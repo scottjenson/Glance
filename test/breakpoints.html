@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Breakpoints</title>
+<!-- Test page for edge-shrink: the color and label change with the window's
+     real (layout) width, so you can see whether the app was resized. -->
+<style>
+  html, body { margin: 0; height: 100%; font-family: sans-serif; color: #fff; }
+  body { display: flex; flex-direction: column; align-items: center;
+         justify-content: center; text-align: center; background: #2e7d32; }
+  #name { font-size: 12vw; font-weight: bold; }
+  #width { font-size: 5vw; }
+  #name::after { content: "Wide"; }
+
+  @media (max-width: 1200px) { body { background: #1565c0; } #name::after { content: "Desktop"; } }
+  @media (max-width: 800px)  { body { background: #6a1b9a; } #name::after { content: "Tablet"; } }
+  @media (max-width: 600px)  { body { background: #e65100; } #name::after { content: "Small"; } }
+  @media (max-width: 500px)  { body { background: #c62828; } #name::after { content: "Phone"; } }
+</style>
+</head>
+<body>
+  <div id="name"></div>
+  <div id="width"></div>
+<script>
+  const label = document.getElementById("width");
+  const update = () => label.textContent = window.innerWidth + " × " + window.innerHeight + " px";
+  window.addEventListener("resize", update);
+  update();
+</script>
+</body>
+</html>

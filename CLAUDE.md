@@ -10,9 +10,8 @@ Wayfire Wayland compositor.
 Wayfire was chosen over KWin effects because its view transformers handle both
 rendering and input mapping (clicks land correctly on a scaled window).
 
-Today the shrink is purely visual (the app doesn't know). The next experiment
-is to also really resize the app so web pages reflow via CSS media queries
-(see "Next steps").
+On release the app is also really resized (down to a phone-like width), so
+web pages reflow via CSS media queries; the rest of the shrink is visual.
 
 ## Environment
 - Fedora 44 KDE (aarch64) in a VMware Fusion VM on an Apple Silicon Mac.
@@ -47,6 +46,9 @@ is to also really resize the app so web pages reflow via CSS media queries
 - `meson.build`: builds `build/libedgeshrink.so`. Links the static library
   `libwayfire-move-drag-interface.a` (shipped in Fedora's wayfire-devel).
 - `src/edge-shrink.cpp`: the plugin (the only source file).
+- `test/breakpoints.html`: test page whose color/label change at widths
+  1200/800/600/500 px and that shows its inner size. Open in Firefox inside the
+  nested session: file:///home/scottjenson/WideMonitorUX/test/breakpoints.html
 - `wayfire-test.ini`: minimal test config. Loads the plugin by absolute path
   (/home/scottjenson/WideMonitorUX/build/libedgeshrink.so), uses `<alt> BTN_LEFT`
   for move (KDE grabs Super), and sets `enable_snap = false` so edge snapping
@@ -60,6 +62,8 @@ is to also really resize the app so web pages reflow via CSS media queries
     wayfire -c ~/WideMonitorUX/wayfire-test.ini   # from Konsole in the VM window
 
 Success check: Wayfire's output includes `edge-shrink: plugin loaded`.
+To let the agent read the log, run with
+`2>&1 | tee ~/WideMonitorUX/wayfire.log` (the file is git-ignored).
 Wayfire only loads the .so at startup: restart the nested session after
 rebuilding.
 
@@ -87,25 +91,44 @@ listens to `drag_motion_signal` and `drag_done_signal`.
   rendering the helper into a temporary buffer.
 - While no drag is active (`drag->view` is null) the transformer is a no-op.
 
-**On release** (`on_drag_done`, `place_after_drop`):
-- Total scale = leftover scale (from an earlier drop) × `drag_scale_t::scale`.
-- The window stays exactly where and as large as it was drawn at release: the
-  view is moved and gets a `view_2d_transformer_t` named `edge-shrink-scale`
-  (z = TRANSFORMER_2D). That transform scales around the window geometry's
-  center and maps input, so the small window stays clickable. The position math
-  accounts for the bounding box (incl. client-side shadows) vs. geometry offset.
-- If total scale ≥ 0.99 (dropped outside the edge zone), the transform is
-  removed and the window is placed at full size, on screen.
-- Placement runs synchronously in the handler AND again in a `wl_idle_call`,
-  because the move plugin also places the window in its own drag_done handler
-  and the handler order isn't fixed. The existing 2D transform is reused (not
-  removed/re-added) so no frame shows the window at full size.
+**On release** (`on_drag_done`, `place_after_drop`, `show_at`):
+- Scales are relative to the window's *original* size: `leftover_scale` =
+  visual 2D scale × (current width / original width).
+- The window stays exactly where and as large as it was drawn at release. That
+  target (`resize_state_t::shown`, the window geometry without client-side
+  shadows, output-local) and which edge to pin to are stored on the view as
+  `resize_state_t` custom data, together with its original size.
+- Real resize: the app is asked (`view->resize`) to lay out at the smallest
+  size that keeps its original shape and is ≥ `min_layout_width` (400) and ≥
+  the app's `get_min_size()`, capped at the original size. Firefox declares a
+  500x120 minimum, so it goes to 500 px wide.
+- `show_at` fits the window's *current* geometry into `shown` with a
+  `view_2d_transformer_t` named `edge-shrink-scale` (z = TRANSFORMER_2D), which
+  scales around the geometry's center and maps input. It uses only geometry,
+  never the drawn bounding box, which is stale right after the app commits a
+  new size (that caused a "window shrinks to 1/4" bug).
+- Positioning uses the 2D transform's translation, which applies instantly.
+  `view->move` waits for any unfinished resize (Wayfire transactions), so the
+  window would otherwise be drawn at its pre-drag position for a few frames
+  (a "jumps to the bottom and back" bug). show_at also moves the view to where
+  the translation would be zero.
+- `on_geometry_changed` (core `view_geometry_changed_signal`) re-runs show_at
+  for any view with state, on every resize or move, so the drawing stays in
+  place as the app commits its size and moves land. Skips the dragged view.
+- Dropped outside the edge zone (total ≥ 0.99): resize back to the original
+  size, `restoring = true`; once it's at scale 1 with zero shift, the
+  transform and state are removed.
+- Placement runs synchronously in the drag_done handler AND again in a
+  `wl_idle_call`, because the move plugin also places the window in its own
+  drag_done handler and the handler order isn't fixed.
 - Released without any motion: nothing is changed.
+- Logs one `edge-shrink:` line per resize request (original size, app
+  minimum, scale, requested size).
 
 **Dragging a shrunk window again:** the helper sees it at its leftover size;
 `drag_scale_t::scale` is relative to that (target / leftover), so it can grow.
 
-`fini()` removes all transforms, returning every window to full size.
+`fini()` removes all transforms and resizes windows back to their original size.
 
 ## Wayfire 0.10.1 facts (verified in source)
 - `core_drag_t::set_scale` takes a shrink *factor* (2.0 = half size) and
@@ -127,39 +150,34 @@ listens to `drag_motion_signal` and `drag_done_signal`.
   angle/alpha`, scales around `toplevel->get_geometry()`'s center, maps input.
   Wrap changes in `get_transformed_node()->begin_transform_update()` /
   `end_transform_update()`.
+- `toplevel_view_interface_t::get_geometry()` is the *current* (applied)
+  geometry; `toplevel()->pending().geometry` is what's been requested.
+  `move`/`resize` only set pending state and schedule a transaction; a size
+  change waits for the client to ack/commit (or a timeout), and a move in the
+  same transaction waits too. On apply, `view_geometry_changed_signal` fires
+  synchronously, before the next frame.
+- `view_2d_transformer_t` draws a point at
+  `center + (p - center) * scale + translation` (center of get_geometry()).
 - Resize-related API: `toplevel_view_interface_t::resize(w, h)` /
   `set_geometry(g)`; `toplevel()->get_min_size()` / `get_max_size()` (0x0 when
   the client declares none); `view_geometry_changed_signal` fires when the
   size actually changes.
 
 ## Status (2026-09-26)
-Tested by the user in the nested session, all working and feeling good:
+Tested by the user in the nested session, all working:
 - Windows (Konsole, Firefox) shrink while dragged toward either edge, with the
   grabbed spot staying under the cursor and the window pinned to the edge.
-- Windows stay shrunk in place on release; dragging them out restores them.
-- Flicker/flashes were reduced by the smoothness changes ("feels much better").
-  Some remaining roughness may be the nested VM (Wayfire → KDE → VMware → macOS).
+- On release they stay exactly where and as large as drawn, and the app is
+  really resized: the breakpoints page reflows ("Phone" at the edge) with no
+  visible jump. Dragging back out restores the original size.
+- Some remaining roughness may be the nested VM (Wayfire → KDE → VMware → macOS).
 
 ## Next steps
-1. **Resize experiment (agreed plan, not started).** Goal: web pages reflow via
-   media queries as windows shrink. Apps won't resize to 15%, so combine a real
-   resize with visual scaling:
-   - First, add logging of each window's declared minimum size
-     (`get_min_size()`) at drag start; the user drags Konsole and Firefox to
-     see real numbers (and whether they report 0x0).
-   - On release: target on-screen size S = total scale × full size (as now).
-     Ask the app to resize to the smallest size that is ≥ its minimum in both
-     dimensions AND keeps the original aspect ratio (user agreed: keep shape).
-   - Wait for the app to commit its new size (it may choose a different one;
-     `view_geometry_changed_signal`), then set the visual scale = S / actual
-     size and re-pin at the edge, so it looks identical to the pure-scale
-     version.
-   - Remember the original size; when dragged back out of the edge zone,
-     resize back and remove the visual scale.
-   - Release-only at first; live resizing during the drag maybe later.
-   - Test with a simple page whose background color changes at width
-     breakpoints.
-   - Possibly a setting for laying out larger than the on-screen size.
+1. Resize experiment follow-ups (ideas, not agreed):
+   - Live resizing during the drag (now release-only; while dragging a resized
+     window back out it is upscaled and blurry until release).
+   - A setting for laying out larger than the on-screen size; tune
+     `min_layout_width`.
 2. Public-repo housekeeping, offered but not yet done: MIT `LICENSE`
    (meson.build already says MIT) and a short `README.md`. The user also
    hasn't decided whether to hide their email in commits (GitHub noreply).

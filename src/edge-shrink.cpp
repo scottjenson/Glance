@@ -5,6 +5,9 @@
 // Wayfire's built-in "move" plugin uses, and stacks its own transform on top
 // of the dragged window to shrink it around the cursor. A window dropped while
 // shrunk stays shrunk.
+//
+// On release the app is also really resized (down to a phone-like width), so
+// web pages reflow via CSS media queries; the rest of the shrink is visual.
 
 #include <wayfire/plugin.hpp>
 #include <wayfire/core.hpp>
@@ -14,6 +17,7 @@
 #include <wayfire/scene-render.hpp>
 #include <wayfire/toplevel-view.hpp>
 #include <wayfire/util.hpp>
+#include <wayfire/signal-definitions.hpp>
 #include <wayfire/plugins/common/shared-core-data.hpp>
 #include <wayfire/plugins/common/move-drag-interface.hpp>
 
@@ -200,6 +204,20 @@ class drag_scale_t : public wf::scene::transformer_base_node_t
     }
 };
 
+// Kept on a window the plugin has really resized.
+struct resize_state_t : public wf::custom_data_t
+{
+    // The window's size before we first resized it.
+    wf::dimensions_t original;
+    // Where the window proper (without shadows) should appear, output-local.
+    // When the app commits a new size, it is scaled to fit this box again.
+    wlr_fbox shown;
+    // Keep the right edge of `shown` fixed rather than the left one.
+    bool pin_right = false;
+    // We asked the app to go back to `original`; forget this state once it has.
+    bool restoring = false;
+};
+
 class edge_shrink_plugin : public wf::plugin_interface_t
 {
     // --- Tuning knobs (later these can become config options) ---
@@ -207,6 +225,9 @@ class edge_shrink_plugin : public wf::plugin_interface_t
     const double zone_width = 400.0;
     // Window size at the very edge of the screen (1.0 = full size).
     const double min_scale = 0.15;
+    // On release, the app is resized no narrower than this (keeping its
+    // shape), so web pages switch to their phone layout. The rest is visual.
+    const double min_layout_width = 400.0;
 
     // A window dropped while shrunk keeps a view_2d_transformer_t with this
     // name. It scales around the window's center and also maps input, so the
@@ -219,11 +240,18 @@ class edge_shrink_plugin : public wf::plugin_interface_t
                get_transformer<wf::scene::view_2d_transformer_t>(shrink_name);
     }
 
-    // The scale a window was left at by an earlier drop (1.0 if none).
+    // How large a window is drawn relative to its original size, as left by
+    // an earlier drop (1.0 if none): its visual scale times its real resize.
     double leftover_scale(wayfire_toplevel_view view)
     {
         auto tr = get_shrink(view);
-        return tr ? tr->scale_x : 1.0;
+        double scale = tr ? tr->scale_x : 1.0;
+        if (auto state = view->get_data<resize_state_t>())
+        {
+            scale *= 1.0 * view->get_geometry().width / state->original.width;
+        }
+
+        return scale;
     }
 
     // Runs our drop handling after the move plugin has placed the window.
@@ -334,7 +362,7 @@ class edge_shrink_plugin : public wf::plugin_interface_t
             return;
         }
 
-        // The window's total scale at release.
+        // The window's total scale at release, relative to its original size.
         double scale = leftover_scale(clamped_view) * clamp->scale;
         detach_clamp();
 
@@ -373,10 +401,11 @@ class edge_shrink_plugin : public wf::plugin_interface_t
     };
 
     // Leave the window exactly where and as large as it was drawn at the
-    // moment of release: scaled by `scale`, positioned around the grab point,
-    // and pushed back inside the screen the same way drag_scale_t did.
+    // moment of release: `total` times its original size, positioned around
+    // the grab point, and pushed back inside the screen the same way
+    // drag_scale_t did. When shrunk, also ask the app to really resize.
     void place_after_drop(wayfire_toplevel_view view, wf::point_t grab,
-        wf::pointf_t relative, double scale, wf::geometry_t screen)
+        wf::pointf_t relative, double total, wf::geometry_t screen)
     {
         if (!view || !view->is_mapped() || view->pending_fullscreen() ||
             view->pending_tiled_edges())
@@ -384,19 +413,19 @@ class edge_shrink_plugin : public wf::plugin_interface_t
             return;
         }
 
-        // Measure the window at full size. If it is already shrunk, the scale
-        // transform's children are the unscaled window. Reusing the transform
-        // (rather than removing and re-adding it) avoids a full-size frame.
-        //
-        // `box` is everything drawn (it may include client-side shadows), while
-        // `geom` is the window proper, whose center the 2D transform scales
-        // around. Both are in output-local coordinates.
-        auto node = view->get_transformed_node();
-        auto tr   = get_shrink(view);
-        auto box  = tr ? tr->get_children_bounding_box() : node->get_bounding_box();
-        auto geom = view->get_geometry();
+        // Measure the window at its current (unscaled) size. If it is already
+        // shrunk, the scale transform's children are the unscaled window.
+        auto tr    = get_shrink(view);
+        auto box   = tr ? tr->get_children_bounding_box() :
+            view->get_transformed_node()->get_bounding_box();
+        auto geom  = view->get_geometry();
+        auto state = view->get_data<resize_state_t>();
+        wf::dimensions_t original = state ? state->original : wf::dimensions(geom);
 
-        // Where the window was drawn at release, in output-layout coordinates.
+        // The scale relative to the current size.
+        double scale = total * original.width / geom.width;
+
+        // Where the window was drawn at release, output-local.
         int width  = std::floor(box.width * scale);
         int height = std::floor(box.height * scale);
         wf::geometry_t shown = {
@@ -407,29 +436,137 @@ class edge_shrink_plugin : public wf::plugin_interface_t
         shown.x += std::round(shift_onto_screen(shown.x, shown.width, screen));
         shown.x -= screen.x;
         shown.y -= screen.y;
+        bool pin_right = shown.x + shown.width / 2 > screen.width / 2;
 
-        double box_dx = box.x - geom.x;
-        double box_dy = box.y - geom.y;
+        // The same, for the window proper: `box` may include client-side
+        // shadows, which stay the same number of pixels when the app resizes,
+        // so everything after this works with the window's geometry.
+        wlr_fbox target = {
+            shown.x + (geom.x - box.x) * scale,
+            shown.y + (geom.y - box.y) * scale,
+            geom.width * scale,
+            geom.height * scale,
+        };
 
-        if (scale >= 0.99)
+        auto pending = wf::dimensions(view->toplevel()->pending().geometry);
+
+        if (!state)
         {
+            view->store_data(std::make_unique<resize_state_t>());
+            state = view->get_data<resize_state_t>();
+            state->original = original;
+        }
+
+        state->shown     = target;
+        state->pin_right = pin_right;
+
+        if (total >= 0.99)
+        {
+            // Dropped outside the edge zone: back to the original size. The
+            // state is forgotten once the window is back in place.
+            if ((wf::dimensions(geom) != original) && (pending != original))
+            {
+                LOGI("edge-shrink: ", view->get_app_id(), " restoring ",
+                    original.width, "x", original.height);
+                view->resize(original.width, original.height);
+            }
+
+            state->restoring = true;
+            show_at(view, target, pin_right);
+            return;
+        }
+
+        // Shrunk: lay the app out at the smallest size that keeps its shape
+        // and respects both our minimum width and the app's minimum size.
+        auto min = view->toplevel()->get_min_size();
+        double k = std::max({total,
+            min_layout_width / original.width,
+            1.0 * min.width / original.width,
+            1.0 * min.height / original.height});
+        k = std::min(k, 1.0);
+        wf::dimensions_t layout = {
+            (int)std::round(original.width * k),
+            (int)std::round(original.height * k),
+        };
+
+        if (pending != layout)
+        {
+            LOGI("edge-shrink: ", view->get_app_id(), " original ",
+                original.width, "x", original.height, ", app minimum ",
+                min.width, "x", min.height, ", scale ", total,
+                ", resizing to ", layout.width, "x", layout.height);
+            view->resize(layout.width, layout.height);
+        }
+
+        state->restoring = false;
+
+        // Show it at the right size now; once the app has committed its new
+        // size, on_geometry_changed fits it into `shown` again.
+        show_at(view, target, pin_right);
+    }
+
+    // Scale the window, at whatever size it currently is, to fit `shown`
+    // (the window proper, output-local), keeping its shape. It is pinned to
+    // the left or right edge of `shown` and centered vertically.
+    //
+    // Only the window's geometry is used: right after the app commits a new
+    // size, the drawn bounding box is still stale.
+    //
+    // Moving a window waits for any resize the app hasn't finished yet, and
+    // until then it would be drawn at its old position. So the transform's
+    // translation places it exactly, right away, wherever the window really
+    // is; the window is also moved there, and once that lands (see
+    // on_geometry_changed) the translation drops back to zero.
+    void show_at(wayfire_toplevel_view view, wlr_fbox shown, bool pin_right)
+    {
+        auto node = view->get_transformed_node();
+        auto tr   = get_shrink(view);
+        auto geom = view->get_geometry();
+        if ((geom.width <= 0) || (geom.height <= 0))
+        {
+            return;
+        }
+
+        double scale = std::min(shown.width / geom.width, shown.height / geom.height);
+        if (std::abs(scale - 1.0) < 0.01)
+        {
+            scale = 1.0;
+        }
+
+        // Where the scaled window's top-left corner goes.
+        double sx = pin_right ? shown.x + shown.width - geom.width * scale : shown.x;
+        double sy = shown.y + (shown.height - geom.height * scale) / 2.0;
+
+        // The 2D transform scales around the window's center, which moves
+        // the corner inward by half the size lost. `tx`, `ty` is what is
+        // left to shift from where the window is now.
+        double tx = sx - geom.x - geom.width * (1.0 - scale) / 2.0;
+        double ty = sy - geom.y - geom.height * (1.0 - scale) / 2.0;
+
+        // Where the window should really be, for no shift at all.
+        int x = std::round(geom.x + tx);
+        int y = std::round(geom.y + ty);
+
+        if ((scale == 1.0) && (std::abs(tx) < 0.5) && (std::abs(ty) < 0.5))
+        {
+            // Drawn at its real size and place: no transform needed, so it
+            // stays crisp.
             if (tr)
             {
                 node->rem_transformer(tr);
             }
 
-            view->move(shown.x - box_dx, shown.y - box_dy);
+            auto state = view->get_data<resize_state_t>();
+            if (state && state->restoring)
+            {
+                view->erase_data<resize_state_t>();
+            }
+
             return;
         }
 
-        // Scaling around the window's center maps the box's corner to
-        //   center + (corner - center) * scale,
-        // so solve for the window position that lands that corner on `shown`.
-        double half_w = geom.width / 2.0;
-        double half_h = geom.height / 2.0;
-        double x = shown.x - half_w - (box_dx - half_w) * scale;
-        double y = shown.y - half_h - (box_dy - half_h) * scale;
-
+        // Reusing an existing transform (rather than removing and re-adding
+        // it) avoids a frame at full size.
         if (!tr)
         {
             tr = std::make_shared<wf::scene::view_2d_transformer_t>(view);
@@ -439,15 +576,45 @@ class edge_shrink_plugin : public wf::plugin_interface_t
         node->begin_transform_update();
         tr->scale_x = scale;
         tr->scale_y = scale;
+        tr->translation_x = tx;
+        tr->translation_y = ty;
         node->end_transform_update();
-        view->move(std::round(x), std::round(y));
+
+        auto pending = view->toplevel()->pending().geometry;
+        if ((pending.x != x) || (pending.y != y))
+        {
+            view->move(x, y);
+        }
     }
+
+    // The app committed a new size (possibly not the one we asked for), or a
+    // move landed: fit the window into the box it should appear in.
+    wf::signal::connection_t<wf::view_geometry_changed_signal> on_geometry_changed =
+        [this] (wf::view_geometry_changed_signal *ev)
+    {
+        auto view = ev->view;
+        if (!view || (view == clamped_view) || (view == drag_helper->view) ||
+            !view->is_mapped())
+        {
+            return;
+        }
+
+        auto state = view->get_data<resize_state_t>();
+        if (!state)
+        {
+            return;
+        }
+
+        // Resized or moved: re-fit, so it keeps being drawn in place.
+        show_at(view, state->shown, state->pin_right);
+    };
 
   public:
     void init() override
     {
         drag_helper->connect(&on_drag_motion);
         drag_helper->connect(&on_drag_done);
+        wf::get_core().connect(&on_geometry_changed);
         LOGI("edge-shrink: plugin loaded");
     }
 
@@ -455,6 +622,7 @@ class edge_shrink_plugin : public wf::plugin_interface_t
     {
         on_drag_motion.disconnect();
         on_drag_done.disconnect();
+        on_geometry_changed.disconnect();
         idle_place.disconnect();
         detach_clamp();
 
@@ -466,6 +634,12 @@ class edge_shrink_plugin : public wf::plugin_interface_t
                 if (auto tr = get_shrink(view))
                 {
                     view->get_transformed_node()->rem_transformer(tr);
+                }
+
+                if (auto state = view->get_data<resize_state_t>())
+                {
+                    view->resize(state->original.width, state->original.height);
+                    view->erase_data<resize_state_t>();
                 }
             }
         }

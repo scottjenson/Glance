@@ -1,0 +1,475 @@
+// edge-shrink: a Wayfire plugin that scales a window down as it is dragged
+// toward the left or right edge of the screen.
+//
+// Rather than moving windows itself, it hooks into the drag helper that
+// Wayfire's built-in "move" plugin uses, and stacks its own transform on top
+// of the dragged window to shrink it around the cursor. A window dropped while
+// shrunk stays shrunk.
+
+#include <wayfire/plugin.hpp>
+#include <wayfire/core.hpp>
+#include <wayfire/output.hpp>
+#include <wayfire/debug.hpp>
+#include <wayfire/view-transform.hpp>
+#include <wayfire/scene-render.hpp>
+#include <wayfire/toplevel-view.hpp>
+#include <wayfire/util.hpp>
+#include <wayfire/plugins/common/shared-core-data.hpp>
+#include <wayfire/plugins/common/move-drag-interface.hpp>
+
+#include <algorithm>
+#include <cmath>
+
+// How far a box spanning [x, x + width) must move horizontally to lie inside
+// `screen`. A box wider than the screen keeps its left edge visible.
+static double shift_onto_screen(double x, double width, wf::geometry_t screen)
+{
+    // Smallest shift that brings the left edge back on screen, and the
+    // largest shift that keeps the right edge on screen.
+    double min_shift = screen.x - x;
+    double max_shift = (screen.x + screen.width) - (x + width);
+    if (min_shift > max_shift)
+    {
+        return min_shift;
+    }
+
+    return std::clamp(0.0, min_shift, max_shift);
+}
+
+// A transformer stacked on top of the drag helper's own transform, which
+// positions the window around the cursor (at its drawn size, i.e. including
+// any shrink left over from an earlier drop).
+//
+// This node scales that by `scale` around `anchor` (the cursor), immediately
+// rather than with the helper's 300 ms animation, so the grabbed spot stays
+// under the cursor. As a fallback, for when even the smallest allowed size
+// doesn't fit, it slides the window back inside `screen` horizontally.
+class drag_scale_t : public wf::scene::transformer_base_node_t
+{
+  public:
+    // The drag we belong to. While no drag is active this node does nothing,
+    // so Wayfire's drop logic sees the window's real position.
+    wf::move_drag::core_drag_t *drag;
+
+    // Output bounds, anchor and scale, in output-layout coordinates (the same
+    // space the drag helper's transform works in).
+    wf::geometry_t screen = {0, 0, 0, 0};
+    wf::point_t anchor    = {0, 0};
+    double scale = 1.0;
+
+    drag_scale_t(wf::move_drag::core_drag_t *drag) :
+        transformer_base_node_t(false), drag(drag)
+    {}
+
+    std::string stringify() const override
+    {
+        return "edge-shrink";
+    }
+
+    bool active() const
+    {
+        return drag->view && (screen.width > 0);
+    }
+
+    // Where the window is drawn: the children's box scaled around the anchor
+    // and shifted back on screen. Kept fractional, so the window glides
+    // instead of its edges snapping between whole pixels independently.
+    wlr_fbox exact_box()
+    {
+        auto box = get_children_bounding_box();
+        if (!active())
+        {
+            return {1.0 * box.x, 1.0 * box.y, 1.0 * box.width, 1.0 * box.height};
+        }
+
+        double x = anchor.x + (box.x - anchor.x) * scale;
+        double y = anchor.y + (box.y - anchor.y) * scale;
+        double w = box.width * scale;
+        double h = box.height * scale;
+        x += shift_onto_screen(x, w, screen);
+        return {x, y, w, h};
+    }
+
+    double x_offset()
+    {
+        if (!active())
+        {
+            return 0;
+        }
+
+        auto box = get_children_bounding_box();
+        double x = anchor.x + (box.x - anchor.x) * scale;
+        return shift_onto_screen(x, box.width * scale, screen);
+    }
+
+    wf::pointf_t to_local(const wf::pointf_t& point) override
+    {
+        if (!active())
+        {
+            return point;
+        }
+
+        return {
+            anchor.x + (point.x - x_offset() - anchor.x) / scale,
+            anchor.y + (point.y - anchor.y) / scale,
+        };
+    }
+
+    wf::pointf_t to_global(const wf::pointf_t& point) override
+    {
+        if (!active())
+        {
+            return point;
+        }
+
+        return {
+            anchor.x + (point.x - anchor.x) * scale + x_offset(),
+            anchor.y + (point.y - anchor.y) * scale,
+        };
+    }
+
+    // Whole pixels enclosing exact_box(), for damage tracking.
+    wf::geometry_t get_bounding_box() override
+    {
+        auto box = exact_box();
+        int x1   = std::floor(box.x);
+        int y1   = std::floor(box.y);
+        int x2   = std::ceil(box.x + box.width);
+        int y2   = std::ceil(box.y + box.height);
+        return {x1, y1, x2 - x1, y2 - y1};
+    }
+
+    class render_instance_t :
+        public wf::scene::transformer_render_instance_t<drag_scale_t>
+    {
+        // The drag helper below us only draws the window's surface texture
+        // around the cursor. When that texture is directly available, draw it
+        // ourselves and skip rendering the helper into a temporary buffer:
+        // that saves a full-window copy every frame.
+        std::optional<wf::texture_t> direct_texture()
+        {
+            auto& helper = self->get_children();
+            if (helper.size() != 1)
+            {
+                return {};
+            }
+
+            auto inner = helper.front()->get_children();
+            if (inner.size() != 1)
+            {
+                return {};
+            }
+
+            if (auto zcopy =
+                    dynamic_cast<wf::scene::zero_copy_texturable_node_t*>(inner.front().get()))
+            {
+                return zcopy->to_texture();
+            }
+
+            return {};
+        }
+
+      public:
+        using transformer_render_instance_t::transformer_render_instance_t;
+
+        void transform_damage_region(wf::region_t& region) override
+        {
+            region |= self->get_bounding_box();
+        }
+
+        void render(const wf::scene::render_instruction_t& data) override
+        {
+            auto tex = direct_texture();
+            if (tex)
+            {
+                self->release_buffers();
+            } else
+            {
+                tex = this->get_texture(data.target.scale);
+            }
+
+            data.pass->add_texture(*tex, data.target, self->exact_box(), data.damage);
+        }
+    };
+
+    void gen_render_instances(std::vector<wf::scene::render_instance_uptr>& instances,
+        wf::scene::damage_callback push_damage, wf::output_t *shown_on) override
+    {
+        instances.push_back(std::make_unique<render_instance_t>(this,
+            push_damage, shown_on));
+    }
+};
+
+class edge_shrink_plugin : public wf::plugin_interface_t
+{
+    // --- Tuning knobs (later these can become config options) ---
+    // Distance from the left/right edge, in pixels, where shrinking begins.
+    const double zone_width = 400.0;
+    // Window size at the very edge of the screen (1.0 = full size).
+    const double min_scale = 0.15;
+
+    // A window dropped while shrunk keeps a view_2d_transformer_t with this
+    // name. It scales around the window's center and also maps input, so the
+    // small window stays clickable.
+    const std::string shrink_name = "edge-shrink-scale";
+
+    std::shared_ptr<wf::scene::view_2d_transformer_t> get_shrink(wayfire_toplevel_view view)
+    {
+        return view->get_transformed_node()->
+               get_transformer<wf::scene::view_2d_transformer_t>(shrink_name);
+    }
+
+    // The scale a window was left at by an earlier drop (1.0 if none).
+    double leftover_scale(wayfire_toplevel_view view)
+    {
+        auto tr = get_shrink(view);
+        return tr ? tr->scale_x : 1.0;
+    }
+
+    // Runs our drop handling after the move plugin has placed the window.
+    wf::wl_idle_call idle_place;
+
+    // Shared drag state, owned jointly with the move plugin.
+    wf::shared_data::ref_ptr_t<wf::move_drag::core_drag_t> drag_helper;
+
+    // The window currently being dragged, and our scaling transform on it.
+    wayfire_toplevel_view clamped_view = nullptr;
+    std::shared_ptr<drag_scale_t> clamp;
+
+    void attach_clamp(wayfire_toplevel_view view)
+    {
+        detach_clamp();
+        clamp = std::make_shared<drag_scale_t>(drag_helper.get());
+        // Just above the drag helper's transform (TRANSFORMER_HIGHLEVEL - 1),
+        // so we act on the window as the helper has positioned it.
+        view->get_transformed_node()->add_transformer(clamp,
+            wf::TRANSFORMER_HIGHLEVEL + 1, "edge-shrink");
+        clamped_view = view;
+    }
+
+    void detach_clamp()
+    {
+        if (clamped_view && clamp)
+        {
+            clamped_view->get_transformed_node()->rem_transformer(clamp);
+        }
+
+        clamped_view = nullptr;
+        clamp = nullptr;
+    }
+
+    // Map the pointer position to a window scale.
+    double scale_for_position(wf::point_t pos, wf::geometry_t screen)
+    {
+        double to_left  = pos.x - screen.x;
+        double to_right = (screen.x + screen.width) - pos.x;
+        double distance = std::max(0.0, std::min(to_left, to_right));
+
+        if (distance >= zone_width)
+        {
+            return 1.0;
+        }
+
+        double t = distance / zone_width; // 0 at the edge, 1 at the zone boundary
+        return min_scale + (1.0 - min_scale) * t;
+    }
+
+    // Called on every pointer movement during a window drag.
+    wf::signal::connection_t<wf::move_drag::drag_motion_signal> on_drag_motion =
+        [this] (wf::move_drag::drag_motion_signal *ev)
+    {
+        auto output = drag_helper->current_output;
+        if (!drag_helper->view || !output)
+        {
+            return;
+        }
+
+        if (clamped_view != drag_helper->view)
+        {
+            attach_clamp(drag_helper->view);
+        }
+
+        auto screen = output->get_layout_geometry();
+        auto cursor = ev->current_position;
+
+        // The window as the drag helper draws it: at its leftover size, with
+        // the grabbed spot under the cursor.
+        auto box = clamp->get_children_bounding_box();
+        double leftover = leftover_scale(clamped_view);
+
+        // Our scale is applied on top of the leftover one.
+        double scale = scale_for_position(cursor, screen) / leftover;
+
+        // Shrink further if needed so that, scaled around the cursor, the
+        // window still fits between the screen edges. Its edge then rests
+        // against the screen edge while the grabbed spot stays under the cursor.
+        int box_right = box.x + box.width;
+        if (cursor.x > box.x)
+        {
+            scale = std::min(scale, 1.0 * (cursor.x - screen.x) / (cursor.x - box.x));
+        }
+
+        if (box_right > cursor.x)
+        {
+            scale = std::min(scale,
+                1.0 * (screen.x + screen.width - cursor.x) / (box_right - cursor.x));
+        }
+
+        scale = std::max(scale, min_scale / leftover);
+
+        auto node = clamped_view->get_transformed_node();
+        node->begin_transform_update();
+        clamp->screen = screen;
+        clamp->anchor = cursor;
+        clamp->scale  = scale;
+        node->end_transform_update();
+    };
+
+    wf::signal::connection_t<wf::move_drag::drag_done_signal> on_drag_done =
+        [this] (wf::move_drag::drag_done_signal *ev)
+    {
+        if (!clamped_view || !clamp)
+        {
+            // Released without any motion: nothing changed.
+            return;
+        }
+
+        // The window's total scale at release.
+        double scale = leftover_scale(clamped_view) * clamp->scale;
+        detach_clamp();
+
+        if (!ev->main_view || !ev->focused_output)
+        {
+            return;
+        }
+
+        wf::pointf_t relative = {0.5, 0.5};
+        for (auto& v : ev->all_views)
+        {
+            if (v.view == ev->main_view)
+            {
+                relative = v.relative_grab;
+            }
+        }
+
+        // The move plugin also places the window, in its own drag_done
+        // handler, which may run before or after this one. Place it now, so
+        // no frame shows the window at full size, and once more after the
+        // move plugin is done in case it ran after us.
+        auto view   = ev->main_view;
+        auto screen = ev->focused_output->get_layout_geometry();
+        auto grab   = ev->grab_position;
+        place_after_drop(view, grab, relative, scale, screen);
+
+        std::weak_ptr<wf::view_interface_t> weak = view->weak_from_this();
+        idle_place.run_once([=] ()
+        {
+            if (auto v = weak.lock())
+            {
+                place_after_drop(wf::toplevel_cast(wayfire_view{v.get()}),
+                    grab, relative, scale, screen);
+            }
+        });
+    };
+
+    // Leave the window exactly where and as large as it was drawn at the
+    // moment of release: scaled by `scale`, positioned around the grab point,
+    // and pushed back inside the screen the same way drag_scale_t did.
+    void place_after_drop(wayfire_toplevel_view view, wf::point_t grab,
+        wf::pointf_t relative, double scale, wf::geometry_t screen)
+    {
+        if (!view || !view->is_mapped() || view->pending_fullscreen() ||
+            view->pending_tiled_edges())
+        {
+            return;
+        }
+
+        // Measure the window at full size. If it is already shrunk, the scale
+        // transform's children are the unscaled window. Reusing the transform
+        // (rather than removing and re-adding it) avoids a full-size frame.
+        //
+        // `box` is everything drawn (it may include client-side shadows), while
+        // `geom` is the window proper, whose center the 2D transform scales
+        // around. Both are in output-local coordinates.
+        auto node = view->get_transformed_node();
+        auto tr   = get_shrink(view);
+        auto box  = tr ? tr->get_children_bounding_box() : node->get_bounding_box();
+        auto geom = view->get_geometry();
+
+        // Where the window was drawn at release, in output-layout coordinates.
+        int width  = std::floor(box.width * scale);
+        int height = std::floor(box.height * scale);
+        wf::geometry_t shown = {
+            grab.x - (int)std::floor(relative.x * width),
+            grab.y - (int)std::floor(relative.y * height),
+            width, height,
+        };
+        shown.x += std::round(shift_onto_screen(shown.x, shown.width, screen));
+        shown.x -= screen.x;
+        shown.y -= screen.y;
+
+        double box_dx = box.x - geom.x;
+        double box_dy = box.y - geom.y;
+
+        if (scale >= 0.99)
+        {
+            if (tr)
+            {
+                node->rem_transformer(tr);
+            }
+
+            view->move(shown.x - box_dx, shown.y - box_dy);
+            return;
+        }
+
+        // Scaling around the window's center maps the box's corner to
+        //   center + (corner - center) * scale,
+        // so solve for the window position that lands that corner on `shown`.
+        double half_w = geom.width / 2.0;
+        double half_h = geom.height / 2.0;
+        double x = shown.x - half_w - (box_dx - half_w) * scale;
+        double y = shown.y - half_h - (box_dy - half_h) * scale;
+
+        if (!tr)
+        {
+            tr = std::make_shared<wf::scene::view_2d_transformer_t>(view);
+            node->add_transformer(tr, wf::TRANSFORMER_2D, shrink_name);
+        }
+
+        node->begin_transform_update();
+        tr->scale_x = scale;
+        tr->scale_y = scale;
+        node->end_transform_update();
+        view->move(std::round(x), std::round(y));
+    }
+
+  public:
+    void init() override
+    {
+        drag_helper->connect(&on_drag_motion);
+        drag_helper->connect(&on_drag_done);
+        LOGI("edge-shrink: plugin loaded");
+    }
+
+    void fini() override
+    {
+        on_drag_motion.disconnect();
+        on_drag_done.disconnect();
+        idle_place.disconnect();
+        detach_clamp();
+
+        // Return every shrunk window to full size.
+        for (auto& v : wf::get_core().get_all_views())
+        {
+            if (auto view = wf::toplevel_cast(v))
+            {
+                if (auto tr = get_shrink(view))
+                {
+                    view->get_transformed_node()->rem_transformer(tr);
+                }
+            }
+        }
+    }
+};
+
+DECLARE_WAYFIRE_PLUGIN(edge_shrink_plugin);

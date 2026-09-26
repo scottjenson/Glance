@@ -1,4 +1,4 @@
-# edge-shrink: Wayfire plugin
+# WideMonitorUX: edge-shrink Wayfire plugin
 
 ## Goal
 A window-management experiment: as the user drags a window toward the edge of
@@ -11,7 +11,7 @@ rendering and input mapping (clicks land correctly on a scaled window).
 
 ## Environment
 - Fedora 44 KDE (aarch64) in a VMware Fusion VM on an Apple Silicon Mac.
-- User: scottjenson. Project lives at ~/edge-shrink in the VM.
+- User: scottjenson. Project lives at ~/WideMonitorUX in the VM (GitHub: scottjenson/WideMonitorUX, public). The plugin inside is still called edge-shrink.
 - Wayfire 0.10.1 from Fedora packages (`wayfire`, `wayfire-devel`), wlroots 0.19.
   No need to build Wayfire from source.
 - Wayfire is tested **nested**: run as a window inside the KDE Plasma session.
@@ -23,14 +23,14 @@ rendering and input mapping (clicks land correctly on a scaled window).
   `libwayfire-move-drag-interface.a` (shipped in Fedora's wayfire-devel).
 - `src/edge-shrink.cpp`: the plugin.
 - `wayfire-test.ini`: minimal test config. Loads the plugin by absolute path
-  (/home/scottjenson/edge-shrink/build/libedgeshrink.so), uses `<alt> BTN_LEFT`
+  (/home/scottjenson/WideMonitorUX/build/libedgeshrink.so), uses `<alt> BTN_LEFT`
   for move (KDE grabs Super), and sets `enable_snap = false` so edge snapping
   doesn't fight the effect. Alt+Enter opens another Konsole.
 
 ## Build and run
     meson setup build        # once
     meson compile -C build
-    wayfire -c ~/edge-shrink/wayfire-test.ini   # from Konsole in the VM window
+    wayfire -c ~/WideMonitorUX/wayfire-test.ini   # from Konsole in the VM window
 
 Success check: Wayfire's output includes `edge-shrink: plugin loaded`.
 

@@ -98,10 +98,18 @@ listens to `drag_motion_signal` and `drag_done_signal`.
   target (`resize_state_t::shown`, the window geometry without client-side
   shadows, output-local) and which edge to pin to are stored on the view as
   `resize_state_t` custom data, together with its original size.
-- Real resize: the app is asked (`view->resize`) to lay out at the smallest
-  size that keeps its original shape and is ≥ `min_layout_width` (400) and ≥
-  the app's `get_min_size()`, capped at the original size. Firefox declares a
-  500x120 minimum, so it goes to 500 px wide.
+- Real resize, chosen for text quality: if the app can lay out at exactly 1x
+  or 2x the shown size (≥ `min_layout_width` (400) and ≥ the app's
+  `get_min_size()`), it does, and `shown` is snapped to exactly 1/ratio
+  (`resize_state_t::ratio`, `layout`). The drawn size including client-side
+  shadows is kept divisible by the ratio, and once the app has committed that
+  size `show_at` uses the exact scale and puts the drawn corner on a whole
+  pixel. At 1/2, bilinear filtering averages exact 2x2 blocks; 1/3 would just
+  pick every third pixel, so only 1 and 2 are used. Too small for either (icon
+  sizes): the smallest size that keeps the shape and meets both minimums,
+  capped at the original size (Firefox declares 500x120, so 500 px wide).
+  The view_2d transform draws into a whole-pixel box (`get_bbox_for_node`
+  floors/ceils), which is why exact sizes matter.
 - `show_at` fits the window's *current* geometry into `shown` with a
   `view_2d_transformer_t` named `edge-shrink-scale` (z = TRANSFORMER_2D), which
   scales around the geometry's center and maps input. It uses only geometry,

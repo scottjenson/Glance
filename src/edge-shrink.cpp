@@ -216,6 +216,11 @@ struct resize_state_t : public wf::custom_data_t
     bool pin_right = false;
     // We asked the app to go back to `original`; forget this state once it has.
     bool restoring = false;
+    // When nonzero, the app was asked to lay out at `layout`, exactly `ratio`
+    // times the size it is shown at (1 or 2). Once it has, it is drawn at
+    // exactly 1/ratio, on whole pixels, which keeps text as clean as possible.
+    int ratio = 0;
+    wf::dimensions_t layout = {0, 0};
 };
 
 class edge_shrink_plugin : public wf::plugin_interface_t
@@ -472,29 +477,80 @@ class edge_shrink_plugin : public wf::plugin_interface_t
             }
 
             state->restoring = true;
+            state->ratio     = 0;
             show_at(view, target, pin_right);
             return;
         }
 
-        // Shrunk: lay the app out at the smallest size that keeps its shape
-        // and respects both our minimum width and the app's minimum size.
+        // Shrunk. Scaling text by exactly 1 or 1/2 keeps it clean (at 1/2,
+        // each screen pixel averages exactly a 2x2 block of the app's pixels);
+        // other factors blur it unevenly. So if the app can lay out at 1x or
+        // 2x the shown size, respecting our minimum width and the app's
+        // minimum size, it does, and the shown size is snapped to match.
         auto min = view->toplevel()->get_min_size();
-        double k = std::max({total,
-            min_layout_width / original.width,
-            1.0 * min.width / original.width,
-            1.0 * min.height / original.height});
-        k = std::min(k, 1.0);
-        wf::dimensions_t layout = {
-            (int)std::round(original.width * k),
-            (int)std::round(original.height * k),
-        };
+        double min_width = std::max(min_layout_width, 1.0 * min.width);
+        int shown_w = std::round(target.width);
+        int shown_h = std::round(target.height);
+
+        int ratio = 0;
+        for (int n : {1, 2})
+        {
+            if ((n * shown_w >= min_width) && (n * shown_h >= min.height))
+            {
+                ratio = n;
+                break;
+            }
+        }
+
+        wf::dimensions_t layout;
+        if (ratio)
+        {
+            // What is drawn includes any client-side shadows, so make that
+            // whole size divisible by the ratio, to land on whole pixels.
+            int pad_w = box.width - geom.width;
+            int pad_h = box.height - geom.height;
+            layout = {ratio * shown_w, ratio * shown_h};
+            layout.width  += (ratio - (layout.width + pad_w) % ratio) % ratio;
+            layout.height += (ratio - (layout.height + pad_h) % ratio) % ratio;
+
+            // Snap the shown box to exactly 1/ratio of that, keeping the
+            // pinned edge and vertical center.
+            double w = 1.0 * layout.width / ratio;
+            double h = 1.0 * layout.height / ratio;
+            if (pin_right)
+            {
+                target.x += target.width - w;
+            }
+
+            target.y     += (target.height - h) / 2.0;
+            target.width  = w;
+            target.height = h;
+            state->shown  = target;
+        } else
+        {
+            // Too small for either: lay the app out at the smallest size that
+            // keeps its shape and respects both minimums.
+            double k = std::max({total,
+                min_width / original.width,
+                1.0 * min.height / original.height});
+            k = std::min(k, 1.0);
+            layout = {
+                (int)std::round(original.width * k),
+                (int)std::round(original.height * k),
+            };
+        }
+
+        state->ratio  = ratio;
+        state->layout = layout;
 
         if (pending != layout)
         {
             LOGI("edge-shrink: ", view->get_app_id(), " original ",
                 original.width, "x", original.height, ", app minimum ",
                 min.width, "x", min.height, ", scale ", total,
-                ", resizing to ", layout.width, "x", layout.height);
+                ", resizing to ", layout.width, "x", layout.height,
+                ratio ? ", shown at exactly 1/" + std::to_string(ratio) :
+                std::string(", shown at a free scale"));
             view->resize(layout.width, layout.height);
         }
 
@@ -527,7 +583,12 @@ class edge_shrink_plugin : public wf::plugin_interface_t
             return;
         }
 
-        double scale = std::min(shown.width / geom.width, shown.height / geom.height);
+        // Laid out at the size we asked for, for an exact ratio?
+        auto state = view->get_data<resize_state_t>();
+        bool exact = state && state->ratio && (wf::dimensions(geom) == state->layout);
+
+        double scale = exact ? 1.0 / state->ratio :
+            std::min(shown.width / geom.width, shown.height / geom.height);
         if (std::abs(scale - 1.0) < 0.01)
         {
             scale = 1.0;
@@ -536,6 +597,18 @@ class edge_shrink_plugin : public wf::plugin_interface_t
         // Where the scaled window's top-left corner goes.
         double sx = pin_right ? shown.x + shown.width - geom.width * scale : shown.x;
         double sy = shown.y + (shown.height - geom.height * scale) / 2.0;
+
+        if (exact)
+        {
+            // Put the corner of what is drawn (including shadows) on a whole
+            // pixel, so each screen pixel covers exactly `ratio` x `ratio`
+            // of the app's pixels.
+            auto drawn = tr ? tr->get_children_bounding_box() : node->get_bounding_box();
+            double dx  = sx + (drawn.x - geom.x) * scale;
+            double dy  = sy + (drawn.y - geom.y) * scale;
+            sx += std::round(dx) - dx;
+            sy += std::round(dy) - dy;
+        }
 
         // The 2D transform scales around the window's center, which moves
         // the corner inward by half the size lost. `tx`, `ty` is what is
@@ -556,7 +629,6 @@ class edge_shrink_plugin : public wf::plugin_interface_t
                 node->rem_transformer(tr);
             }
 
-            auto state = view->get_data<resize_state_t>();
             if (state && state->restoring)
             {
                 view->erase_data<resize_state_t>();

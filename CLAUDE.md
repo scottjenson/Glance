@@ -84,6 +84,13 @@ listens to `drag_motion_signal` and `drag_done_signal`.
   the window still fits between the screen edges when scaled around the
   cursor), floored at `min_scale`. Tuning: `zone_width = 400` px,
   `min_scale = 0.15`.
+- Drawing quality: both the drag transform and the parked-window transform
+  (`smooth_2d_t`, a `view_2d_transformer_t` subclass) draw through
+  `smooth_scaler_t`, which halves the texture into offscreen buffers (exact
+  2x2 averages, like a mipmap) until the last step is between 1/2 and 1, then
+  draws that with bilinear. Plain bilinear below 1/2 skips pixels and makes
+  text look dirty. Halving uses raw wlroots passes
+  (`wlr_renderer_begin_buffer_pass`), like Wayfire's `render_buffer_t::blit`.
 - As a fallback, only when the floor is hit, it slides the window back on screen
   horizontally (`shift_onto_screen`); then the cursor detaches from the grab spot.
 - Smoothness: draws at fractional coordinates (`wlr_fbox`), and when the

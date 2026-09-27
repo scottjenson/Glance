@@ -20,9 +20,11 @@
 #include <wayfire/signal-definitions.hpp>
 #include <wayfire/plugins/common/shared-core-data.hpp>
 #include <wayfire/plugins/common/move-drag-interface.hpp>
+#include <wayfire/nonstd/wlroots-full.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 // How far a box spanning [x, x + width) must move horizontally to lie inside
 // `screen`. A box wider than the screen keeps its left edge visible.
@@ -39,6 +41,86 @@ static double shift_onto_screen(double x, double width, wf::geometry_t screen)
 
     return std::clamp(0.0, min_shift, max_shift);
 }
+
+// Draws a window's texture shrunk, with less of the "dirty" look of plain
+// bilinear filtering. Bilinear only blends the 4 pixels nearest each sample, so
+// below half size it skips pixels and text breaks up. Halving exactly, though,
+// averages each 2x2 block perfectly. So the texture is first halved as often
+// as needed into offscreen buffers (like a mipmap), and only the last step,
+// between 1/2 and 1, uses a free scale.
+class smooth_scaler_t
+{
+    std::vector<wf::auxilliary_buffer_t> halves;
+
+    // Copy `src_box` of `src` into all of `dst`, scaled to fit.
+    static bool copy(wlr_texture *src, wlr_fbox src_box, wf::auxilliary_buffer_t& dst,
+        wf::dimensions_t size)
+    {
+        if (dst.allocate(size) == wf::buffer_reallocation_result_t::FAILED)
+        {
+            return false;
+        }
+
+        auto pass = wlr_renderer_begin_buffer_pass(wf::get_core().renderer,
+            dst.get_buffer(), NULL);
+        if (!pass)
+        {
+            return false;
+        }
+
+        wlr_render_texture_options opts{};
+        opts.texture     = src;
+        opts.src_box     = src_box;
+        opts.dst_box     = {0, 0, size.width, size.height};
+        opts.filter_mode = WLR_SCALE_FILTER_BILINEAR;
+        opts.blend_mode  = WLR_RENDER_BLEND_MODE_NONE;
+        wlr_render_pass_add_texture(pass, &opts);
+        return wlr_render_pass_submit(pass);
+    }
+
+  public:
+    void draw(const wf::scene::render_instruction_t& data, wf::texture_t tex,
+        wlr_fbox box, float alpha = 1.0)
+    {
+        tex.filter_mode = WLR_SCALE_FILTER_BILINEAR;
+        wlr_fbox src = tex.source_box.value_or(wlr_fbox{0, 0,
+            1.0 * tex.texture->width, 1.0 * tex.texture->height});
+
+        // Size on screen, in real pixels.
+        double want_w = box.width * data.target.scale;
+        double want_h = box.height * data.target.scale;
+
+        size_t steps = 0;
+        if (tex.transform == WL_OUTPUT_TRANSFORM_NORMAL)
+        {
+            while ((src.width / 2 >= want_w) && (src.height / 2 >= want_h) &&
+                   (src.width >= 4) && (src.height >= 4))
+            {
+                if (halves.size() <= steps)
+                {
+                    halves.emplace_back();
+                }
+
+                wf::dimensions_t half = {
+                    (int)std::round(src.width / 2), (int)std::round(src.height / 2)
+                };
+                if (!copy(tex.texture, src, halves[steps], half))
+                {
+                    break;
+                }
+
+                tex = wf::texture_t{halves[steps].get_texture()};
+                tex.filter_mode = WLR_SCALE_FILTER_BILINEAR;
+                src = {0, 0, 1.0 * half.width, 1.0 * half.height};
+                steps++;
+            }
+        }
+
+        // Free buffers no longer needed (e.g. after growing again).
+        halves.resize(steps);
+        data.pass->add_texture(tex, data.target, box, data.damage, alpha);
+    }
+};
 
 // A transformer stacked on top of the drag helper's own transform, which
 // positions the window around the cursor (at its drawn size, i.e. including
@@ -173,6 +255,8 @@ class drag_scale_t : public wf::scene::transformer_base_node_t
             return {};
         }
 
+        smooth_scaler_t scaler;
+
       public:
         using transformer_render_instance_t::transformer_render_instance_t;
 
@@ -192,7 +276,50 @@ class drag_scale_t : public wf::scene::transformer_base_node_t
                 tex = this->get_texture(data.target.scale);
             }
 
-            data.pass->add_texture(*tex, data.target, self->exact_box(), data.damage);
+            scaler.draw(data, *tex, self->exact_box());
+        }
+    };
+
+    void gen_render_instances(std::vector<wf::scene::render_instance_uptr>& instances,
+        wf::scene::damage_callback push_damage, wf::output_t *shown_on) override
+    {
+        instances.push_back(std::make_unique<render_instance_t>(this,
+            push_damage, shown_on));
+    }
+};
+
+// Wayfire's 2D transform (which scales the window and maps input onto it),
+// drawn with smooth_scaler_t instead of plain bilinear filtering. Used for
+// windows parked shrunk.
+class smooth_2d_t : public wf::scene::view_2d_transformer_t
+{
+  public:
+    using view_2d_transformer_t::view_2d_transformer_t;
+
+    class render_instance_t :
+        public wf::scene::transformer_render_instance_t<smooth_2d_t>
+    {
+        smooth_scaler_t scaler;
+
+      public:
+        using transformer_render_instance_t::transformer_render_instance_t;
+
+        void transform_damage_region(wf::region_t& damage) override
+        {
+            auto copy = damage;
+            damage.clear();
+            for (auto& box : copy)
+            {
+                damage |= wf::get_bbox_for_node(self, wlr_box_from_pixman_box(box));
+            }
+        }
+
+        void render(const wf::scene::render_instruction_t& data) override
+        {
+            auto box = self->get_bounding_box();
+            scaler.draw(data, get_texture(data.target.scale),
+                {1.0 * box.x, 1.0 * box.y, 1.0 * box.width, 1.0 * box.height},
+                self->get_alpha());
         }
     };
 
@@ -641,7 +768,7 @@ class edge_shrink_plugin : public wf::plugin_interface_t
         // it) avoids a frame at full size.
         if (!tr)
         {
-            tr = std::make_shared<wf::scene::view_2d_transformer_t>(view);
+            tr = std::make_shared<smooth_2d_t>(view);
             node->add_transformer(tr, wf::TRANSFORMER_2D, shrink_name);
         }
 

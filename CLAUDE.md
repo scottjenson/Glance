@@ -23,6 +23,10 @@ web pages reflow via CSS media queries; the rest of the shrink is visual.
   No need to build Wayfire from source.
 - Build also needs `glm-devel` (Wayfire's headers include GLM but wayfire-devel
   doesn't depend on it); meson.build checks for it at setup time. Installed.
+- Display: VMware "Use full resolution for Retina display" is on, and KDE is
+  at 100% scale (tiny). The nested Wayfire runs at 2560x1440, scale 2
+  (`[output:WL-1]` in wayfire-test.ini), so it is sharp and normal size.
+  Nested Wayfire can't tell KDE it is 2x, so KDE at 200% would double it.
 - Wayfire is tested **nested**: run as a window inside the KDE Plasma session.
   It must be launched from the VM's graphical session (Konsole in the VM window),
   not from an SSH shell. Crashes only close the nested window.

@@ -18,6 +18,34 @@ so a scaled window being clickable needs an internal-API C++ plugin (e.g. an
 input filter setting the seat's pointer surface transformation); KWin
 scripts can't scale windows at all.
 
+## KDE plan (decided 2026-09-28)
+Options weighed:
+- KWin script (JS): can't scale or map input; real resize alone can't reach
+  the parked state (apps have minimum sizes). Ruled out.
+- KWin effect: scales drawing but not input. Not enough on its own.
+- **KWin C++ plugin (internal API): chosen.** Scale the window's scene item
+  for drawing; an input filter picks the window by its drawn rectangle and
+  sets the seat's pointer transformation (offset + scale). Downside: internal
+  API, so it must be rebuilt per Plasma release. Ship like other third-party
+  KWin plugins (Better Blur, KDE Rounded Corners): source on GitHub plus a
+  Fedora COPR / Arch AUR package.
+- Fallback if KWin fails: a GNOME Shell extension (JS). Mutter likely maps
+  Wayland pointer input through the window actor's transform, so a scaled
+  window may be clickable for free (unverified; Xwayland apps probably not).
+- Long term: ask KWin upstream for a way to set a window's input transform.
+
+The 100%/200% scaling workaround was only needed for nested Wayfire. A KWin
+plugin runs in the real session at any KDE scale (logical coordinates); the
+"lay out at exactly 1x/2x" text trick needs rethinking for fractional scales.
+Installed KWin is **6.6.4** (the 6.7 source above was for reading only).
+
+Mapping of the three window states: full size = plugin does nothing;
+partially shrunk (dragging) = follow KWin's own interactive move
+(`Window::interactiveMoveResizeStepped`) and scale around the cursor with the
+same curve; parked (~15%) = visual scale + real resize + input rerouting.
+
+Step 1 is the feasibility test in `kwin/` (see Files); not built yet.
+
 On release the app is also really resized (down to a phone-like width), so
 web pages reflow via CSS media queries; the rest of the shrink is visual.
 
@@ -67,6 +95,13 @@ web pages reflow via CSS media queries; the rest of the shrink is visual.
   doesn't fight the effect. Alt+Enter opens another Konsole. The `plugins =`
   list uses `\` line continuations: to disable the plugin, remove the `\` on
   the `place` line as well as commenting out the plugin line.
+- `kwin/`: KWin feasibility test plugin (`main.cpp`, `metadata.json`,
+  `CMakeLists.txt`, separate CMake build in `kwin/build/`, not installed).
+  Alt+Shift+S shrinks the active window to half size (anchored top-left) or
+  restores it, to test whether clicks/scroll/hover land correctly. Needs
+  `kwin-devel` and `extra-cmake-modules` (not yet installed). Meant to run
+  in a nested KWin (`kwin_wayland --scale 2 ...`) with QT_PLUGIN_PATH
+  pointing at the build folder.
 
 ## Build and run
     meson setup build        # once (delete build/ and redo if the folder moves)
@@ -200,6 +235,9 @@ Tested by the user in the nested session, all working:
 - Some remaining roughness may be the nested VM (Wayfire → KDE → VMware → macOS).
 
 ## Next steps
+0. KDE port (see "KDE plan"): build and run the `kwin/` feasibility test; if
+   input works, port drag-to-shrink and parking into a KWin plugin (Wayfire
+   version stays as reference); then packaging (COPR) and README/LICENSE.
 1. Resize experiment follow-ups (ideas, not agreed):
    - Live resizing during the drag (now release-only; while dragging a resized
      window back out it is upscaled and blurry until release).

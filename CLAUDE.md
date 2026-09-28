@@ -10,6 +10,14 @@ Wayfire Wayland compositor.
 Wayfire was chosen over KWin effects because its view transformers handle both
 rendering and input mapping (clicks land correctly on a scaled window).
 
+**Ultimate goal: ship something people can try on KDE Plasma (KWin).** The
+Wayfire plugin is the prototype; the design and algorithms should carry over,
+the code mostly won't. Checked in KWin 6.7 source: a window's input transform
+is hard-coded to a translation (`Window::inputTransformation()`, window.cpp),
+so a scaled window being clickable needs an internal-API C++ plugin (e.g. an
+input filter setting the seat's pointer surface transformation); KWin
+scripts can't scale windows at all.
+
 On release the app is also really resized (down to a phone-like width), so
 web pages reflow via CSS media queries; the rest of the shrink is visual.
 

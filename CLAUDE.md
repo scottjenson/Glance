@@ -37,14 +37,31 @@ Options weighed:
 The 100%/200% scaling workaround was only needed for nested Wayfire. A KWin
 plugin runs in the real session at any KDE scale (logical coordinates); the
 "lay out at exactly 1x/2x" text trick needs rethinking for fractional scales.
-Installed KWin is **6.6.4** (the 6.7 source above was for reading only).
+Installed KWin is **6.7.5** (a system update moved it from 6.6.4). Its source
+is unpacked at ~/src/kwin-6.7.5 (`dnf download --source kwin`, then
+`rpm2cpio kwin-*.src.rpm | cpio -idm` and untar).
 
 Mapping of the three window states: full size = plugin does nothing;
 partially shrunk (dragging) = follow KWin's own interactive move
 (`Window::interactiveMoveResizeStepped`) and scale around the cursor with the
 same curve; parked (~15%) = visual scale + real resize + input rerouting.
 
-Step 1 is the feasibility test in `kwin/` (see Files); not built yet.
+Step 1, the feasibility test in `kwin/` (see Files), **passed (2026-09-29)**
+in a nested KWin 6.7.5: a half-size window is drawn fully, windows behind
+its empty area show, and clicks, text selection and scrolling land
+correctly (hover not checked explicitly). Lessons, verified in source:
+- It must be a KWin **effect** (`KWIN_EFFECT_FACTORY`, namespace
+  `kwin/effects/plugins`), not a plain `KWin::Plugin`, so that
+  `prePaintWindow` can call `data.setTransformed()` for scaled windows.
+  Without it KWin clips drawing in unscaled coordinates
+  (`clipQuads` in scene/itemrenderer_opengl.cpp uses only the translation)
+  and only the top-left quarter of a half-size window is painted; it would
+  also treat the window as still covering its full-size area (occlusion).
+- `Effect` has its own `pointerMotion`/`pointerButton`/... virtuals, so the
+  `InputEventFilter` is a separate member object.
+- After changing the seat's pointer transformation, reset it on restore:
+  KWin only recomputes it on pointer enter or geometry change (otherwise
+  scrolling/clicks land at 2x positions after un-shrinking).
 
 On release the app is also really resized (down to a phone-like width), so
 web pages reflow via CSS media queries; the rest of the shrink is visual.
@@ -95,13 +112,21 @@ web pages reflow via CSS media queries; the rest of the shrink is visual.
   doesn't fight the effect. Alt+Enter opens another Konsole. The `plugins =`
   list uses `\` line continuations: to disable the plugin, remove the `\` on
   the `place` line as well as commenting out the plugin line.
-- `kwin/`: KWin feasibility test plugin (`main.cpp`, `metadata.json`,
+- `kwin/`: KWin feasibility test effect (`main.cpp`, `metadata.json`,
   `CMakeLists.txt`, separate CMake build in `kwin/build/`, not installed).
-  Alt+Shift+S shrinks the active window to half size (anchored top-left) or
-  restores it, to test whether clicks/scroll/hover land correctly. Needs
-  `kwin-devel` and `extra-cmake-modules` (not yet installed). Meant to run
-  in a nested KWin (`kwin_wayland --scale 2 ...`) with QT_PLUGIN_PATH
-  pointing at the build folder.
+  Alt+Shift+S (Option+Shift+S on the Mac keyboard) shrinks the active
+  window to half size (anchored top-left) or restores it. Build:
+  `cmake -S kwin -B kwin/build && cmake --build kwin/build`. Needs
+  `kwin-devel`, `extra-cmake-modules` and `libepoxy-devel` (all installed;
+  kwin-devel doesn't pull in libepoxy-devel), C++23, and Qt Widgets/DBus/
+  Quick in find_package (KWin's CMake target needs them).
+  `kwin/run-nested.sh` starts a nested KWin (1280x800 logical at scale 2)
+  with QT_PLUGIN_PATH at the build folder and a Konsole inside; output also
+  goes to `kwin.log` (git-ignored). Must be run from Konsole in the VM
+  window. Check: `edge-shrink: test plugin loaded`. Headless load check the
+  agent can run: `kwin_wayland --virtual --socket es-check
+  --exit-with-session "sleep 3"` with the same QT_PLUGIN_PATH and
+  QT_FORCE_STDERR_LOGGING=1.
 
 ## Build and run
     meson setup build        # once (delete build/ and redo if the folder moves)
@@ -235,9 +260,10 @@ Tested by the user in the nested session, all working:
 - Some remaining roughness may be the nested VM (Wayfire → KDE → VMware → macOS).
 
 ## Next steps
-0. KDE port (see "KDE plan"): build and run the `kwin/` feasibility test; if
-   input works, port drag-to-shrink and parking into a KWin plugin (Wayfire
-   version stays as reference); then packaging (COPR) and README/LICENSE.
+0. KDE port (see "KDE plan"): feasibility test passed; next, port
+   drag-to-shrink and parking into a KWin effect (Wayfire version stays as
+   reference); then test in the real Plasma session, then packaging (COPR)
+   and README/LICENSE.
 1. Resize experiment follow-ups (ideas, not agreed):
    - Live resizing during the drag (now release-only; while dragging a resized
      window back out it is upscaled and blurry until release).
@@ -257,7 +283,13 @@ Tested by the user in the nested session, all working:
   (sudo, dnf, -devel packages, etc.) and give exact commands.
 - The user prefers simple options (e.g. HTTPS over SSH) and likes design
   choices talked through before big changes.
-- The user runs the nested Wayfire and reports how it feels; the agent can
-  build but can't see or interact with the nested session. `sudo` needs the
+- The user runs the nested session and reports how it feels; the agent can
+  build but can't interact with it. It *can* see it: screenshot the whole
+  VM desktop with `spectacle -b -n -f -o <file>` using the desktop's env
+  (DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus). `sudo` needs the
   user's password, so the user runs installs.
+- Mac→VM clipboard (VMware Tools, `vmtoolsd -n vmusr`) is unreliable and
+  adds a trailing NUL byte; keep commands for the user short or put them
+  in scripts.
 - Linux paths are case-sensitive.

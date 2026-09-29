@@ -2,6 +2,8 @@
     "KPlugin": {
         "Name": "Edge Shrink (feasibility test)",
         "Description": "Alt+Shift+S shrinks the active window to half size; tests whether it still gets input.",
-        "EnabledByDefault": true
+        "EnabledByDefault": true,
+        "Category": "Tools",
+        "License": "MIT"
     }
 }

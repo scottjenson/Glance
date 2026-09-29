@@ -7,7 +7,11 @@
 //
 // Alt+Shift+S shrinks the active window to half size (visually, anchored at
 // its top-left corner) or restores it. While shrunk:
-// - Drawing: a scale transform on the window's scene item.
+// - Drawing: a scale transform on the window's scene item. This is a KWin
+//   effect (not a plain plugin) only so it can mark shrunk windows as
+//   transformed in prePaintWindow: otherwise KWin clips a window's drawing
+//   to its region as if it weren't scaled, and only the top-left quarter of
+//   a half-size window gets painted.
 // - Input: KWin still picks the pointer's window from the window's real,
 //   full-size rectangle. Over the visible (shrunk) part it picks the right
 //   window, so we only replace the seat's pointer transformation with one
@@ -22,8 +26,9 @@
 
 #include <input.h>
 #include <input_event.h>
+#include <effect/effect.h>
+#include <effect/effectwindow.h>
 #include <main.h>
-#include <plugin.h>
 #include <pointer_input.h>
 #include <scene/windowitem.h>
 #include <wayland/seat.h>
@@ -39,19 +44,19 @@
 
 using namespace KWin;
 
-class EdgeShrinkTest : public Plugin, public InputEventFilter
+class EdgeShrinkTest : public Effect
 {
 public:
     EdgeShrinkTest()
-        : InputEventFilter(InputFilterOrder::ButtonRebind)
+        : m_filter(this)
     {
-        input()->installInputEventFilter(this);
+        input()->installInputEventFilter(&m_filter);
         qInfo("edge-shrink: test plugin loaded; Alt+Shift+S toggles the active window");
     }
 
     ~EdgeShrinkTest() override
     {
-        input()->uninstallInputEventFilter(this);
+        input()->uninstallInputEventFilter(&m_filter);
         for (auto &[window, scale] : m_shrunk) {
             if (window && window->windowItem()) {
                 window->windowItem()->setTransform(QTransform());
@@ -59,7 +64,21 @@ public:
         }
     }
 
-    bool keyboardKey(KeyboardKeyEvent *event) override
+    // Only take part in painting while something is shrunk.
+    bool isActive() const override
+    {
+        return !m_shrunk.empty();
+    }
+
+    void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
+    {
+        if (scaleOf(w->window())) {
+            data.setTransformed();
+        }
+        Effect::prePaintWindow(view, w, data);
+    }
+
+    bool onKey(KeyboardKeyEvent *event)
     {
         if (event->key != Qt::Key_S || event->modifiers != (Qt::AltModifier | Qt::ShiftModifier)) {
             return false;
@@ -71,7 +90,7 @@ public:
         return true;
     }
 
-    bool pointerMotion(PointerMotionEvent *event) override
+    bool onMotion(PointerMotionEvent *event)
     {
         if (!route(event->position, event->buttons != Qt::NoButton)) {
             return false;
@@ -83,7 +102,7 @@ public:
         return true;
     }
 
-    bool pointerButton(PointerButtonEvent *event) override
+    bool onButton(PointerButtonEvent *event)
     {
         const bool pressed = event->state == PointerButtonState::Pressed;
         // Keep the target of a press until its release.
@@ -101,7 +120,7 @@ public:
         return true;
     }
 
-    bool pointerAxis(PointerAxisEvent *event) override
+    bool onAxis(PointerAxisEvent *event)
     {
         if (!route(event->position, event->buttons != Qt::NoButton)) {
             return false;
@@ -114,6 +133,27 @@ public:
     }
 
 private:
+    // Effect has its own pointerMotion() etc., so the input filter is a
+    // separate object that hands events back to us.
+    class Filter : public InputEventFilter
+    {
+    public:
+        explicit Filter(EdgeShrinkTest *effect)
+            : InputEventFilter(InputFilterOrder::ButtonRebind)
+            , m_effect(effect)
+        {
+        }
+        bool keyboardKey(KeyboardKeyEvent *event) override { return m_effect->onKey(event); }
+        bool pointerMotion(PointerMotionEvent *event) override { return m_effect->onMotion(event); }
+        bool pointerButton(PointerButtonEvent *event) override { return m_effect->onButton(event); }
+        bool pointerAxis(PointerAxisEvent *event) override { return m_effect->onAxis(event); }
+
+    private:
+        EdgeShrinkTest *m_effect;
+    };
+
+    Filter m_filter;
+
     // Shrunk windows and their scale (removed when a window closes).
     std::map<Window *, qreal> m_shrunk;
     // Where we last pointed the seat, and whether KWin disagreed (so we
@@ -234,6 +274,13 @@ private:
         if (m_shrunk.erase(window)) {
             disconnect(window, &Window::closed, this, nullptr);
             window->windowItem()->setTransform(QTransform());
+            // KWin only recomputes the pointer transformation on enter or
+            // geometry change, so the scaled one would otherwise stay.
+            auto seat = waylandServer()->seat();
+            if (window->surface() && seat->focusedPointerSurface() == window->surface()) {
+                seat->setFocusedPointerSurfaceTransformation(window->inputTransformation());
+            }
+            m_target = nullptr;
             qInfo("edge-shrink: restored %s", qPrintable(window->caption()));
         } else {
             const qreal scale = 0.5;
@@ -253,17 +300,6 @@ private:
     }
 };
 
-class KWIN_EXPORT EdgeShrinkTestFactory : public PluginFactory
-{
-    Q_OBJECT
-    Q_PLUGIN_METADATA(IID PluginFactory_iid FILE "metadata.json")
-    Q_INTERFACES(KWin::PluginFactory)
-
-public:
-    std::unique_ptr<Plugin> create() const override
-    {
-        return std::make_unique<EdgeShrinkTest>();
-    }
-};
+KWIN_EFFECT_FACTORY(EdgeShrinkTest, "metadata.json")
 
 #include "main.moc"

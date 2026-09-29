@@ -4,13 +4,17 @@
 cmake_minimum_required(VERSION 3.20)
 project(edgeshrink-kwin LANGUAGES CXX)
 
-find_package(ECM REQUIRED NO_MODULE)
+# KWin's headers need C++20 or later (KWin itself is built as C++23).
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(ECM 6.0 REQUIRED NO_MODULE)
 list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
 include(KDEInstallDirs)
 include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Quick)
 find_package(KF6CoreAddons REQUIRED)
 find_package(KWin REQUIRED)
 

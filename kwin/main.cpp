@@ -1,41 +1,38 @@
-// edge-shrink for KWin: feasibility test.
+// edge-shrink for KWin: windows shrink as they are dragged toward the left or
+// right screen edge, and stay shrunk ("parked") where they are dropped.
 //
-// Question: can a window that is drawn shrunk still receive clicks, scrolling
-// and hover at the right spot? KWin maps pointer positions into a window with
-// a plain offset (Window::inputTransformation()), so on its own it would
-// deliver them as if the window were full size.
+// Dragging: while KWin moves a window interactively (title bar or Meta+drag),
+// the window is drawn shrunk around the cursor once its left or right edge
+// goes into the outer quarter of the screen (the middle half is full size),
+// reaching minScale at the screen edge. Quick tiling by dragging to the side
+// is turned off while the effect is loaded, since it uses the same edges.
 //
-// Alt+Shift+S shrinks the active window to half size (visually, anchored at
-// its top-left corner) or restores it. While shrunk:
-// - Drawing: a scale transform on the window's scene item. This is a KWin
-//   effect (not a plain plugin) only so it can mark shrunk windows as
-//   transformed in prePaintWindow: otherwise KWin clips a window's drawing
-//   to its region as if it weren't scaled, and only the top-left quarter of
-//   a half-size window gets painted.
-// - Input: KWin still picks the pointer's window from the window's real,
-//   full-size rectangle. Over the visible (shrunk) part it picks the right
-//   window, so we only replace the seat's pointer transformation with one
-//   that includes the scale, and KWin forwards events as usual. Over the
-//   invisible rest of the real rectangle ("dead zone") it picks the wrong
-//   window, so there we point the seat at whatever is really visible under
-//   the pointer and forward the events ourselves.
+// Parking: dropped while shrunk, the window stays exactly where and as large
+// as it was drawn. KWin still thinks it is full size, at its real ("frame")
+// position; only the drawing is scaled (a transform on its scene item).
 //
-// Dragging (step 1 of the port): while KWin moves a window interactively
-// (title bar or Meta+drag), the window is drawn shrunk around the cursor once
-// its left or right edge goes into the outer quarter of the screen (the
-// middle half is full size), reaching minScale at the screen edge. Drawing
-// only: on release it goes back to full size. Quick tiling by dragging to the
-// side is turned off while the effect is loaded, since it uses the same edges.
+// Input to a parked window: whenever the pointer is over one, its frame is
+// moved ("re-anchored") so that the point under the pointer is the same point
+// of the window as in the shrunk drawing; the drawing is adjusted so it
+// doesn't move. KWin then finds the right spot on its own, at the pointer:
+// clicks, hover, the title bar (so it can be dragged out again), popups.
+// Where KWin still picks another window (the invisible full-size frame of a
+// different window lies above), we point the seat at the window really
+// visible under the pointer and forward the events ourselves.
 //
-// Known gaps, fine for this test: server-side decorations (title bars drawn
-// by KWin) of a shrunk window don't get input; touch and tablets aren't
-// handled; the cursor shape in the dead zone may be the shrunk window's.
+// It is a KWin effect (not a plain plugin) so that it can mark scaled windows
+// as transformed in prePaintWindow: otherwise KWin clips a window's drawing
+// as if it weren't scaled, and it also treats the window as still covering
+// its full-size area.
+//
+// Known gaps: touch and tablets aren't handled; in the forwarding case the
+// title bar doesn't respond and the cursor shape may be wrong.
 
-#include <input.h>
-#include <input_event.h>
+#include <core/output.h>
 #include <effect/effect.h>
 #include <effect/effectwindow.h>
-#include <core/output.h>
+#include <input.h>
+#include <input_event.h>
 #include <main.h>
 #include <options.h>
 #include <pointer_input.h>
@@ -54,10 +51,10 @@
 
 using namespace KWin;
 
-class EdgeShrinkTest : public Effect
+class EdgeShrink : public Effect
 {
 public:
-    EdgeShrinkTest()
+    EdgeShrink()
         : m_filter(this)
     {
         input()->installInputEventFilter(&m_filter);
@@ -65,7 +62,7 @@ public:
         for (Window *window : workspace()->windows()) {
             watch(window);
         }
-        connect(workspace(), &Workspace::windowAdded, this, &EdgeShrinkTest::watch);
+        connect(workspace(), &Workspace::windowAdded, this, &EdgeShrink::watch);
 
         m_savedTiling = options->electricBorderTiling();
         options->setElectricBorderTiling(false);
@@ -76,10 +73,10 @@ public:
             }
         });
 
-        qInfo("edge-shrink: test plugin loaded; Alt+Shift+S toggles the active window");
+        qInfo("edge-shrink: effect loaded");
     }
 
-    ~EdgeShrinkTest() override
+    ~EdgeShrink() override
     {
         input()->uninstallInputEventFilter(&m_filter);
         disconnect(options, nullptr, this, nullptr);
@@ -87,37 +84,25 @@ public:
         if (m_dragged && m_dragged->windowItem()) {
             m_dragged->windowItem()->setTransform(QTransform());
         }
-        for (auto &[window, scale] : m_shrunk) {
-            if (window && window->windowItem()) {
+        for (auto &[window, parked] : m_parked) {
+            if (window->windowItem()) {
                 window->windowItem()->setTransform(QTransform());
             }
         }
     }
 
-    // Only take part in painting while something is shrunk.
+    // Only take part in painting while something is scaled.
     bool isActive() const override
     {
-        return !m_shrunk.empty() || m_dragged;
+        return !m_parked.empty() || m_dragged;
     }
 
     void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
     {
-        if (scaleOf(w->window()) || w->window() == m_dragged) {
+        if (isParked(w->window()) || w->window() == m_dragged) {
             data.setTransformed();
         }
         Effect::prePaintWindow(view, w, data);
-    }
-
-    bool onKey(KeyboardKeyEvent *event)
-    {
-        if (event->key != Qt::Key_S || event->modifiers != (Qt::AltModifier | Qt::ShiftModifier)) {
-            return false;
-        }
-
-        if (event->state == KeyboardKeyState::Pressed) {
-            toggle(workspace()->activeWindow());
-        }
-        return true;
     }
 
     bool onMotion(PointerMotionEvent *event)
@@ -168,18 +153,17 @@ private:
     class Filter : public InputEventFilter
     {
     public:
-        explicit Filter(EdgeShrinkTest *effect)
+        explicit Filter(EdgeShrink *effect)
             : InputEventFilter(InputFilterOrder::ButtonRebind)
             , m_effect(effect)
         {
         }
-        bool keyboardKey(KeyboardKeyEvent *event) override { return m_effect->onKey(event); }
         bool pointerMotion(PointerMotionEvent *event) override { return m_effect->onMotion(event); }
         bool pointerButton(PointerButtonEvent *event) override { return m_effect->onButton(event); }
         bool pointerAxis(PointerAxisEvent *event) override { return m_effect->onAxis(event); }
 
     private:
-        EdgeShrinkTest *m_effect;
+        EdgeShrink *m_effect;
     };
 
     Filter m_filter;
@@ -190,18 +174,29 @@ private:
     static constexpr qreal zoneFraction = 0.25;
     // Window size at the very edge of the screen (1.0 = full size).
     static constexpr qreal minScale = 0.15;
+    // Dropped at this scale or larger, a window goes back to full size.
+    static constexpr qreal parkBelow = 0.99;
 
-    // The window being dragged while we draw it shrunk.
+    // A parked window: drawn at `scale`, with its frame's top-left corner
+    // drawn at `drawn` (global coordinates).
+    struct Parked
+    {
+        qreal scale;
+        QPointF drawn;
+    };
+    std::map<Window *, Parked> m_parked;
+
+    // The window being dragged while we draw it scaled, and its scale.
     QPointer<Window> m_dragged;
-    // Quick tiling setting to restore when unloaded.
-    bool m_savedTiling = true;
+    qreal m_dragScale = 1.0;
 
-    // Shrunk windows and their scale (removed when a window closes).
-    std::map<Window *, qreal> m_shrunk;
     // Where we last pointed the seat, and whether KWin disagreed (so we
     // forward events ourselves).
     QPointer<Window> m_target;
     bool m_forwarding = false;
+
+    // Quick tiling setting to restore when unloaded.
+    bool m_savedTiling = true;
 
     void watch(Window *window)
     {
@@ -211,7 +206,15 @@ private:
         connect(window, &Window::interactiveMoveResizeFinished, this, [this, window]() {
             dragFinished(window);
         });
+        connect(window, &Window::frameGeometryChanged, this, [this, window]() {
+            applyParked(window);
+        });
+        connect(window, &Window::closed, this, [this, window]() {
+            m_parked.erase(window);
+        });
     }
+
+    // --- Dragging ---
 
     // How far a box spanning [x, x + width) must move horizontally to lie
     // inside `screen`. A box wider than the screen keeps its left edge visible.
@@ -239,12 +242,15 @@ private:
     }
 
     // KWin has moved the dragged window so the grabbed spot is under the
-    // cursor; draw it scaled around the cursor.
+    // cursor; draw it scaled around the cursor. A parked window being dragged
+    // stops being parked: its frame was re-anchored around the cursor when
+    // it was grabbed, so the drag continues from where it is drawn.
     void dragStep(Window *window)
     {
-        if (!window->isInteractiveMove() || scaleOf(window) || !window->windowItem()) {
+        if (!window->isInteractiveMove() || !window->windowItem()) {
             return;
         }
+        m_parked.erase(window);
         m_dragged = window;
 
         const QPointF cursor = input()->pointer()->pos();
@@ -260,6 +266,7 @@ private:
                                 edgeScale(cursor.x() - screen.x(), cursor.x() - left, zoneWidth),
                                 edgeScale(screen.x() + screen.width() - cursor.x(), right - cursor.x(), zoneWidth)});
         scale = std::max(scale, minScale);
+        m_dragScale = scale;
 
         // Fallback when even minScale doesn't fit: slide it back on screen
         // (the cursor then detaches from the grabbed spot).
@@ -275,52 +282,91 @@ private:
         window->windowItem()->setTransform(transform);
     }
 
+    // Dropped: park it where it is drawn, or restore full size.
     void dragFinished(Window *window)
     {
         if (window != m_dragged) {
             return;
         }
-        if (window->windowItem()) {
+        m_dragged = nullptr;
+        if (!window->windowItem()) {
+            return;
+        }
+
+        if (m_dragScale < parkBelow) {
+            const QPointF drawn = window->frameGeometry().topLeft()
+                + window->windowItem()->transform().map(QPointF(0, 0));
+            m_parked[window] = Parked{m_dragScale, drawn};
+            applyParked(window);
+        } else {
             window->windowItem()->setTransform(QTransform());
         }
-        m_dragged = nullptr;
     }
 
-    std::optional<qreal> scaleOf(Window *window) const
+    // --- Parked windows ---
+
+    bool isParked(Window *window) const
     {
-        auto it = m_shrunk.find(window);
-        if (it == m_shrunk.end()) {
-            return std::nullopt;
+        return m_parked.contains(window);
+    }
+
+    // Draw a parked window at its place, wherever its frame currently is.
+    void applyParked(Window *window)
+    {
+        auto it = m_parked.find(window);
+        if (it == m_parked.end() || !window->windowItem()) {
+            return;
         }
-        return it->second;
+        const Parked &parked = it->second;
+        const QPointF offset = parked.drawn - window->frameGeometry().topLeft();
+        QTransform transform;
+        transform.translate(offset.x(), offset.y());
+        transform.scale(parked.scale, parked.scale);
+        window->windowItem()->setTransform(transform);
     }
 
-    // Where a shrunk window is drawn: scaled around its top-left corner.
-    static QRectF visibleRect(Window *window, qreal scale)
+    // Where a parked window is drawn.
+    QRectF drawnRect(Window *window) const
     {
+        const Parked &parked = m_parked.at(window);
         const auto frame = window->frameGeometry();
-        return QRectF(frame.x(), frame.y(), frame.width() * scale, frame.height() * scale);
+        return QRectF(parked.drawn, QSizeF(frame.width(), frame.height()) * parked.scale);
+    }
+
+    // Move a parked window's frame so that the point of the window drawn at
+    // `pos` is also at `pos` in the frame. The drawing stays in place.
+    void reanchor(Window *window, const QPointF &pos)
+    {
+        if (workspace()->moveResizeWindow() == window) {
+            return;
+        }
+        const Parked &parked = m_parked.at(window);
+        const QPointF topLeft = pos - (pos - parked.drawn) / parked.scale;
+        if (topLeft != window->frameGeometry().topLeft()) {
+            window->move(topLeft);
+        }
     }
 
     // Maps a global position to the window's surface-local position.
     QMatrix4x4 transformFor(Window *window) const
     {
-        auto scale = scaleOf(window);
-        if (!scale) {
+        auto it = m_parked.find(window);
+        if (it == m_parked.end()) {
             return window->inputTransformation();
         }
 
+        const Parked &parked = it->second;
         const QPointF frame = window->frameGeometry().topLeft();
         const QPointF buffer = window->bufferGeometry().topLeft();
         QMatrix4x4 m;
         m.translate(frame.x() - buffer.x(), frame.y() - buffer.y());
-        m.scale(1.0 / *scale, 1.0 / *scale);
-        m.translate(-frame.x(), -frame.y());
+        m.scale(1.0 / parked.scale, 1.0 / parked.scale);
+        m.translate(-parked.drawn.x(), -parked.drawn.y());
         return m;
     }
 
     // The window really visible at `pos`, like InputRedirection::findToplevel
-    // but using the drawn rectangle for shrunk windows.
+    // but using the drawn rectangle for parked windows.
     Window *pick(const QPointF &pos) const
     {
         const auto &stacking = workspace()->stackingOrder();
@@ -332,8 +378,8 @@ private:
                 continue;
             }
 
-            if (auto scale = scaleOf(window)) {
-                if (visibleRect(window, *scale).contains(pos)) {
+            if (isParked(window)) {
+                if (drawnRect(window).contains(pos)) {
                     return window;
                 }
                 continue;
@@ -346,30 +392,47 @@ private:
         return nullptr;
     }
 
-    // Point the seat at the surface really under `pos`, with a transformation
-    // that accounts for shrinking. Returns whether we must forward the event
-    // ourselves because KWin's own pointer focus is wrong. With `keep`, a
-    // button is held: stay with the current target.
+    // Make the pointer event at `pos` reach the window really visible there.
+    // Returns whether we must forward it ourselves because KWin's own pick is
+    // wrong. With `keep`, a button is held: stay with the current target.
     bool route(const QPointF &pos, bool keep)
     {
-        if (m_shrunk.empty()) {
+        // KWin's own drags (and no parked windows) need nothing from us.
+        if (m_parked.empty() || workspace()->moveResizeWindow()) {
+            m_target = nullptr;
+            m_forwarding = false;
             return false;
         }
 
         auto pointer = input()->pointer();
         if (keep) {
-            if (m_target && scaleOf(m_target)) {
-                waylandServer()->seat()->setFocusedPointerSurfaceTransformation(transformFor(m_target));
+            if (m_target && isParked(m_target)) {
+                reanchor(m_target, pos);
+                if (m_forwarding) {
+                    waylandServer()->seat()->setFocusedPointerSurfaceTransformation(transformFor(m_target));
+                }
             }
             return m_forwarding;
         }
 
         Window *target = pick(pos);
-        const bool involved = (target && scaleOf(target)) || (pointer->hover() && scaleOf(pointer->hover()));
+        const bool involved = (target && isParked(target)) || (pointer->hover() && isParked(pointer->hover()));
         if (!involved) {
-            // Nothing shrunk here: KWin knows best (decorations etc.).
+            // Nothing parked here: KWin knows best.
             m_target = nullptr;
             m_forwarding = false;
+            return false;
+        }
+
+        if (target && isParked(target)) {
+            reanchor(target, pos);
+            // KWin picked its window before the frame moved; pick again.
+            pointer->update();
+        }
+
+        m_target = target;
+        m_forwarding = target != pointer->hover();
+        if (!m_forwarding) {
             return false;
         }
 
@@ -384,47 +447,10 @@ private:
         } else if (surface) {
             seat->setFocusedPointerSurfaceTransformation(transformFor(target));
         }
-
-        m_target = target;
-        m_forwarding = target != pointer->focus();
-        return m_forwarding;
-    }
-
-    void toggle(Window *window)
-    {
-        if (!window || !window->windowItem()) {
-            return;
-        }
-
-        if (m_shrunk.erase(window)) {
-            disconnect(window, &Window::closed, this, nullptr);
-            window->windowItem()->setTransform(QTransform());
-            // KWin only recomputes the pointer transformation on enter or
-            // geometry change, so the scaled one would otherwise stay.
-            auto seat = waylandServer()->seat();
-            if (window->surface() && seat->focusedPointerSurface() == window->surface()) {
-                seat->setFocusedPointerSurfaceTransformation(window->inputTransformation());
-            }
-            m_target = nullptr;
-            qInfo("edge-shrink: restored %s", qPrintable(window->caption()));
-        } else {
-            const qreal scale = 0.5;
-            m_shrunk[window] = scale;
-            connect(window, &Window::closed, this, [this, window]() {
-                m_shrunk.erase(window);
-            });
-            window->windowItem()->setTransform(QTransform::fromScale(scale, scale));
-            qInfo("edge-shrink: shrunk %s to %g", qPrintable(window->caption()), scale);
-        }
-
-        // Re-route for the current pointer position right away.
-        auto pointer = input()->pointer();
-        pointer->update();
-        route(pointer->pos(), false);
-        m_forwarding = false;
+        return true;
     }
 };
 
-KWIN_EFFECT_FACTORY(EdgeShrinkTest, "metadata.json")
+KWIN_EFFECT_FACTORY(EdgeShrink, "metadata.json")
 
 #include "main.moc"

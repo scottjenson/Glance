@@ -76,8 +76,10 @@ web pages reflow via CSS media queries; the rest of the shrink is visual.
   No need to build Wayfire from source.
 - Build also needs `glm-devel` (Wayfire's headers include GLM but wayfire-devel
   doesn't depend on it); meson.build checks for it at setup time. Installed.
-- Display: VMware "Use full resolution for Retina display" is on, and KDE is
-  at 100% scale (tiny). The nested Wayfire runs at 2560x1440, scale 2
+- Display: VMware "Use full resolution for Retina display" is on; the VM
+  screen is 5990x2504 px. KDE was at 100% scale (tiny) for the Wayfire
+  tests; since 2026-09-29 it is at 200% (2995x1252 logical), and the nested
+  KWin (`kwin/run-nested.sh`) defaults to 2982x1090 at scale 2 to fill it. The nested Wayfire runs at 2560x1440, scale 2
   (`[output:WL-1]` in wayfire-test.ini), so it is sharp and normal size.
   Nested Wayfire can't tell KDE it is 2x, so KDE at 200% would double it.
 - Wayfire is tested **nested**: run as a window inside the KDE Plasma session.
@@ -120,7 +122,7 @@ web pages reflow via CSS media queries; the rest of the shrink is visual.
   `kwin-devel`, `extra-cmake-modules` and `libepoxy-devel` (all installed;
   kwin-devel doesn't pull in libepoxy-devel), C++23, and Qt Widgets/DBus/
   Quick in find_package (KWin's CMake target needs them).
-  `kwin/run-nested.sh` starts a nested KWin (1280x800 logical at scale 2)
+  `kwin/run-nested.sh` starts a nested KWin (2982x1090 logical at scale 2)
   with QT_PLUGIN_PATH at the build folder and a Konsole inside; output also
   goes to `kwin.log` (git-ignored). Must be run from Konsole in the VM
   window. Check: `edge-shrink: test plugin loaded`. Headless load check the

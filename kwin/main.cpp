@@ -37,6 +37,13 @@
 // be dragged from anywhere and still work as widgets (buttons, scrolling).
 // Not for KDE title bars (KWin handles those) or presses with modifiers.
 //
+// Keyboard (replaces KDE's quick tiling on Meta+arrows): Meta+Left/Right
+// step the active window between left parking lot, left staging, left half
+// of the middle, right half of the middle, right staging and right parking
+// lot; a free window in the middle first snaps to the half on that side.
+// Windows move horizontally and keep their vertical position. Meta+Up makes
+// a window fill the screen height; Meta+Down undoes that.
+//
 // Known gaps: touch and tablets aren't handled; in the forwarding case the
 // title bar doesn't respond and the cursor shape may be wrong.
 
@@ -120,6 +127,41 @@ public:
         Effect::prePaintWindow(view, w, data);
     }
 
+    // Meta+arrows (see the header comment). Keys we act on are not passed
+    // on, so KDE's own quick tiling on them doesn't run.
+    bool onKey(KeyboardKeyEvent *event)
+    {
+        if (event->modifiers != Qt::MetaModifier) {
+            return false;
+        }
+        const Qt::Key key = event->key;
+        if (key != Qt::Key_Left && key != Qt::Key_Right && key != Qt::Key_Up && key != Qt::Key_Down) {
+            return false;
+        }
+        Window *window = workspace()->activeWindow();
+        if (!window || !window->isNormalWindow() || window->isFullScreen() || !window->isMovable()
+            || !window->isResizable() || workspace()->moveResizeWindow() || !window->windowItem()) {
+            return false;
+        }
+        if (event->state == KeyboardKeyState::Pressed) {
+            switch (key) {
+            case Qt::Key_Left:
+                stepSideways(window, Side::Left);
+                break;
+            case Qt::Key_Right:
+                stepSideways(window, Side::Right);
+                break;
+            case Qt::Key_Up:
+                fillHeight(window);
+                break;
+            default:
+                undoFillHeight(window);
+                break;
+            }
+        }
+        return true;
+    }
+
     bool onMotion(PointerMotionEvent *event)
     {
         if (m_pending) {
@@ -182,6 +224,7 @@ private:
             , m_effect(effect)
         {
         }
+        bool keyboardKey(KeyboardKeyEvent *event) override { return m_effect->onKey(event); }
         bool pointerMotion(PointerMotionEvent *event) override { return m_effect->onMotion(event); }
         bool pointerButton(PointerButtonEvent *event) override { return m_effect->onButton(event); }
         bool pointerAxis(PointerAxisEvent *event) override { return m_effect->onAxis(event); }
@@ -234,6 +277,9 @@ private:
     QPointer<Window> m_target;
     bool m_forwarding = false;
 
+    // Frame y and height of windows before Meta+Up, for Meta+Down.
+    std::map<Window *, std::pair<qreal, qreal>> m_beforeFillHeight;
+
     // A left-button press on a parked window, held back until we know
     // whether it is a click or a drag.
     struct PendingPress
@@ -261,6 +307,7 @@ private:
         });
         connect(window, &Window::closed, this, [this, window]() {
             m_parked.erase(window);
+            m_beforeFillHeight.erase(window);
         });
     }
 
@@ -329,6 +376,153 @@ private:
         seat->notifyPointerButton(event->nativeButton, PointerButtonState::Released);
         seat->notifyPointerFrame();
         return true;
+    }
+
+    // --- Keyboard: stepping between places ---
+
+    enum class Side { Left, Right };
+    // Where a window is, for Meta+Left/Right. Each side has a parking lot, a
+    // staging area and a half of the middle; Free is anywhere else.
+    enum class Place { ParkedLeft, StagingLeft, HalfLeft, HalfRight, StagingRight, ParkedRight, Free };
+
+    // Scale of a window in staging when put there with the keyboard.
+    static constexpr qreal stagingScale = 0.5;
+
+    Place placeOf(Window *window) const
+    {
+        const RectF screen = window->output()->geometryF();
+        const qreal zoneWidth = screen.width() * zoneFraction;
+        auto it = m_parked.find(window);
+        if (it != m_parked.end() && !it->second.restoring) {
+            const Parked &parked = it->second;
+            const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
+            const bool tiny = parked.shown.width() / parked.original.width() < minScale + 0.02;
+            if (tiny) {
+                return left ? Place::ParkedLeft : Place::ParkedRight;
+            }
+            return left ? Place::StagingLeft : Place::StagingRight;
+        }
+        const RectF frame = window->moveResizeGeometry();
+        auto near = [](qreal a, qreal b) {
+            return std::abs(a - b) < 2.0;
+        };
+        if (near(frame.width(), zoneWidth)) {
+            if (near(frame.x(), screen.x() + zoneWidth)) {
+                return Place::HalfLeft;
+            }
+            if (near(frame.x(), screen.x() + 2 * zoneWidth)) {
+                return Place::HalfRight;
+            }
+        }
+        return Place::Free;
+    }
+
+    // One step towards `side` along: parked L, staging L, half L, half R,
+    // staging R, parked R. A free window goes to the half on that side.
+    void stepSideways(Window *window, Side side)
+    {
+        static constexpr Place order[] = {Place::ParkedLeft, Place::StagingLeft, Place::HalfLeft,
+                                          Place::HalfRight, Place::StagingRight, Place::ParkedRight};
+        const Place from = placeOf(window);
+        Place to;
+        if (from == Place::Free) {
+            to = side == Side::Left ? Place::HalfLeft : Place::HalfRight;
+        } else {
+            const int i = int(std::find(std::begin(order), std::end(order), from) - std::begin(order));
+            const int j = std::clamp(i + (side == Side::Left ? -1 : 1), 0, 5);
+            if (i == j) {
+                return;
+            }
+            to = order[j];
+        }
+        moveTo(window, to);
+    }
+
+    void moveTo(Window *window, Place place)
+    {
+        // KDE's own maximized or tiled state would fight our geometry.
+        if (window->maximizeMode() != MaximizeRestore) {
+            window->maximize(MaximizeRestore);
+        }
+        if (window->quickTileMode() != QuickTileMode(QuickTileFlag::None)) {
+            window->setQuickTileModeAtCurrentPosition(QuickTileFlag::None);
+        }
+        m_beforeFillHeight.erase(window);
+
+        const RectF screen = window->output()->geometryF();
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
+        const qreal zoneWidth = screen.width() * zoneFraction;
+
+        // Its full (unparked) size, and the vertical center it keeps.
+        auto it = m_parked.find(window);
+        const bool parked = it != m_parked.end();
+        const RectF current = window->moveResizeGeometry();
+        const QSizeF size = parked ? it->second.original : QSizeF(current.width(), current.height());
+        const qreal centerY = parked ? it->second.shown.center().y() : current.y() + current.height() / 2;
+        auto topFor = [&](qreal height) {
+            return std::clamp(centerY - height / 2, area.y(), std::max(area.y(), area.y() + area.height() - height));
+        };
+
+        switch (place) {
+        case Place::HalfLeft:
+        case Place::HalfRight: {
+            const qreal height = std::min(size.height(), area.height());
+            const qreal x = screen.x() + (place == Place::HalfLeft ? zoneWidth : 2 * zoneWidth);
+            const RectF target(QPointF(x, topFor(height)), QSizeF(zoneWidth, height));
+            if (parked) {
+                // Leaving a parked state: keep drawing it scaled into the
+                // target until the app has its new size.
+                m_parked[window] = Parked{.shown = target, .original = target.size(), .restoring = true};
+                window->moveResize(target);
+                applyParked(window);
+            } else {
+                window->moveResize(target);
+            }
+            break;
+        }
+        case Place::StagingLeft:
+        case Place::StagingRight:
+        case Place::ParkedLeft:
+        case Place::ParkedRight: {
+            const bool staging = place == Place::StagingLeft || place == Place::StagingRight;
+            const qreal scale = staging ? stagingScale : minScale;
+            const QSizeF drawn = size * scale;
+            // Where the drag rule gives this scale: the outer edge this far in.
+            const qreal depth = (scale - minScale) / (1.0 - minScale) * zoneWidth;
+            const bool left = place == Place::StagingLeft || place == Place::ParkedLeft;
+            const qreal x = left ? screen.x() + depth : screen.x() + screen.width() - depth - drawn.width();
+            park(window, QRectF(QPointF(x, topFor(drawn.height())), drawn), size);
+            break;
+        }
+        case Place::Free:
+            break;
+        }
+    }
+
+    // Meta+Up: fill the screen height, keeping width and x.
+    void fillHeight(Window *window)
+    {
+        if (isParked(window)) {
+            return;
+        }
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
+        const RectF current = window->moveResizeGeometry();
+        if (!m_beforeFillHeight.contains(window)) {
+            m_beforeFillHeight[window] = {current.y(), current.height()};
+        }
+        window->moveResize(RectF(current.x(), area.y(), current.width(), area.height()));
+    }
+
+    // Meta+Down: back to the height before Meta+Up.
+    void undoFillHeight(Window *window)
+    {
+        auto it = m_beforeFillHeight.find(window);
+        if (it == m_beforeFillHeight.end() || isParked(window)) {
+            return;
+        }
+        const RectF current = window->moveResizeGeometry();
+        window->moveResize(RectF(current.x(), it->second.first, current.width(), it->second.second));
+        m_beforeFillHeight.erase(it);
     }
 
     // --- Dragging ---
@@ -426,16 +620,7 @@ private:
                                  .translated(frame.topLeft());
 
         if (m_dragScale < parkBelow) {
-            m_parked[window] = Parked{.shown = drawn, .original = m_dragOriginal};
-            const QSizeF layout = layoutSize(window, drawn.size(), m_dragOriginal);
-            if (layout != QSizeF(frame.width(), frame.height())) {
-                qInfo("edge-shrink: %s: original %.0fx%.0f, app minimum %.0fx%.0f, shown %.0fx%.0f -> resize to %.0fx%.0f",
-                      qPrintable(window->caption()), m_dragOriginal.width(), m_dragOriginal.height(),
-                      window->minSize().width(), window->minSize().height(),
-                      drawn.width(), drawn.height(), layout.width(), layout.height());
-                window->moveResize(RectF(drawn.topLeft(), layout));
-            }
-            applyParked(window);
+            park(window, drawn, m_dragOriginal);
         } else if (m_dragOriginal != QSizeF(frame.width(), frame.height())) {
             // Back to the original size, keeping the grabbed spot under the
             // cursor: the drawing grows around it until the app has resized.
@@ -450,6 +635,23 @@ private:
         } else {
             window->windowItem()->setTransform(QTransform());
         }
+    }
+
+    // Park a window: draw it at `shown`, and really resize the app (see
+    // layoutSize). `original` is its size before it was first parked.
+    void park(Window *window, const QRectF &shown, const QSizeF &original)
+    {
+        m_parked[window] = Parked{.shown = shown, .original = original};
+        const RectF frame = window->frameGeometry();
+        const QSizeF layout = layoutSize(window, shown.size(), original);
+        if (layout != QSizeF(frame.width(), frame.height())) {
+            qInfo("edge-shrink: %s: original %.0fx%.0f, app minimum %.0fx%.0f, shown %.0fx%.0f -> resize to %.0fx%.0f",
+                  qPrintable(window->caption()), original.width(), original.height(),
+                  window->minSize().width(), window->minSize().height(),
+                  shown.width(), shown.height(), layout.width(), layout.height());
+            window->moveResize(RectF(shown.topLeft(), layout));
+        }
+        applyParked(window);
     }
 
     // The size to really resize a parked window to, when it is shown at

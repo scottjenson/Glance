@@ -1,4 +1,4 @@
-// edge-shrink for KWin: windows shrink as they are dragged toward the left or
+// Glance, a KWin effect: windows shrink as they are dragged toward the left or
 // right screen edge, and stay shrunk ("parked") where they are dropped.
 //
 // Dragging: while KWin moves a window interactively (title bar or Meta+drag),
@@ -93,10 +93,10 @@
 
 using namespace KWin;
 
-class EdgeShrink : public Effect
+class Glance : public Effect
 {
 public:
-    EdgeShrink()
+    Glance()
         : m_filter(this)
     {
         input()->installInputEventFilter(&m_filter);
@@ -104,7 +104,7 @@ public:
         for (Window *window : workspace()->windows()) {
             watch(window);
         }
-        connect(workspace(), &Workspace::windowAdded, this, &EdgeShrink::watch);
+        connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
 
         disableQuickTiling();
 
@@ -117,10 +117,10 @@ public:
             }
         });
 
-        qInfo("edge-shrink: effect loaded");
+        qInfo("glance: effect loaded");
     }
 
-    ~EdgeShrink() override
+    ~Glance() override
     {
         input()->uninstallInputEventFilter(&m_filter);
         disconnect(options, nullptr, this, nullptr);
@@ -300,7 +300,7 @@ private:
     class Filter : public InputEventFilter
     {
     public:
-        explicit Filter(EdgeShrink *effect)
+        explicit Filter(Glance *effect)
             : InputEventFilter(InputFilterOrder::ButtonRebind)
             , m_effect(effect)
         {
@@ -311,7 +311,7 @@ private:
         bool pointerAxis(PointerAxisEvent *event) override { return m_effect->onAxis(event); }
 
     private:
-        EdgeShrink *m_effect;
+        Glance *m_effect;
     };
 
     Filter m_filter;
@@ -509,7 +509,7 @@ private:
                                  "Window Quick Tile Top", "Window Quick Tile Bottom"}) {
             QAction *action = workspace()->findChild<QAction *>(QString::fromLatin1(name));
             if (!action) {
-                qWarning("edge-shrink: KWin action \"%s\" not found", name);
+                qWarning("glance: KWin action \"%s\" not found", name);
                 continue;
             }
             if (action->isEnabled()) {
@@ -970,7 +970,7 @@ private:
             const qreal grow = m_dragOriginal.width() / frame.width();
             const QRectF target(cursor - (cursor - frame.topLeft()) * grow, m_dragOriginal);
             m_parked[window] = Parked{.shown = target, .original = m_dragOriginal, .restoring = true};
-            qInfo("edge-shrink: %s: restore to %.0fx%.0f", qPrintable(window->caption()),
+            qInfo("glance: %s: restore to %.0fx%.0f", qPrintable(window->caption()),
                   m_dragOriginal.width(), m_dragOriginal.height());
             window->moveResize(RectF(target.topLeft(), m_dragOriginal));
             applyParked(window);
@@ -987,7 +987,7 @@ private:
         const RectF frame = window->frameGeometry();
         const QSizeF layout = layoutSize(window, shown.size(), original);
         if (layout != QSizeF(frame.width(), frame.height())) {
-            qInfo("edge-shrink: %s: original %.0fx%.0f, app minimum %.0fx%.0f, shown %.0fx%.0f -> resize to %.0fx%.0f",
+            qInfo("glance: %s: original %.0fx%.0f, app minimum %.0fx%.0f, shown %.0fx%.0f -> resize to %.0fx%.0f",
                   qPrintable(window->caption()), original.width(), original.height(),
                   window->minSize().width(), window->minSize().height(),
                   shown.width(), shown.height(), layout.width(), layout.height());
@@ -1345,6 +1345,6 @@ private:
     }
 };
 
-KWIN_EFFECT_FACTORY(EdgeShrink, "metadata.json")
+KWIN_EFFECT_FACTORY(Glance, "metadata.json")
 
 #include "main.moc"

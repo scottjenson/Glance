@@ -1,8 +1,8 @@
-# edge-shrink for KWin (KDE Plasma's compositor): effect.
-# Builds kwin/build/bin/kwin/effects/plugins/edgeshrink.so. It is not installed:
+# Glance for KWin (KDE Plasma's compositor): effect.
+# Builds kwin/build/bin/kwin/effects/plugins/glance.so. It is not installed:
 # a nested KWin loads it from the build folder via QT_PLUGIN_PATH.
 cmake_minimum_required(VERSION 3.20)
-project(edgeshrink-kwin LANGUAGES CXX)
+project(glance LANGUAGES CXX)
 
 # KWin's headers need C++20 or later (KWin itself is built as C++23).
 set(CMAKE_CXX_STANDARD 23)
@@ -18,7 +18,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Quick)
 find_package(KF6CoreAddons REQUIRED)
 find_package(KWin REQUIRED)
 
-kcoreaddons_add_plugin(edgeshrink SOURCES main.cpp INSTALL_NAMESPACE "kwin/effects/plugins")
-target_link_libraries(edgeshrink PRIVATE KWin::kwin)
+kcoreaddons_add_plugin(glance SOURCES main.cpp INSTALL_NAMESPACE "kwin/effects/plugins")
+target_link_libraries(glance PRIVATE KWin::kwin)
 # Let moc see the Q_OBJECT inside KWin's effect factory macro.
-set_property(TARGET edgeshrink APPEND PROPERTY AUTOMOC_MACRO_NAMES "KWIN_EFFECT_FACTORY")
+set_property(TARGET glance APPEND PROPERTY AUTOMOC_MACRO_NAMES "KWIN_EFFECT_FACTORY")

@@ -1,4 +1,4 @@
-# WideMonitorUX: edge-shrink for KDE Plasma (KWin)
+# Glance: a window-management effect for KDE Plasma (KWin)
 
 ## Goal
 A window-management experiment for wide (ultrawide) monitors: as the user
@@ -9,6 +9,13 @@ Mac, then as a Wayfire plugin (now in `wayfire/`, reference only).
 
 **Goal: ship something people can try on KDE Plasma.** The product is the
 KWin effect in `kwin/`.
+
+**Name:** Glance (chosen 2026-09-30: you glance at the windows on the
+sides). Formerly WideMonitorUX (project/repo) and edge-shrink (the effect).
+Renamed in code, scripts and docs; the project folder is being renamed to
+~/Glance by the user; the GitHub repo (still WideMonitorUX) is to be
+renamed in a separate step (`gh repo rename`, then update the clone URL
+in README.md). "Overview" was ruled out: KDE's own Meta+W effect.
 
 ## Design rules (agreed with the user)
 - Screen: the middle half is full size; the left and right quarters are
@@ -66,7 +73,7 @@ KWin effect in `kwin/`.
 ## Environment
 - Fedora 44 KDE (aarch64) in a VMware Fusion VM on an Apple Silicon Mac,
   VMware SVGA3D virtual GPU. The user has VM snapshots to roll back to.
-- User: scottjenson. Project at ~/WideMonitorUX. The user edits in VS Code,
+- User: scottjenson. Project at ~/Glance (was ~/WideMonitorUX). The user edits in VS Code,
   connected into the VM.
 - KWin **6.7.5** (Plasma 6.7). Its source is unpacked at ~/src/kwin-6.7.5
   for checking internals (`dnf download --source kwin`, then
@@ -90,24 +97,26 @@ KWin effect in `kwin/`.
 
 ## Files
 - `kwin/main.cpp`: the effect (only source file). `kwin/metadata.json`:
-  plugin metadata (id `edgeshrink`, from the CMake target name).
-- `kwin/CMakeLists.txt`: builds `kwin/build/bin/kwin/effects/plugins/edgeshrink.so`.
+  plugin metadata (id `glance`, from the CMake target name; shown as
+  "Glance" in Desktop Effects).
+- `kwin/CMakeLists.txt`: builds `kwin/build/bin/kwin/effects/plugins/glance.so`.
   Needs `find_package(ECM <version>)` (else no output folder), Qt
   Widgets/DBus/Quick (KWin's CMake target needs them), C++23, and
   `AUTOMOC_MACRO_NAMES KWIN_EFFECT_FACTORY`. Not installed yet.
 - `kwin/run-nested.sh`: starts a nested KWin (a window in the desktop,
   2982x1090 logical at scale 2, override with WIDTH/HEIGHT) with
   QT_PLUGIN_PATH at the build folder and a Konsole inside. Must be run from
-  Konsole in the VM window (not SSH). Log: `~/WideMonitorUX/kwin.log`,
+  Konsole in the VM window (not SSH). Log: `~/Glance/kwin.log`,
   previous one `kwin.log.1`.
 - `kwin/use-in-session.sh on|off`: loads the effect into the real Plasma
   session from kwin/build (a systemd drop-in,
-  ~/.config/systemd/user/plasma-kwin_wayland.service.d/edge-shrink.conf,
+  ~/.config/systemd/user/plasma-kwin_wayland.service.d/glance.conf (the old
+  edge-shrink.conf is removed by the script),
   setting QT_PLUGIN_PATH for KWin only); takes effect at the next login.
   **Currently on.** The user runs it (auto mode blocks the agent from
   changing what loads at login). After a rebuild: log out and back in.
   In the real session, KWin's log is in the journal:
-  `journalctl --user -b -o cat | grep edge-shrink`.
+  `journalctl --user -b -o cat | grep glance:`.
 - `kwin/nested-firefox.sh`: run inside the nested session; opens
   `test/breakpoints.html` in a separate Firefox (`--no-remote`, own profile),
   since plain `firefox` would open in the desktop's instance.
@@ -118,9 +127,9 @@ KWin effect in `kwin/`.
 ## Build and run
     cmake -S kwin -B kwin/build        # once
     cmake --build kwin/build
-    ~/WideMonitorUX/kwin/run-nested.sh # user runs it, from Konsole in the VM window
+    ~/Glance/kwin/run-nested.sh        # user runs it, from Konsole in the VM window
 
-Success check: log has `edge-shrink: effect loaded`. KWin loads effects at
+Success check: log has `glance: effect loaded`. KWin loads effects at
 startup: restart the nested session after rebuilding. Headless load check
 the agent can run itself:
 `XDG_RUNTIME_DIR=/run/user/1000 QT_PLUGIN_PATH=$PWD/kwin/build/bin
@@ -163,7 +172,7 @@ so nothing jumps while the app catches up with a resize. Real resize via
 ≤ original; else the smallest size keeping the shape that meets both
 minimums, capped at the original (Firefox: 500 px wide). 1x/2x are for
 text quality (drawn at 1/2, bilinear averages exact 2x2 blocks). Logs one
-`edge-shrink:` line per resize. Dropped in the middle: `moveResize` to the
+`glance:` line per resize. Dropped in the middle: `moveResize` to the
 original size (grabbed spot under the cursor), `restoring` until it has it.
 
 **Input to parked windows** (`route`, `reanchor`, `pick`): KWin picks the
@@ -245,10 +254,10 @@ or VM load); one unexplained freeze in the middle zone that didn't recur.
 5. Long term: ask KWin upstream for a way to set a window's input
    transform. Fallback platform if KWin ever fails: a GNOME Shell extension.
 
-## Wayfire prototype (wayfire/, reference only)
+## Wayfire prototype (wayfire/, reference only; keeps its old edge-shrink names)
 Same behaviour, earlier version (cursor-driven 400 px zone). Build:
 `meson setup wayfire/build && meson compile -C wayfire/build`; run
-`wayfire -c ~/WideMonitorUX/wayfire/wayfire-test.ini` from Konsole in the VM
+`wayfire -c ~/Glance/wayfire/wayfire-test.ini` from Konsole in the VM
 window. Needs `wayfire`, `wayfire-devel`, `glm-devel` (installed). It worked
 nested only with KDE at 100% (it can't tell KDE it is 2x). Worth porting
 from it: `smooth_scaler_t`, which halves the texture into offscreen buffers

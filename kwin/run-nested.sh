@@ -1,8 +1,8 @@
 #!/bin/bash
 # Starts a nested KWin (a window inside the current Plasma session) with the
-# edge-shrink effect loaded from kwin/build, and a Konsole inside it.
+# Glance effect loaded from kwin/build, and a Konsole inside it.
 # Run from Konsole in the VM window. Output goes to the terminal and to
-# ~/WideMonitorUX/kwin.log (the previous one is kept as kwin.log.1).
+# ~/Glance/kwin.log (the previous one is kept as kwin.log.1).
 # More windows: run `konsole &` in the inner Konsole; for Firefox, use
 # kwin/nested-firefox.sh.
 cd "$(dirname "$0")"

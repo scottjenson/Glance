@@ -1,7 +1,7 @@
 {
     "KPlugin": {
-        "Name": "Edge Shrink",
-        "Description": "Windows shrink as they are dragged toward the left or right screen edge, and stay shrunk where they are dropped.",
+        "Name": "Glance",
+        "Description": "Windows shrink as they are dragged toward the sides of a wide screen, and stay there, small but usable.",
         "EnabledByDefault": true,
         "Category": "Tools",
         "License": "MIT"

@@ -21,11 +21,11 @@
 //   the pointer and forward the events ourselves.
 //
 // Dragging (step 1 of the port): while KWin moves a window interactively
-// (title bar or Meta+drag), the window is drawn shrunk around the cursor as it
-// nears the left/right screen edge, with the same curve as the Wayfire
-// plugin. Drawing only: on release it goes back to full size. Quick tiling
-// by dragging to the side is turned off while the effect is loaded, since it
-// uses the same edges.
+// (title bar or Meta+drag), the window is drawn shrunk around the cursor once
+// its left or right edge goes into the outer quarter of the screen (the
+// middle half is full size), reaching minScale at the screen edge. Drawing
+// only: on release it goes back to full size. Quick tiling by dragging to the
+// side is turned off while the effect is loaded, since it uses the same edges.
 //
 // Known gaps, fine for this test: server-side decorations (title bars drawn
 // by KWin) of a shrunk window don't get input; touch and tablets aren't
@@ -225,18 +225,17 @@ private:
         return std::clamp(0.0, minShift, maxShift);
     }
 
-    // Window scale for a cursor position: 1 in the middle of the screen,
-    // falling linearly across an edge zone to minScale at the screen edge.
-    static qreal scaleForPosition(qreal x, const RectF &screen)
+    // Scale at which a window, scaled around the cursor, has its edge on one
+    // side at the point of the curve: full size until that edge enters the
+    // edge zone, then falling linearly to minScale at the screen edge.
+    // `cursorToScreenEdge` and `cursorToWindowEdge` are measured towards the
+    // same side, the latter at full size. The drawn edge is at distance
+    // d = cursorToScreenEdge - cursorToWindowEdge * s from the screen edge,
+    // and s = minScale + (1 - minScale) * d / zoneWidth; solved for s:
+    static qreal edgeScale(qreal cursorToScreenEdge, qreal cursorToWindowEdge, qreal zoneWidth)
     {
-        const qreal toLeft = x - screen.x();
-        const qreal toRight = (screen.x() + screen.width()) - x;
-        const qreal distance = std::max(0.0, std::min(toLeft, toRight));
-        const qreal zoneWidth = screen.width() * zoneFraction;
-        if (distance >= zoneWidth) {
-            return 1.0;
-        }
-        return minScale + (1.0 - minScale) * (distance / zoneWidth);
+        const qreal k = (1.0 - minScale) / zoneWidth;
+        return (minScale + k * cursorToScreenEdge) / (1.0 + k * cursorToWindowEdge);
     }
 
     // KWin has moved the dragged window so the grabbed spot is under the
@@ -254,16 +253,12 @@ private:
         const qreal left = frame.x();
         const qreal right = frame.x() + frame.width();
 
-        qreal scale = scaleForPosition(cursor.x(), screen);
-        // Shrink further if needed so that, scaled around the cursor, the
-        // window still fits between the screen edges: its edge then rests
-        // against the screen edge while the grabbed spot stays under the cursor.
-        if (cursor.x() > left) {
-            scale = std::min(scale, (cursor.x() - screen.x()) / (cursor.x() - left));
-        }
-        if (right > cursor.x()) {
-            scale = std::min(scale, (screen.x() + screen.width() - cursor.x()) / (right - cursor.x()));
-        }
+        // Full size while the window stays within the middle of the screen;
+        // shrinks as its left or right edge goes into the edge zone.
+        const qreal zoneWidth = screen.width() * zoneFraction;
+        qreal scale = std::min({1.0,
+                                edgeScale(cursor.x() - screen.x(), cursor.x() - left, zoneWidth),
+                                edgeScale(screen.x() + screen.width() - cursor.x(), right - cursor.x(), zoneWidth)});
         scale = std::max(scale, minScale);
 
         // Fallback when even minScale doesn't fit: slide it back on screen

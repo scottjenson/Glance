@@ -35,7 +35,9 @@ KWin effect in `kwin/`.
 - Build packages (installed): `kwin-devel`, `extra-cmake-modules`,
   `libepoxy-devel` (kwin-devel doesn't pull it in).
 - Display: VMware "Use full resolution for Retina display" is on; the VM
-  screen is 5990x2504 px, KDE at 200% (2995x1252 logical).
+  screen is about 6000x2450 px (it follows the VM window size). KDE scale
+  changes: 200% earlier, **150%** since 2026-09-29 evening (4004x1630
+  logical). Check with `kscreen-doctor -o` (desktop env, see below).
 
 ## Git / GitHub
 - Repo: https://github.com/scottjenson/WideMonitorUX (**public**), branch
@@ -59,6 +61,14 @@ KWin effect in `kwin/`.
   QT_PLUGIN_PATH at the build folder and a Konsole inside. Must be run from
   Konsole in the VM window (not SSH). Log: `~/WideMonitorUX/kwin.log`,
   previous one `kwin.log.1`.
+- `kwin/use-in-session.sh on|off`: loads the effect into the real Plasma
+  session from kwin/build (a systemd drop-in,
+  ~/.config/systemd/user/plasma-kwin_wayland.service.d/edge-shrink.conf,
+  setting QT_PLUGIN_PATH for KWin only); takes effect at the next login.
+  **Currently on.** The user runs it (auto mode blocks the agent from
+  changing what loads at login). After a rebuild: log out and back in.
+  In the real session, KWin's log is in the journal:
+  `journalctl --user -b -o cat | grep edge-shrink`.
 - `kwin/nested-firefox.sh`: run inside the nested session; opens
   `test/breakpoints.html` in a separate Firefox (`--no-remote`, own profile),
   since plain `firefox` would open in the desktop's instance.
@@ -128,14 +138,21 @@ then exact at the pointer: clicks, hover, scrolling, title bar (drag out),
 popups at the cursor. If KWin still picks another window (another frame
 lies above), we point the seat at the right surface with our own
 transformation (`transformFor`) and forward events ourselves; then
-decorations don't respond. Not done during KWin's own moves
+decorations don't respond. KWin doesn't notice that we re-pointed the seat
+(it only calls `seat->notifyPointerEnter` when *its* focus window changes),
+so before leaving events to KWin again, `syncSeatFocus` points the seat back
+at KWin's focus window. Without it, after the pointer passed over a parked
+window's invisible frame area, clicks on the parked window went to the
+desktop with the window's coordinates (desktop rubber band). Not done during KWin's own moves
 (`workspace()->moveResizeWindow()`). Resetting: KWin only recomputes the
 pointer transformation on enter or geometry change.
 
 Unloading resizes parked windows back to their original size.
 
 ## Status (2026-09-29)
-Tested by the user in the nested KWin, all working: shrink while dragging
+Running in the user's real Plasma session (via use-in-session.sh). Konsole
+and Firefox (Wayland, client-side title bar with tabs) shrink, park, take
+input, and drag back out. Earlier, tested in the nested KWin, all working: shrink while dragging
 (edge-driven rule), parking, clicks/selection/scrolling in parked windows,
 dragging out by the title bar, real resize with reflow (Firefox, Konsole),
 restore to original size. Open observations: some jank (possibly the
@@ -143,9 +160,12 @@ re-anchoring on every pointer motion, which moves the frame and repaints;
 or VM load); one unexplained freeze in the middle zone that didn't recur.
 
 ## Next steps
-1. Real Plasma session: load the effect into the user's desktop (a login
-   script setting QT_PLUGIN_PATH, or install to the system plugin folder),
-   after a VM snapshot. Watch performance.
+1. Open design question (asked, not answered): how to grab icon-sized
+   parked windows. At 15% the title bar is tiny, and apps like Firefox fill
+   it with tabs. Proposed: below some size (e.g. 1/3), press-and-drag
+   anywhere on a parked window moves it (click and scroll still go to the
+   app); larger parked windows behave normally. Alternatives: drag anywhere
+   at any parked size; or keep title bar / Meta+drag only.
 2. Polish: re-anchor less often (e.g. on press/scroll, or after enough
    movement); overlapping parked windows; title-bar buttons of parked
    windows; text quality (the Wayfire halving scaler, below; pixel-exact

@@ -485,6 +485,26 @@ private:
         return nullptr;
     }
 
+    // When we forward events ourselves, we point the seat at another surface
+    // than KWin's focus window, and KWin doesn't notice: it only re-points
+    // the seat when its own focus changes. Before leaving events to KWin
+    // again, point the seat back at KWin's focus window, or KWin would
+    // deliver them to whatever surface we last chose (e.g. the desktop).
+    void syncSeatFocus(const QPointF &pos)
+    {
+        auto seat = waylandServer()->seat();
+        Window *focus = input()->pointer()->focus();
+        SurfaceInterface *surface = focus ? focus->surface() : nullptr;
+        if (seat->focusedPointerSurface() == surface) {
+            return;
+        }
+        if (surface) {
+            seat->notifyPointerEnter(surface, pos, focus->inputTransformation());
+        } else {
+            seat->notifyPointerLeave();
+        }
+    }
+
     // Make the pointer event at `pos` reach the window really visible there.
     // Returns whether we must forward it ourselves because KWin's own pick is
     // wrong. With `keep`, a button is held: stay with the current target.
@@ -514,6 +534,7 @@ private:
             // Nothing parked here: KWin knows best.
             m_target = nullptr;
             m_forwarding = false;
+            syncSeatFocus(pos);
             return false;
         }
 
@@ -526,6 +547,7 @@ private:
         m_target = target;
         m_forwarding = target != pointer->hover();
         if (!m_forwarding) {
+            syncSeatFocus(pos);
             return false;
         }
 

@@ -215,9 +215,17 @@ re-anchoring on every pointer motion, which moves the frame and repaints;
 or VM load); one unexplained freeze in the middle zone that didn't recur.
 
 ## Next steps
-1. Mouse accelerators (in discussion 2026-09-30): Meta+drag gestures by
-   direction (up = Meta+Up; left/right: short drag = staging, longer =
-   parking lot).
+1. Mouse accelerators: Meta+drag gestures (built 2026-09-30; see the
+   header comment in main.cpp). While Meta is held during a drag, the
+   window snaps (glides) to the gesture target as a preview; releasing the
+   mouse commits, releasing Meta returns to a normal drag. Sideways walks
+   the ladder parking L, staging L, left half, right half, staging R,
+   parking R, one step per threshold (150 px, then every 250 px). Up/down
+   = Meta+Up/Down. A short diagonal (>= 100 px, under 150 px sideways) =
+   the half on that side, full height if upward. The user felt snapping
+   may be a bit quick; the distances are "pinned" for later tuning.
+   Gesture distance is measured from our own recorded press position:
+   KWin's `interactiveMoveResizeAnchor()` follows the cursor during a move.
 2. Polish: re-anchor less often (e.g. on press/scroll, or after enough
    movement); overlapping parked windows; title-bar buttons of parked
    windows; text quality (the Wayfire halving scaler, below; pixel-exact
@@ -259,6 +267,10 @@ CLAUDE.md as of commit 6f217f6.
   nested screen with `WAYLAND_DISPLAY=wayland-1 wayland-info`. `sudo` needs
   the user's password, so the user runs installs.
 - On the Mac keyboard in the VM: Option = Alt, Command = Meta/Super.
+  VMware Fusion's Mac shortcut mappings turned Command+click into
+  Ctrl+click (Firefox opened new tabs, KDE's Meta+drag did nothing); the
+  user turned that mapping off in Fusion's Keyboard & Mouse settings
+  (2026-09-30). If Meta+click stops working, check there first.
 - Mac→VM clipboard (VMware Tools, `vmtoolsd -n vmusr`) is unreliable and
   adds a trailing NUL byte; keep commands for the user short or put them
   in scripts.

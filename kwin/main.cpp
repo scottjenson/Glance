@@ -45,6 +45,15 @@
 // a window fill the screen height; Meta+Down undoes that. Keyboard moves
 // animate (the drawing glides to the new place while the app resizes).
 //
+// Meta+drag gestures: while Meta is held during a drag, the direction and
+// distance from the press decide a target, and the window snaps there (with
+// a short glide) as a preview: up = Meta+Up, down = Meta+Down; left/right
+// walk the ladder parking L, staging L, left half, right half, staging R,
+// parking R, one step per threshold (a free window's first step is staging
+// on that side); a short diagonal = the half of the middle on that side, at
+// full height if upward (see gestureFor). Releasing the mouse with
+// Meta held commits it; releasing Meta returns to a normal drag.
+//
 // Stacks: the windows in each staging area and parking lot form one column,
 // centered vertically, in the order of their vertical position (see
 // arrangeArea). Whenever a window arrives (keyboard or drop) or leaves
@@ -72,6 +81,7 @@
 #include <QAction>
 #include <QMatrix4x4>
 #include <QPointer>
+#include <QTimer>
 #include <QTransform>
 
 #include <algorithm>
@@ -79,6 +89,7 @@
 #include <chrono>
 #include <cmath>
 #include <map>
+#include <optional>
 
 using namespace KWin;
 
@@ -161,11 +172,17 @@ public:
         for (Window *window : animating) {
             applyParked(window);
         }
+        if (m_dragged && m_dragAnimating) {
+            dragStep(m_dragged);
+        }
         Effect::prePaintScreen(data);
     }
 
     void postPaintScreen() override
     {
+        if (m_dragAnimating) {
+            effects->addRepaintFull();
+        }
         for (const auto &[window, parked] : m_parked) {
             if (parked.animating) {
                 effects->addRepaintFull();
@@ -178,6 +195,15 @@ public:
     // Meta+arrows (see the header comment).
     bool onKey(KeyboardKeyEvent *event)
     {
+        if (m_dragged) {
+            // Meta pressed or released during a drag: switch between gesture
+            // and normal drag now, once KWin has updated its modifier state.
+            QTimer::singleShot(0, this, [this]() {
+                if (m_dragged) {
+                    dragStep(m_dragged);
+                }
+            });
+        }
         if (event->modifiers != Qt::MetaModifier) {
             return false;
         }
@@ -230,6 +256,11 @@ public:
     bool onButton(PointerButtonEvent *event)
     {
         const bool pressed = event->state == PointerButtonState::Pressed;
+        if (pressed) {
+            // Where a drag that may follow started (KWin's own move anchor
+            // follows the cursor, so it can't tell us).
+            m_lastPress = event->position;
+        }
         if (pressed && holdPress(event)) {
             return true;
         }
@@ -285,6 +316,11 @@ private:
 
     Filter m_filter;
 
+    enum class Side { Left, Right };
+    // Where a window is, for Meta+Left/Right. Each side has a parking lot, a
+    // staging area and a half of the middle; Free is anywhere else.
+    enum class Place { ParkedLeft, StagingLeft, HalfLeft, HalfRight, StagingRight, ParkedRight, Free };
+
     // --- Tuning knobs ---
     // Width of the left and right edge zones, where shrinking happens, as a
     // fraction of the screen width: the middle half stays full size.
@@ -325,6 +361,29 @@ private:
     QPointer<Window> m_dragged;
     QSizeF m_dragOriginal;
     qreal m_dragScale = 1.0;
+
+    // A Meta+drag gesture's target: a place, or filling / unfilling height.
+    struct Gesture
+    {
+        int key; // tells targets apart
+        QRectF drawn; // where the window is shown meanwhile
+        std::optional<Place> place = std::nullopt;
+        bool fill = false;
+        bool unfill = false;
+    };
+    // Where the dragged window was when the drag started, where it is drawn
+    // now, the current gesture target, and the glide between them.
+    Place m_dragStartPlace = Place::Free;
+    QPointF m_lastPress;
+    QPointF m_dragPress;
+    QRectF m_dragStartFrame;
+    qreal m_dragStartCenterY = 0;
+    QRectF m_dragDisplayed;
+    std::optional<Gesture> m_dragGesture;
+    int m_dragModeKey = -1;
+    bool m_dragAnimating = false;
+    QRectF m_dragAnimFrom;
+    std::chrono::steady_clock::time_point m_dragAnimStart;
 
     // Where we last pointed the seat, and whether KWin disagreed (so we
     // forward events ourselves).
@@ -460,10 +519,6 @@ private:
         }
     }
 
-    enum class Side { Left, Right };
-    // Where a window is, for Meta+Left/Right. Each side has a parking lot, a
-    // staging area and a half of the middle; Free is anywhere else.
-    enum class Place { ParkedLeft, StagingLeft, HalfLeft, HalfRight, StagingRight, ParkedRight, Free };
 
     // Scale of a window in staging when put there with the keyboard.
     static constexpr qreal stagingScale = 0.5;
@@ -471,6 +526,23 @@ private:
     static constexpr std::chrono::milliseconds animationTime{180};
     // Vertical gap between windows that made room for each other.
     static constexpr qreal arrangeGap = 8.0;
+    // Meta+drag gestures: distance (logical px) from the press for the first
+    // step, then for each further step, and how far off an axis (as tan of
+    // the angle) a drag may go and still count as that direction (30 deg).
+    static constexpr qreal gestureStep1 = 150.0;
+    static constexpr qreal gestureStepEach = 250.0;
+    static constexpr qreal gestureCone = 0.577;
+    // A diagonal drag at least this long (and not yet at gestureStep1
+    // sideways) snaps to the half of the middle on that side.
+    static constexpr qreal gestureDiagonal = 100.0;
+
+    // The places Meta+Left/Right and gestures step along.
+    static constexpr Place placeOrder[] = {Place::ParkedLeft, Place::StagingLeft, Place::HalfLeft,
+                                           Place::HalfRight, Place::StagingRight, Place::ParkedRight};
+    static int placeIndex(Place place)
+    {
+        return int(std::find(std::begin(placeOrder), std::end(placeOrder), place) - std::begin(placeOrder));
+    }
 
     Place placeOf(Window *window) const
     {
@@ -505,19 +577,17 @@ private:
     // staging R, parked R. A free window goes to the half on that side.
     void stepSideways(Window *window, Side side)
     {
-        static constexpr Place order[] = {Place::ParkedLeft, Place::StagingLeft, Place::HalfLeft,
-                                          Place::HalfRight, Place::StagingRight, Place::ParkedRight};
         const Place from = placeOf(window);
         Place to;
         if (from == Place::Free) {
             to = side == Side::Left ? Place::HalfLeft : Place::HalfRight;
         } else {
-            const int i = int(std::find(std::begin(order), std::end(order), from) - std::begin(order));
+            const int i = placeIndex(from);
             const int j = std::clamp(i + (side == Side::Left ? -1 : 1), 0, 5);
             if (i == j) {
                 return;
             }
-            to = order[j];
+            to = placeOrder[j];
         }
         moveTo(window, to);
     }
@@ -533,10 +603,6 @@ private:
         }
         m_beforeFillHeight.erase(window);
 
-        const RectF screen = window->output()->geometryF();
-        const RectF area = workspace()->clientArea(MaximizeArea, window);
-        const qreal zoneWidth = screen.width() * zoneFraction;
-
         // Where it is drawn now: the animation starts there.
         const QRectF from = currentlyDrawn(window);
         const auto closeRanks = leaving(window);
@@ -547,18 +613,27 @@ private:
         const RectF current = window->moveResizeGeometry();
         const QSizeF size = parked ? it->second.original : QSizeF(current.width(), current.height());
         const qreal centerY = parked ? it->second.shown.center().y() : current.y() + current.height() / 2;
+        commitPlace(window, place, size, centerY, from);
+        closeRanks();
+    }
+
+    // Where a window of full size `size`, centered at `centerY`, goes in
+    // `place`: for the halves of the middle its new frame, for staging and
+    // parking lot where it is drawn.
+    QRectF placeRect(Window *window, Place place, const QSizeF &size, qreal centerY) const
+    {
+        const RectF screen = window->output()->geometryF();
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
+        const qreal zoneWidth = screen.width() * zoneFraction;
         auto topFor = [&](qreal height) {
             return std::clamp(centerY - height / 2, area.y(), std::max(area.y(), area.y() + area.height() - height));
         };
-
         switch (place) {
         case Place::HalfLeft:
         case Place::HalfRight: {
             const qreal height = std::min(size.height(), area.height());
             const qreal x = screen.x() + (place == Place::HalfLeft ? zoneWidth : 2 * zoneWidth);
-            const RectF target(QPointF(x, topFor(height)), QSizeF(zoneWidth, height));
-            resizeAnimated(window, target, from);
-            break;
+            return QRectF(QPointF(x, topFor(height)), QSizeF(zoneWidth, height));
         }
         case Place::StagingLeft:
         case Place::StagingRight:
@@ -571,15 +646,34 @@ private:
             const qreal depth = (scale - minScale) / (1.0 - minScale) * zoneWidth;
             const bool left = place == Place::StagingLeft || place == Place::ParkedLeft;
             const qreal x = left ? screen.x() + depth : screen.x() + screen.width() - depth - drawn.width();
-            park(window, QRectF(QPointF(x, topFor(drawn.height())), drawn), size);
-            animate(window, from);
-            arrange(window);
-            break;
+            return QRectF(QPointF(x, topFor(drawn.height())), drawn);
         }
         case Place::Free:
             break;
         }
-        closeRanks();
+        return QRectF();
+    }
+
+    // Put a window in `place` (see placeRect), gliding from `from`.
+    void commitPlace(Window *window, Place place, const QSizeF &size, qreal centerY, const QRectF &from)
+    {
+        const QRectF rect = placeRect(window, place, size, centerY);
+        switch (place) {
+        case Place::HalfLeft:
+        case Place::HalfRight:
+            resizeAnimated(window, RectF(rect.x(), rect.y(), rect.width(), rect.height()), from);
+            break;
+        case Place::StagingLeft:
+        case Place::StagingRight:
+        case Place::ParkedLeft:
+        case Place::ParkedRight:
+            park(window, rect, size);
+            animate(window, from);
+            arrange(window);
+            break;
+        case Place::Free:
+            break;
+        }
     }
 
     // Really resize (and move) a window to `target`, drawing it gliding
@@ -649,27 +743,74 @@ private:
     }
 
     // KWin has moved the dragged window so the grabbed spot is under the
-    // cursor; draw it scaled around the cursor. A parked window being dragged
-    // stops being parked: its frame was re-anchored around the cursor when
-    // it was grabbed, so the drag continues from where it is drawn.
+    // cursor. Draw it scaled around the cursor by the edge rule, or, while
+    // Meta is held and the drag matches a gesture, at the gesture's target;
+    // switching between the two glides. A parked window being dragged stops
+    // being parked: its frame was re-anchored around the cursor when it was
+    // grabbed, so the drag continues from where it is drawn.
     void dragStep(Window *window)
     {
         if (!window->isInteractiveMove() || !window->windowItem()) {
             return;
         }
         const RectF frame = window->frameGeometry();
+        const QPointF cursor = input()->pointer()->pos();
         if (m_dragged != window) {
             // Start of a drag. The scale is relative to the original size,
             // which a parked (resized) window remembers.
             auto it = m_parked.find(window);
+            const bool parked = it != m_parked.end() && !it->second.restoring;
             m_dragOriginal = it != m_parked.end() ? it->second.original : QSizeF(frame.width(), frame.height());
+            m_dragStartPlace = placeOf(window);
+            m_dragPress = m_lastPress;
+            const QPointF moved = cursor - m_dragPress;
+            m_dragStartFrame = QRectF(frame.x() - moved.x(), frame.y() - moved.y(), frame.width(), frame.height());
+            m_dragStartCenterY = parked ? it->second.shown.center().y() : m_dragStartFrame.center().y();
+            m_dragDisplayed = currentlyDrawn(window);
+            m_dragGesture.reset();
+            m_dragModeKey = -1;
+            m_dragAnimating = false;
             const auto closeRanks = leaving(window);
             m_parked.erase(window);
             m_dragged = window;
             closeRanks();
         }
 
-        const QPointF cursor = input()->pointer()->pos();
+        std::optional<Gesture> gesture;
+        if (input()->keyboardModifiers() & Qt::MetaModifier) {
+            gesture = gestureFor(window, cursor - m_dragPress);
+        }
+        const QRectF want = gesture ? gesture->drawn : followRect(window, frame, cursor);
+        const int key = gesture ? gesture->key : -1;
+        if (key != m_dragModeKey) {
+            m_dragModeKey = key;
+            m_dragAnimFrom = m_dragDisplayed;
+            m_dragAnimStart = std::chrono::steady_clock::now();
+            m_dragAnimating = true;
+        }
+        QRectF shown = want;
+        if (m_dragAnimating) {
+            const auto elapsed = std::chrono::steady_clock::now() - m_dragAnimStart;
+            const qreal t = std::clamp(std::chrono::duration<qreal>(elapsed) / animationTime, 0.0, 1.0);
+            if (t >= 1.0) {
+                m_dragAnimating = false;
+            } else {
+                shown = lerpRect(m_dragAnimFrom, want, 1.0 - std::pow(1.0 - t, 3));
+            }
+        }
+        m_dragDisplayed = shown;
+        m_dragGesture = gesture;
+
+        // The item's coordinates start at the frame's top-left corner.
+        QTransform transform;
+        transform.translate(shown.x() - frame.x(), shown.y() - frame.y());
+        transform.scale(shown.width() / frame.width(), shown.height() / frame.height());
+        window->windowItem()->setTransform(transform);
+    }
+
+    // Where the edge rule draws the dragged window: scaled around the cursor.
+    QRectF followRect(Window *window, const RectF &frame, const QPointF &cursor)
+    {
         const RectF screen = window->moveResizeOutput()->geometryF();
         const qreal left = frame.x();
         const qreal right = frame.x() + frame.width();
@@ -691,14 +832,95 @@ private:
         // (the cursor then detaches from the grabbed spot).
         const qreal drawnLeft = cursor.x() + (left - cursor.x()) * scale;
         const qreal shift = shiftOntoScreen(drawnLeft, frame.width() * scale, screen);
+        return QRectF(drawnLeft + shift, cursor.y() + (frame.y() - cursor.y()) * scale,
+                      frame.width() * scale, frame.height() * scale);
+    }
 
-        // The item's coordinates start at the frame's top-left corner.
-        const QPointF anchor = cursor - frame.topLeft();
-        QTransform transform;
-        transform.translate(anchor.x() + shift, anchor.y());
-        transform.scale(scale, scale);
-        transform.translate(-anchor.x(), -anchor.y());
-        window->windowItem()->setTransform(transform);
+    // The gesture target for a Meta+drag that has moved `delta` from the
+    // press, if any. Left/right: from the middle (free or a half), staging on
+    // that side, then (further) its parking lot; from staging or a parking
+    // lot, one or two steps along placeOrder, not past the half of the
+    // middle on that side. Up/down (windows in the middle): fill height /
+    // undo it.
+    std::optional<Gesture> gestureFor(Window *window, const QPointF &delta) const
+    {
+        const qreal ax = std::abs(delta.x());
+        const qreal ay = std::abs(delta.y());
+        const bool middle = m_dragStartPlace == Place::Free || m_dragStartPlace == Place::HalfLeft
+            || m_dragStartPlace == Place::HalfRight;
+        const bool diagonal = ay > ax * gestureCone && ax > ay * gestureCone;
+        if (middle && diagonal && ax < gestureStep1 && std::hypot(ax, ay) >= gestureDiagonal) {
+            // Half of the middle on that side; upward also fills the height.
+            const Place half = delta.x() < 0 ? Place::HalfLeft : Place::HalfRight;
+            QRectF rect = placeRect(window, half, m_dragOriginal, m_dragStartCenterY);
+            const bool up = delta.y() < 0;
+            if (up) {
+                const RectF area = workspace()->clientArea(MaximizeArea, window);
+                rect.setTop(area.y());
+                rect.setHeight(area.height());
+            }
+            return Gesture{.key = int(half) + (up ? 200 : 0), .drawn = rect, .place = half, .fill = up};
+        }
+        // Far enough sideways, staging and parking lot win over up/down.
+        if (ay <= ax * gestureCone || (middle && ax >= gestureStep1)) {
+            if (ax < gestureStep1) {
+                return std::nullopt;
+            }
+            const int steps = 1 + int((ax - gestureStep1) / gestureStepEach);
+            const bool left = delta.x() < 0;
+            // A free window counts as being in the half on that side, so its
+            // first step is staging.
+            Place start = m_dragStartPlace;
+            if (start == Place::Free) {
+                start = left ? Place::HalfLeft : Place::HalfRight;
+            }
+            const int j = std::clamp(placeIndex(start) + (left ? -steps : steps), 0, 5);
+            if (placeOrder[j] == m_dragStartPlace) {
+                return std::nullopt;
+            }
+            const Place to = placeOrder[j];
+            return Gesture{.key = int(to), .drawn = placeRect(window, to, m_dragOriginal, m_dragStartCenterY), .place = to};
+        }
+        if (ax <= ay * gestureCone && middle && ay >= gestureStep1) {
+            const RectF area = workspace()->clientArea(MaximizeArea, window);
+            const QRectF &start = m_dragStartFrame;
+            if (delta.y() < 0) {
+                return Gesture{.key = 100, .drawn = QRectF(start.x(), area.y(), start.width(), area.height()), .fill = true};
+            }
+            auto it = m_beforeFillHeight.find(window);
+            if (it != m_beforeFillHeight.end()) {
+                return Gesture{.key = 101, .drawn = QRectF(start.x(), it->second.first, start.width(), it->second.second), .unfill = true};
+            }
+        }
+        return std::nullopt;
+    }
+
+    // Released with a gesture target: go there, gliding from where it is
+    // shown.
+    void commitGesture(Window *window, const Gesture &gesture, const QRectF &from)
+    {
+        const QRectF &start = m_dragStartFrame;
+        if (gesture.place && gesture.fill) {
+            // A half of the middle at full height.
+            m_beforeFillHeight[window] = {start.y(), start.height()};
+            const QRectF &r = gesture.drawn;
+            resizeAnimated(window, RectF(r.x(), r.y(), r.width(), r.height()), from);
+        } else if (gesture.place) {
+            commitPlace(window, *gesture.place, m_dragOriginal, m_dragStartCenterY, from);
+        } else if (gesture.fill) {
+            const RectF area = workspace()->clientArea(MaximizeArea, window);
+            if (!m_beforeFillHeight.contains(window)) {
+                m_beforeFillHeight[window] = {start.y(), start.height()};
+            }
+            resizeAnimated(window, RectF(start.x(), area.y(), start.width(), area.height()), from);
+        } else if (gesture.unfill) {
+            auto it = m_beforeFillHeight.find(window);
+            if (it != m_beforeFillHeight.end()) {
+                const RectF target(start.x(), it->second.first, start.width(), it->second.second);
+                m_beforeFillHeight.erase(it);
+                resizeAnimated(window, target, from);
+            }
+        }
     }
 
     // Dropped: park it where it is drawn, or restore full size.
@@ -708,7 +930,14 @@ private:
             return;
         }
         m_dragged = nullptr;
+        m_dragAnimating = false;
+        const std::optional<Gesture> gesture = m_dragGesture;
+        m_dragGesture.reset();
         if (!window->windowItem()) {
+            return;
+        }
+        if (gesture) {
+            commitGesture(window, *gesture, m_dragDisplayed);
             return;
         }
 
@@ -806,9 +1035,11 @@ private:
             return parked.shown;
         }
         const qreal t = progress(parked);
-        const qreal e = 1.0 - std::pow(1.0 - t, 3);
-        const QRectF &a = parked.from;
-        const QRectF &b = parked.shown;
+        return lerpRect(parked.from, parked.shown, 1.0 - std::pow(1.0 - t, 3));
+    }
+
+    static QRectF lerpRect(const QRectF &a, const QRectF &b, qreal e)
+    {
         return QRectF(a.x() + (b.x() - a.x()) * e, a.y() + (b.y() - a.y()) * e,
                       a.width() + (b.width() - a.width()) * e, a.height() + (b.height() - a.height()) * e);
     }

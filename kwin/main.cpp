@@ -49,8 +49,8 @@
 // distance from the press decide a target, and the window snaps there (with
 // a short glide) as a preview: up = Meta+Up, down = Meta+Down; left/right
 // walk the ladder parking L, staging L, left half, right half, staging R,
-// parking R, one step per threshold (a free window's first step is staging
-// on that side); a short diagonal = the half of the middle on that side, at
+// parking R, one step per threshold (a free window's first step is the half
+// on that side; see halfMatch for "in a half"); a short diagonal = the half of the middle on that side, at
 // full height if upward (see gestureFor). Releasing the mouse with
 // Meta held commits it; releasing Meta returns to a normal drag.
 //
@@ -520,6 +520,11 @@ private:
     }
 
 
+    // A window counts as being in a half of the middle when its horizontal
+    // extent and the half's share at least this much (intersection over
+    // union), so a slightly moved or resized one still does.
+    static constexpr qreal halfMatch = 0.8;
+
     // Scale of a window in staging when put there with the keyboard.
     static constexpr qreal stagingScale = 0.5;
     // Length of keyboard moves and making-room animations.
@@ -547,7 +552,6 @@ private:
     Place placeOf(Window *window) const
     {
         const RectF screen = window->output()->geometryF();
-        const qreal zoneWidth = screen.width() * zoneFraction;
         auto it = m_parked.find(window);
         if (it != m_parked.end() && !it->second.restoring) {
             const Parked &parked = it->second;
@@ -559,16 +563,25 @@ private:
             return left ? Place::StagingLeft : Place::StagingRight;
         }
         const RectF frame = window->moveResizeGeometry();
-        auto near = [](qreal a, qreal b) {
-            return std::abs(a - b) < 2.0;
+        return placeOfFrame(window, QRectF(frame.x(), frame.y(), frame.width(), frame.height()));
+    }
+
+    // For a window not parked: in a half of the middle (see halfMatch), or
+    // free.
+    Place placeOfFrame(Window *window, const QRectF &frame) const
+    {
+        const RectF screen = window->output()->geometryF();
+        const qreal zoneWidth = screen.width() * zoneFraction;
+        auto share = [&](qreal x) {
+            const qreal inter = std::min(frame.right(), x + zoneWidth) - std::max(frame.left(), x);
+            const qreal uni = std::max(frame.right(), x + zoneWidth) - std::min(frame.left(), x);
+            return std::max(0.0, inter) / uni;
         };
-        if (near(frame.width(), zoneWidth)) {
-            if (near(frame.x(), screen.x() + zoneWidth)) {
-                return Place::HalfLeft;
-            }
-            if (near(frame.x(), screen.x() + 2 * zoneWidth)) {
-                return Place::HalfRight;
-            }
+        if (share(screen.x() + zoneWidth) >= halfMatch) {
+            return Place::HalfLeft;
+        }
+        if (share(screen.x() + 2 * zoneWidth) >= halfMatch) {
+            return Place::HalfRight;
         }
         return Place::Free;
     }
@@ -761,10 +774,10 @@ private:
             auto it = m_parked.find(window);
             const bool parked = it != m_parked.end() && !it->second.restoring;
             m_dragOriginal = it != m_parked.end() ? it->second.original : QSizeF(frame.width(), frame.height());
-            m_dragStartPlace = placeOf(window);
             m_dragPress = m_lastPress;
             const QPointF moved = cursor - m_dragPress;
             m_dragStartFrame = QRectF(frame.x() - moved.x(), frame.y() - moved.y(), frame.width(), frame.height());
+            m_dragStartPlace = parked ? placeOf(window) : placeOfFrame(window, m_dragStartFrame);
             m_dragStartCenterY = parked ? it->second.shown.center().y() : m_dragStartFrame.center().y();
             m_dragDisplayed = currentlyDrawn(window);
             m_dragGesture.reset();
@@ -868,13 +881,14 @@ private:
             }
             const int steps = 1 + int((ax - gestureStep1) / gestureStepEach);
             const bool left = delta.x() < 0;
-            // A free window counts as being in the half on that side, so its
-            // first step is staging.
-            Place start = m_dragStartPlace;
-            if (start == Place::Free) {
-                start = left ? Place::HalfLeft : Place::HalfRight;
+            // A free window's first step is the half on that side.
+            int j;
+            if (m_dragStartPlace == Place::Free) {
+                j = left ? placeIndex(Place::HalfLeft) + 1 - steps : placeIndex(Place::HalfRight) - 1 + steps;
+            } else {
+                j = placeIndex(m_dragStartPlace) + (left ? -steps : steps);
             }
-            const int j = std::clamp(placeIndex(start) + (left ? -steps : steps), 0, 5);
+            j = std::clamp(j, 0, 5);
             if (placeOrder[j] == m_dragStartPlace) {
                 return std::nullopt;
             }

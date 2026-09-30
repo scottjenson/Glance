@@ -220,7 +220,10 @@ or VM load); one unexplained freeze in the middle zone that didn't recur.
    window snaps (glides) to the gesture target as a preview; releasing the
    mouse commits, releasing Meta returns to a normal drag. Sideways walks
    the ladder parking L, staging L, left half, right half, staging R,
-   parking R, one step per threshold (150 px, then every 250 px). Up/down
+   parking R, one step per threshold (150 px, then every 250 px; a free
+   window's first step is the half on that side). "In a half" (keyboard
+   and gestures) = the window's horizontal extent and the half's share
+   >= 80% (IoU, `halfMatch`), so a nudged window counts as in it. Up/down
    = Meta+Up/Down. A short diagonal (>= 100 px, under 150 px sideways) =
    the half on that side, full height if upward. The user felt snapping
    may be a bit quick; the distances are "pinned" for later tuning.

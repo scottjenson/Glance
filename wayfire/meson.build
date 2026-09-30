@@ -17,7 +17,7 @@ move_drag = meson.get_compiler('cpp').find_library(
   'wayfire-move-drag-interface', dirs: libdir, static: true)
 
 # Produces build/libedgeshrink.so
-shared_module('edgeshrink', 'src/edge-shrink.cpp',
+shared_module('edgeshrink', 'edge-shrink.cpp',
   dependencies: [wayfire, move_drag],
   cpp_args: ['-DWLR_USE_UNSTABLE'],
   install: false)

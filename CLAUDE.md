@@ -63,6 +63,16 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
     Quick Tile Left/Right/Top/Bottom" QActions (children of Workspace) are
     disabled while the effect is loaded. `cancelModiferOnlySequence` is
     not exported to plugins.
+- **Selecting, Meta+Alt+arrows** (agreed 2026-09-30; "our one nod to
+  compatibility with KDE": Meta moves, Meta+Alt selects): activates the
+  nearest window in that direction by *drawn* position (centers, KWin's
+  `switchWindow` scoring). KDE's own "Switch Window Left/Right/Up/Down"
+  actions are disabled while loaded (they use real frames, wrong for
+  parked windows); keys passed on, as for Meta+arrows.
+- **Focus ring** (agreed 2026-09-30): the active window gets a thin
+  accent-colored outline (like a dialog's keyboard focus ring), same width
+  on screen at any scale. Dimming inactive windows was rejected: stashed
+  windows are meant to be used, not faded.
 - **Stacks (built 2026-09-29):** each stash and parking area holds its
   windows as one column, centred vertically, ordered by vertical position
   (an arriving window that lands on another goes below it). Arrivals
@@ -214,6 +224,15 @@ music player becomes play/pause), so clicks and scrolling must still work.
 Not for KDE title bars (`pointer->decoration()`), other buttons, or presses
 with modifiers. Larger parked windows (the user expects people to use
 windows at 50-60%) stay normal windows: nothing is taken from their content.
+
+**Focus ring** (`updateRing`): a KWin `OutlinedBorderItem` (exported,
+header installed; what KDE uses for decoration outlines) as a child of the
+active window's `WindowItem`, so it moves/scales/stacks with the window.
+Thickness = `ringWidth` (2 px) / the item's scale; color = the app
+palette's Highlight (KDE accent); radius = `window->borderRadius()`. Items
+don't delete their children and a child must be deleted before its parent,
+so the ring is removed on `Window::closed`. All transform changes go
+through `setDrawTransform`, which keeps the ring width in step.
 
 Unloading resizes parked windows back to their original size.
 

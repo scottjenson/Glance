@@ -31,6 +31,8 @@ Key mechanics:
 - **The stash and parking areas keep their windows in a centered stack**,
   which rearranges itself as windows come and go.
 - **Dragging a window back into main** restores its original size.
+- **The active window has a thin outline** in your accent color, so you can
+  tell which one is selected even when it is small.
 
 ## Accelerators
 
@@ -39,6 +41,8 @@ The Meta key (Super / Windows / Command) is the window system's key:
 - **Meta + Left / Right** steps the active window between the six places:
   parking, stash, and the halves of main, on either side.
 - **Meta + Up** makes it fill the screen height; **Meta + Down** undoes that.
+- **Meta + Alt + arrows** selects the nearest window in that direction (the
+  same keys as in plain KDE), including small windows at the sides.
 - **Meta + drag** does the same with the mouse: drag sideways and the window
   snaps from place to place as you go. Drag up for full height, or
   diagonally for the half of main on that side. Let go of the mouse to keep

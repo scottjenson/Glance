@@ -58,6 +58,13 @@
 // full height if upward (see gestureFor). Releasing the mouse with
 // Meta held commits it; releasing Meta returns to a normal drag.
 //
+// Selecting (Meta+Alt+arrows, KDE's own keys for this): activates the
+// nearest window in that direction, judged by where windows are drawn (KDE's
+// version uses the real frames, which are wrong for parked windows).
+//
+// Focus ring: the active window gets a thin outline in the accent color, as
+// wide on screen at any scale, so it stands out also when tiny.
+//
 // Stacks: the windows in each stash and parking area form one column,
 // centered vertically, in the order of their vertical position (see
 // arrangeArea). Whenever a window arrives (keyboard or drop) or leaves
@@ -76,6 +83,7 @@
 #include <main.h>
 #include <options.h>
 #include <pointer_input.h>
+#include <scene/outlinedborderitem.h>
 #include <scene/windowitem.h>
 #include <wayland/seat.h>
 #include <wayland_server.h>
@@ -83,7 +91,9 @@
 #include <workspace.h>
 
 #include <QAction>
+#include <QGuiApplication>
 #include <QMatrix4x4>
+#include <QPalette>
 #include <QPointer>
 #include <QTimer>
 #include <QTransform>
@@ -109,8 +119,10 @@ public:
             watch(window);
         }
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
+        connect(workspace(), &Workspace::windowActivated, this, &Glance::updateRing);
+        updateRing();
 
-        disableQuickTiling();
+        disableKdeShortcuts();
 
         m_savedTiling = options->electricBorderTiling();
         options->setElectricBorderTiling(false);
@@ -127,6 +139,7 @@ public:
     ~Glance() override
     {
         input()->uninstallInputEventFilter(&m_filter);
+        removeRing();
         disconnect(options, nullptr, this, nullptr);
         options->setElectricBorderTiling(m_savedTiling);
         for (const QPointer<QAction> &action : m_disabledActions) {
@@ -196,7 +209,7 @@ public:
         Effect::postPaintScreen();
     }
 
-    // Meta+arrows (see the header comment).
+    // Meta+arrows and Meta+Alt+arrows (see the header comment).
     bool onKey(KeyboardKeyEvent *event)
     {
         if (m_dragged) {
@@ -208,11 +221,17 @@ public:
                 }
             });
         }
-        if (event->modifiers != Qt::MetaModifier) {
-            return false;
-        }
         const Qt::Key key = event->key;
         if (key != Qt::Key_Left && key != Qt::Key_Right && key != Qt::Key_Up && key != Qt::Key_Down) {
+            return false;
+        }
+        if (event->modifiers == (Qt::MetaModifier | Qt::AltModifier)) {
+            if (event->state != KeyboardKeyState::Released && !workspace()->moveResizeWindow()) {
+                selectToward(key);
+            }
+            return false; // passed on, like Meta+arrows below
+        }
+        if (event->modifiers != Qt::MetaModifier) {
             return false;
         }
         Window *window = workspace()->activeWindow();
@@ -238,7 +257,7 @@ public:
         }
         // Pass the key on: KDE's shortcut system must see it, or it takes
         // releasing Meta as Meta tapped alone and opens the launcher. Its own
-        // quick tiling on these keys is disabled (see disableQuickTiling).
+        // quick tiling on these keys is disabled (see disableKdeShortcuts).
         return false;
     }
 
@@ -408,7 +427,11 @@ private:
     };
     std::optional<PendingPress> m_pending;
 
-    // KDE's quick-tile shortcut actions we disabled, to re-enable on unload.
+    // The focus ring (see updateRing) and the window it outlines.
+    OutlinedBorderItem *m_ring = nullptr;
+    QPointer<Window> m_ringWindow;
+
+    // KDE's shortcut actions we disabled, to re-enable on unload.
     std::vector<QPointer<QAction>> m_disabledActions;
 
     // Quick tiling setting to restore when unloaded.
@@ -424,8 +447,19 @@ private:
         });
         connect(window, &Window::frameGeometryChanged, this, [this, window]() {
             applyParked(window);
+            if (window == m_ringWindow) {
+                updateRing();
+            }
+        });
+        connect(window, &Window::fullScreenChanged, this, [this, window]() {
+            if (window == workspace()->activeWindow()) {
+                updateRing();
+            }
         });
         connect(window, &Window::closed, this, [this, window]() {
+            if (window == m_ringWindow) {
+                removeRing(); // while its parent item still exists
+            }
             const auto closeRanks = leaving(window);
             m_parked.erase(window);
             m_beforeFillHeight.erase(window);
@@ -502,15 +536,18 @@ private:
 
     // --- Keyboard: stepping between places ---
 
-    // Our Meta+arrows replace KDE's quick tiling on the same keys. Rather
-    // than hiding the keys from KDE's shortcut system (which then opens the
-    // launcher when Meta is released), disable KWin's actions for them: the
-    // shortcut still matches, and a disabled action does nothing. Only while
-    // the effect is loaded; nothing is saved to the user's settings.
-    void disableQuickTiling()
+    // Our Meta+arrows replace KDE's quick tiling on the same keys, and our
+    // Meta+Alt+arrows its "Switch to Window" ones. Rather than hiding the
+    // keys from KDE's shortcut system (which then opens the launcher when
+    // Meta is released), disable KWin's actions for them: the shortcut still
+    // matches, and a disabled action does nothing. Only while the effect is
+    // loaded; nothing is saved to the user's settings.
+    void disableKdeShortcuts()
     {
         for (const char *name : {"Window Quick Tile Left", "Window Quick Tile Right",
-                                 "Window Quick Tile Top", "Window Quick Tile Bottom"}) {
+                                 "Window Quick Tile Top", "Window Quick Tile Bottom",
+                                 "Switch Window Left", "Switch Window Right",
+                                 "Switch Window Up", "Switch Window Down"}) {
             QAction *action = workspace()->findChild<QAction *>(QString::fromLatin1(name));
             if (!action) {
                 qWarning("glance: KWin action \"%s\" not found", name);
@@ -528,6 +565,9 @@ private:
     // extent and the half's share at least this much (intersection over
     // union), so a slightly moved or resized one still does.
     static constexpr qreal halfMatch = 0.8;
+
+    // Width of the focus ring on screen (logical pixels).
+    static constexpr qreal ringWidth = 2.0;
 
     // Scale of a window in a stash when put there with the keyboard.
     static constexpr qreal stashScale = 0.5;
@@ -822,7 +862,7 @@ private:
         QTransform transform;
         transform.translate(shown.x() - frame.x(), shown.y() - frame.y());
         transform.scale(shown.width() / frame.width(), shown.height() / frame.height());
-        window->windowItem()->setTransform(transform);
+        setDrawTransform(window, transform);
     }
 
     // Where the edge rule draws the dragged window: scaled around the cursor.
@@ -979,7 +1019,7 @@ private:
             window->moveResize(RectF(target.topLeft(), m_dragOriginal));
             applyParked(window);
         } else {
-            window->windowItem()->setTransform(QTransform());
+            setDrawTransform(window, QTransform());
         }
     }
 
@@ -1163,6 +1203,115 @@ private:
         };
     }
 
+    // --- Selecting and the focus ring ---
+
+    // Meta+Alt+arrow: activate the nearest window in that direction, by
+    // where windows are drawn (centers), scored like KWin's own
+    // Workspace::switchWindow: distance along the arrow, plus how far off
+    // to the side, plus a penalty for being far off to the side but close.
+    void selectToward(Qt::Key key)
+    {
+        Window *active = workspace()->activeWindow();
+        const QPointF from = active ? currentlyDrawn(active).center() : input()->pointer()->pos();
+        Window *best = nullptr;
+        qreal bestScore = 0;
+        for (Window *window : workspace()->stackingOrder()) {
+            // Only windows one can see (not e.g. KDE's hidden Xwayland Video
+            // Bridge, which then can't be activated and blocks the way).
+            if (window == active || window->isDeleted() || !window->wantsTabFocus() || window->skipSwitcher()
+                || window->isMinimized() || !window->isShown() || window->isHiddenByShowDesktop()
+                || !window->readyForPainting() || !window->isOnCurrentDesktop() || !window->isOnCurrentActivity()) {
+                continue;
+            }
+            const QRectF drawn = currentlyDrawn(window);
+            const RectF screen = window->output()->geometryF();
+            if (!drawn.intersects(QRectF(screen.x(), screen.y(), screen.width(), screen.height()))) {
+                continue;
+            }
+            const QPointF to = drawn.center();
+            qreal distance;
+            qreal offset;
+            switch (key) {
+            case Qt::Key_Left:
+                distance = from.x() - to.x();
+                offset = std::abs(to.y() - from.y());
+                break;
+            case Qt::Key_Right:
+                distance = to.x() - from.x();
+                offset = std::abs(to.y() - from.y());
+                break;
+            case Qt::Key_Up:
+                distance = from.y() - to.y();
+                offset = std::abs(to.x() - from.x());
+                break;
+            default:
+                distance = to.y() - from.y();
+                offset = std::abs(to.x() - from.x());
+                break;
+            }
+            if (distance <= 0) {
+                continue;
+            }
+            const qreal score = distance + offset + offset * offset / distance;
+            if (!best || score < bestScore) {
+                best = window;
+                bestScore = score;
+            }
+        }
+        if (best) {
+            workspace()->activateWindow(best);
+        }
+    }
+
+    // Set how a window is drawn (see applyParked, dragStep), keeping its
+    // focus ring the same width on screen.
+    void setDrawTransform(Window *window, const QTransform &transform)
+    {
+        window->windowItem()->setTransform(transform);
+        if (window == m_ringWindow) {
+            updateRing();
+        }
+    }
+
+    // Outline the active window: a line in the accent color just outside its
+    // frame, ringWidth wide on screen whatever the window's scale. It is a
+    // child of the window's scene item (whose coordinates start at the
+    // frame's top-left corner), so it moves, scales and stacks with it.
+    void updateRing()
+    {
+        Window *window = workspace()->activeWindow();
+        const bool wanted = window && !window->isDeleted() && (window->isNormalWindow() || window->isDialog())
+            && !window->isFullScreen() && window->windowItem();
+        if (!wanted || window != m_ringWindow) {
+            removeRing();
+        }
+        if (!wanted) {
+            return;
+        }
+        const RectF frame = window->frameGeometry();
+        const RectF inner(0, 0, frame.width(), frame.height());
+        const qreal scale = window->windowItem()->transform().m11();
+        const QColor color = QGuiApplication::palette().color(QPalette::Active, QPalette::Highlight);
+        const BorderOutline outline(ringWidth / (scale > 0 ? scale : 1.0), color, window->borderRadius());
+        if (m_ring) {
+            m_ring->setInnerRect(inner);
+            m_ring->setOutline(outline);
+            return;
+        }
+        m_ring = new OutlinedBorderItem(inner, outline, window->windowItem());
+        m_ring->setZ(1000); // above the window's surfaces and title bar
+        m_ringWindow = window;
+    }
+
+    // Items don't delete their children, and a child must go before its
+    // parent: called at the latest when the window closes.
+    void removeRing()
+    {
+        delete m_ring;
+        m_ring = nullptr;
+        m_ringWindow = nullptr;
+    }
+
     // --- Drawing and input for managed windows ---
 
     // The scale a managed window's current frame is drawn at.
@@ -1186,7 +1335,7 @@ private:
             && std::abs(frame.height() - parked.original.height()) < 0.5) {
             const QPointF topLeft = parked.shown.topLeft();
             m_parked.erase(it);
-            window->windowItem()->setTransform(QTransform());
+            setDrawTransform(window, QTransform());
             if (frame.topLeft() != topLeft) {
                 window->move(topLeft);
             }
@@ -1198,7 +1347,7 @@ private:
         QTransform transform;
         transform.translate(offset.x(), offset.y());
         transform.scale(scale, scale);
-        window->windowItem()->setTransform(transform);
+        setDrawTransform(window, transform);
     }
 
     // Where a parked window is drawn.

@@ -45,9 +45,11 @@
 // a window fill the screen height; Meta+Down undoes that. Keyboard moves
 // animate (the drawing glides to the new place while the app resizes).
 //
-// Making room: when a window arrives in a staging area or parking lot (by
-// keyboard or by a drop), windows there that overlap push apart vertically,
-// evenly, animated together (see arrange). Crowding comes later.
+// Stacks: the windows in each staging area and parking lot form one column,
+// centered vertically, in the order of their vertical position (see
+// arrangeArea). Whenever a window arrives (keyboard or drop) or leaves
+// (keyboard, dragged out, closed), the column re-forms, animated. Crowding
+// (a column taller than the screen) comes later.
 //
 // Known gaps: touch and tablets aren't handled; in the forwarding case the
 // title bar doesn't respond and the cursor shape may be wrong.
@@ -73,6 +75,7 @@
 #include <QTransform>
 
 #include <algorithm>
+#include <functional>
 #include <chrono>
 #include <cmath>
 #include <map>
@@ -360,8 +363,10 @@ private:
             applyParked(window);
         });
         connect(window, &Window::closed, this, [this, window]() {
+            const auto closeRanks = leaving(window);
             m_parked.erase(window);
             m_beforeFillHeight.erase(window);
+            closeRanks();
         });
     }
 
@@ -534,6 +539,7 @@ private:
 
         // Where it is drawn now: the animation starts there.
         const QRectF from = currentlyDrawn(window);
+        const auto closeRanks = leaving(window);
 
         // Its full (unparked) size, and the vertical center it keeps.
         auto it = m_parked.find(window);
@@ -573,6 +579,7 @@ private:
         case Place::Free:
             break;
         }
+        closeRanks();
     }
 
     // Really resize (and move) a window to `target`, drawing it gliding
@@ -656,8 +663,10 @@ private:
             // which a parked (resized) window remembers.
             auto it = m_parked.find(window);
             m_dragOriginal = it != m_parked.end() ? it->second.original : QSizeF(frame.width(), frame.height());
+            const auto closeRanks = leaving(window);
             m_parked.erase(window);
             m_dragged = window;
+            closeRanks();
         }
 
         const QPointF cursor = input()->pointer()->pos();
@@ -840,97 +849,69 @@ private:
         return (left ? 0 : 2) + (tiny ? 0 : 1);
     }
 
-    // `arriving` has just landed in a staging area or parking lot: push
-    // overlapping windows there apart vertically. Windows are ordered by
-    // their vertical center (the arriving one goes below one it lands on);
-    // overlapping ones form groups spaced by arrangeGap, each group centered
-    // on where its windows were, kept on screen. Moved windows animate.
-    void arrange(Window *arriving)
+    // Re-form the column of windows in one area (see areaOf) on `output`:
+    // stacked with arrangeGap between them, centered vertically in the
+    // usable screen area, ordered by vertical center (an `arriving` window
+    // that lands on another goes below it). Moved windows animate.
+    void arrangeArea(int area, LogicalOutput *output, Window *arriving)
     {
-        if (!isParkedNotRestoring(arriving)) {
-            return;
-        }
-        const int area = areaOf(arriving);
-        const RectF bounds = workspace()->clientArea(MaximizeArea, arriving);
-
+        const RectF bounds = workspace()->clientArea(MaximizeArea, output);
         struct Item
         {
             Window *window;
-            qreal top;
-            qreal height;
             qreal key;
         };
         std::vector<Item> items;
+        qreal total = 0;
         for (const auto &[window, parked] : m_parked) {
-            if (parked.restoring || window->output() != arriving->output() || areaOf(window) != area) {
+            if (parked.restoring || window->output() != output || areaOf(window) != area) {
                 continue;
             }
-            const qreal height = parked.shown.height();
             qreal key = parked.shown.center().y();
             if (window == arriving) {
-                // Landing on another window puts it below that one.
-                key += height / 2;
+                key += parked.shown.height() / 2;
             }
-            items.push_back(Item{window, parked.shown.y(), height, key});
+            items.push_back(Item{window, key});
+            total += parked.shown.height() + (items.size() > 1 ? arrangeGap : 0);
         }
         std::sort(items.begin(), items.end(), [](const Item &a, const Item &b) {
             return a.key < b.key;
         });
 
-        // Groups of consecutive items: first and last index, and top.
-        struct Group
-        {
-            size_t first;
-            size_t last;
-            qreal top;
-        };
-        auto heightOf = [&](const Group &g) {
-            qreal h = 0;
-            for (size_t i = g.first; i <= g.last; ++i) {
-                h += items[i].height + (i > g.first ? arrangeGap : 0);
+        qreal top = std::max(bounds.y(), bounds.y() + (bounds.height() - total) / 2);
+        for (const Item &item : items) {
+            Parked &parked = m_parked.at(item.window);
+            if (std::abs(parked.shown.y() - top) > 0.5) {
+                const QRectF from = displayRect(parked);
+                parked.shown.moveTop(top);
+                animate(item.window, from);
             }
-            return h;
-        };
-        auto place = [&](Group &g) {
-            // Center the group on where its windows want to be.
-            qreal sum = 0;
-            qreal offset = 0;
-            for (size_t i = g.first; i <= g.last; ++i) {
-                sum += items[i].top - offset;
-                offset += items[i].height + arrangeGap;
-            }
-            const qreal n = qreal(g.last - g.first + 1);
-            const qreal h = heightOf(g);
-            g.top = std::clamp(sum / n, bounds.y(), std::max(bounds.y(), bounds.y() + bounds.height() - h));
-        };
-        std::vector<Group> groups;
-        for (size_t i = 0; i < items.size(); ++i) {
-            groups.push_back(Group{i, i, items[i].top});
-            place(groups.back());
-            while (groups.size() > 1) {
-                Group &a = groups[groups.size() - 2];
-                const Group &b = groups.back();
-                if (a.top + heightOf(a) + arrangeGap <= b.top) {
-                    break;
-                }
-                a.last = b.last;
-                groups.pop_back();
-                place(groups.back());
-            }
+            top += parked.shown.height() + arrangeGap;
         }
+    }
 
-        for (const Group &g : groups) {
-            qreal top = g.top;
-            for (size_t i = g.first; i <= g.last; ++i) {
-                Parked &parked = m_parked.at(items[i].window);
-                if (std::abs(parked.shown.y() - top) > 0.5) {
-                    const QRectF from = displayRect(parked);
-                    parked.shown.moveTop(top);
-                    animate(items[i].window, from);
-                }
-                top += items[i].height + arrangeGap;
-            }
+    // `window` has just arrived in a staging area or parking lot.
+    void arrange(Window *window)
+    {
+        if (isParkedNotRestoring(window)) {
+            arrangeArea(areaOf(window), window->output(), window);
         }
+    }
+
+    // Before a parked window leaves its area: returns a function that, once
+    // it has left, re-forms the area it left.
+    std::function<void()> leaving(Window *window)
+    {
+        if (!isParkedNotRestoring(window)) {
+            return [] {};
+        }
+        const int area = areaOf(window);
+        QPointer<LogicalOutput> output = window->output();
+        return [this, area, output] {
+            if (output) {
+                arrangeArea(area, output, nullptr);
+            }
+        };
     }
 
     // --- Drawing and input for managed windows ---

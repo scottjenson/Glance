@@ -44,14 +44,24 @@ KWin effect in `kwin/`.
     → staging R → parked R).
   - Meta+Up: fill the full screen height (keep width and x). Meta+Down:
     undo Meta+Up for now (meaning still open).
-  - Windows move horizontally, keeping their vertical position.
-  - Animation (~150 ms) is a second step.
-- **Phase 2 goal (not now): arrangement.** Once a window lands in staging
-  or the parking lot, re-arrange that area: windows make room for each
-  other vertically (one moves up, one down), centred as a group, so the
-  parking lot holds 10-15 windows and staging 2-3. The user said fixed
-  slots (e.g. "top of staging") would feel visually weird; it should be
-  fluid.
+  - Keyboard moves animate (180 ms, ease-out); the app resizes during the
+    glide. A flash from the app re-laying out remains (noted by the user
+    as spoiling the effect a bit); fix if wanted: snapshot + cross-fade
+    (KWin's CrossFadeEffect, as KDE's maximize animation does).
+  - KDE's Meta-tap launcher: our filter must NOT swallow Meta+arrows (KDE's
+    shortcut system then thinks Meta was tapped alone and opens the
+    launcher). Instead the keys are passed on and KWin's four "Window
+    Quick Tile Left/Right/Top/Bottom" QActions (children of Workspace) are
+    disabled while the effect is loaded. `cancelModiferOnlySequence` is
+    not exported to plugins.
+- **Stacks (built 2026-09-29):** each staging area and parking lot holds its
+  windows as one column, centred vertically, ordered by vertical position
+  (an arriving window that lands on another goes below it). Arrivals
+  (keyboard, drop) and departures (keyboard, dragged out, closed) re-form
+  the column, animated. The user said fixed slots would feel weird; it
+  should be fluid. Still open: crowding (parking lot should hold 10-15,
+  staging 2-3); the user mentioned it may become tiling-like (windows also
+  resized vertically to fit).
 
 ## Environment
 - Fedora 44 KDE (aarch64) in a VMware Fusion VM on an Apple Silicon Mac,
@@ -205,8 +215,9 @@ re-anchoring on every pointer motion, which moves the frame and repaints;
 or VM load); one unexplained freeze in the middle zone that didn't recur.
 
 ## Next steps
-1. Keyboard phase 1 (see Design rules), then its animation; phase 2
-   arrangement later.
+1. Mouse accelerators (in discussion 2026-09-30): Meta+drag gestures by
+   direction (up = Meta+Up; left/right: short drag = staging, longer =
+   parking lot).
 2. Polish: re-anchor less often (e.g. on press/scroll, or after enough
    movement); overlapping parked windows; title-bar buttons of parked
    windows; text quality (the Wayfire halving scaler, below; pixel-exact

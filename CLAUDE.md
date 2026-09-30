@@ -23,6 +23,35 @@ KWin effect in `kwin/`.
   phone-like width so web pages reflow. Dropped in the middle (scale
   ≥ 0.99): back to its original size.
 - Scales are always relative to the window's original size.
+- Regions (user's terms): the **middle** (center half), the **parking lot**
+  (the very edge, icon-sized windows, ~15%), and **staging** (everything in
+  between; its width depends on the monitor).
+- Modifier: Meta (Super; Command on the Mac keyboard) is the window
+  system's key; Ctrl/Shift/Alt belong to apps. The user is fine being
+  aggressive with Meta ("opinionated window manager"), as long as what KDE
+  users rely on keeps working or gets a better replacement. Meta+mouse:
+  Meta+drag stays move; Meta+click, Meta+wheel, Meta+double-click are free
+  for future features. Meta+keyboard shortcuts other than the arrows are
+  left to KDE.
+- **Keyboard, phase 1** (agreed 2026-09-29, may evolve; replaces KDE's
+  quick tiling on Meta+arrows, intercepted by our input filter, active
+  window only):
+  - Meta+Left from a free window in the middle: snap to the left half of
+    the middle (x = middle's left edge, width = half the middle; height and
+    vertical position unchanged; real resize). Again: 50% size in left
+    staging. Again: parked in the left parking lot (15%). Meta+Right
+    mirrors and walks back (parked L → staging L → left half → right half
+    → staging R → parked R).
+  - Meta+Up: fill the full screen height (keep width and x). Meta+Down:
+    undo Meta+Up for now (meaning still open).
+  - Windows move horizontally, keeping their vertical position.
+  - Animation (~150 ms) is a second step.
+- **Phase 2 goal (not now): arrangement.** Once a window lands in staging
+  or the parking lot, re-arrange that area: windows make room for each
+  other vertically (one moves up, one down), centred as a group, so the
+  parking lot holds 10-15 windows and staging 2-3. The user said fixed
+  slots (e.g. "top of staging") would feel visually weird; it should be
+  fluid.
 
 ## Environment
 - Fedora 44 KDE (aarch64) in a VMware Fusion VM on an Apple Silicon Mac,
@@ -176,11 +205,14 @@ re-anchoring on every pointer motion, which moves the frame and repaints;
 or VM load); one unexplained freeze in the middle zone that didn't recur.
 
 ## Next steps
-1. Polish: re-anchor less often (e.g. on press/scroll, or after enough
+1. Keyboard phase 1 (see Design rules), then its animation; phase 2
+   arrangement later.
+2. Polish: re-anchor less often (e.g. on press/scroll, or after enough
    movement); overlapping parked windows; title-bar buttons of parked
    windows; text quality (the Wayfire halving scaler, below; pixel-exact
    placement at 1x/2x); fractional KDE scales.
-3. Packaging: install target, Fedora COPR / Arch AUR, like other
+3. Packaging (not yet: the user wants quality-of-life features first;
+   shipping is the long-term goal): install target, Fedora COPR / Arch AUR, like other
    third-party KWin effects (Better Blur, KDE Rounded Corners). Internal
    API, so it must be rebuilt per Plasma release. `README.md` and MIT
    `LICENSE` (offered, not done). The user hasn't decided whether to hide

@@ -20,6 +20,13 @@
 //   window, so there we point the seat at whatever is really visible under
 //   the pointer and forward the events ourselves.
 //
+// Dragging (step 1 of the port): while KWin moves a window interactively
+// (title bar or Meta+drag), the window is drawn shrunk around the cursor as it
+// nears the left/right screen edge, with the same curve as the Wayfire
+// plugin. Drawing only: on release it goes back to full size. Quick tiling
+// by dragging to the side is turned off while the effect is loaded, since it
+// uses the same edges.
+//
 // Known gaps, fine for this test: server-side decorations (title bars drawn
 // by KWin) of a shrunk window don't get input; touch and tablets aren't
 // handled; the cursor shape in the dead zone may be the shrunk window's.
@@ -28,7 +35,9 @@
 #include <input_event.h>
 #include <effect/effect.h>
 #include <effect/effectwindow.h>
+#include <core/output.h>
 #include <main.h>
+#include <options.h>
 #include <pointer_input.h>
 #include <scene/windowitem.h>
 #include <wayland/seat.h>
@@ -40,6 +49,7 @@
 #include <QPointer>
 #include <QTransform>
 
+#include <algorithm>
 #include <map>
 
 using namespace KWin;
@@ -51,12 +61,32 @@ public:
         : m_filter(this)
     {
         input()->installInputEventFilter(&m_filter);
+
+        for (Window *window : workspace()->windows()) {
+            watch(window);
+        }
+        connect(workspace(), &Workspace::windowAdded, this, &EdgeShrinkTest::watch);
+
+        m_savedTiling = options->electricBorderTiling();
+        options->setElectricBorderTiling(false);
+        // Keep it off if the settings are reloaded.
+        connect(options, &Options::electricBorderTilingChanged, this, []() {
+            if (options->electricBorderTiling()) {
+                options->setElectricBorderTiling(false);
+            }
+        });
+
         qInfo("edge-shrink: test plugin loaded; Alt+Shift+S toggles the active window");
     }
 
     ~EdgeShrinkTest() override
     {
         input()->uninstallInputEventFilter(&m_filter);
+        disconnect(options, nullptr, this, nullptr);
+        options->setElectricBorderTiling(m_savedTiling);
+        if (m_dragged && m_dragged->windowItem()) {
+            m_dragged->windowItem()->setTransform(QTransform());
+        }
         for (auto &[window, scale] : m_shrunk) {
             if (window && window->windowItem()) {
                 window->windowItem()->setTransform(QTransform());
@@ -67,12 +97,12 @@ public:
     // Only take part in painting while something is shrunk.
     bool isActive() const override
     {
-        return !m_shrunk.empty();
+        return !m_shrunk.empty() || m_dragged;
     }
 
     void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
     {
-        if (scaleOf(w->window())) {
+        if (scaleOf(w->window()) || w->window() == m_dragged) {
             data.setTransformed();
         }
         Effect::prePaintWindow(view, w, data);
@@ -154,12 +184,112 @@ private:
 
     Filter m_filter;
 
+    // --- Tuning knobs ---
+    // Width of the left and right edge zones, where shrinking happens, as a
+    // fraction of the screen width: the middle half stays full size.
+    static constexpr qreal zoneFraction = 0.25;
+    // Window size at the very edge of the screen (1.0 = full size).
+    static constexpr qreal minScale = 0.15;
+
+    // The window being dragged while we draw it shrunk.
+    QPointer<Window> m_dragged;
+    // Quick tiling setting to restore when unloaded.
+    bool m_savedTiling = true;
+
     // Shrunk windows and their scale (removed when a window closes).
     std::map<Window *, qreal> m_shrunk;
     // Where we last pointed the seat, and whether KWin disagreed (so we
     // forward events ourselves).
     QPointer<Window> m_target;
     bool m_forwarding = false;
+
+    void watch(Window *window)
+    {
+        connect(window, &Window::interactiveMoveResizeStepped, this, [this, window]() {
+            dragStep(window);
+        });
+        connect(window, &Window::interactiveMoveResizeFinished, this, [this, window]() {
+            dragFinished(window);
+        });
+    }
+
+    // How far a box spanning [x, x + width) must move horizontally to lie
+    // inside `screen`. A box wider than the screen keeps its left edge visible.
+    static qreal shiftOntoScreen(qreal x, qreal width, const RectF &screen)
+    {
+        const qreal minShift = screen.x() - x;
+        const qreal maxShift = (screen.x() + screen.width()) - (x + width);
+        if (minShift > maxShift) {
+            return minShift;
+        }
+        return std::clamp(0.0, minShift, maxShift);
+    }
+
+    // Window scale for a cursor position: 1 in the middle of the screen,
+    // falling linearly across an edge zone to minScale at the screen edge.
+    static qreal scaleForPosition(qreal x, const RectF &screen)
+    {
+        const qreal toLeft = x - screen.x();
+        const qreal toRight = (screen.x() + screen.width()) - x;
+        const qreal distance = std::max(0.0, std::min(toLeft, toRight));
+        const qreal zoneWidth = screen.width() * zoneFraction;
+        if (distance >= zoneWidth) {
+            return 1.0;
+        }
+        return minScale + (1.0 - minScale) * (distance / zoneWidth);
+    }
+
+    // KWin has moved the dragged window so the grabbed spot is under the
+    // cursor; draw it scaled around the cursor.
+    void dragStep(Window *window)
+    {
+        if (!window->isInteractiveMove() || scaleOf(window) || !window->windowItem()) {
+            return;
+        }
+        m_dragged = window;
+
+        const QPointF cursor = input()->pointer()->pos();
+        const RectF screen = window->moveResizeOutput()->geometryF();
+        const RectF frame = window->frameGeometry();
+        const qreal left = frame.x();
+        const qreal right = frame.x() + frame.width();
+
+        qreal scale = scaleForPosition(cursor.x(), screen);
+        // Shrink further if needed so that, scaled around the cursor, the
+        // window still fits between the screen edges: its edge then rests
+        // against the screen edge while the grabbed spot stays under the cursor.
+        if (cursor.x() > left) {
+            scale = std::min(scale, (cursor.x() - screen.x()) / (cursor.x() - left));
+        }
+        if (right > cursor.x()) {
+            scale = std::min(scale, (screen.x() + screen.width() - cursor.x()) / (right - cursor.x()));
+        }
+        scale = std::max(scale, minScale);
+
+        // Fallback when even minScale doesn't fit: slide it back on screen
+        // (the cursor then detaches from the grabbed spot).
+        const qreal drawnLeft = cursor.x() + (left - cursor.x()) * scale;
+        const qreal shift = shiftOntoScreen(drawnLeft, frame.width() * scale, screen);
+
+        // The item's coordinates start at the frame's top-left corner.
+        const QPointF anchor = cursor - frame.topLeft();
+        QTransform transform;
+        transform.translate(anchor.x() + shift, anchor.y());
+        transform.scale(scale, scale);
+        transform.translate(-anchor.x(), -anchor.y());
+        window->windowItem()->setTransform(transform);
+    }
+
+    void dragFinished(Window *window)
+    {
+        if (window != m_dragged) {
+            return;
+        }
+        if (window->windowItem()) {
+            window->windowItem()->setTransform(QTransform());
+        }
+        m_dragged = nullptr;
+    }
 
     std::optional<qreal> scaleOf(Window *window) const
     {

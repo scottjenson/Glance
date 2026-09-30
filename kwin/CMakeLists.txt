@@ -22,5 +22,7 @@ find_package(KWin REQUIRED)
 
 kcoreaddons_add_plugin(glance SOURCES main.cpp INSTALL_NAMESPACE "kwin/effects/plugins")
 target_link_libraries(glance PRIVATE KWin::kwin)
+# KWin headers missing from kwin-devel (see the note in each).
+target_include_directories(glance SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/kwin-private)
 # Let moc see the Q_OBJECT inside KWin's effect factory macro.
 set_property(TARGET glance APPEND PROPERTY AUTOMOC_MACRO_NAMES "KWIN_EFFECT_FACTORY")

@@ -65,6 +65,12 @@
 // Focus ring: the active window gets a thin outline in the accent color, as
 // wide on screen at any scale, so it stands out also when tiny.
 //
+// Clips: text dragged out of an app and dropped on the desktop becomes a
+// window instead of Plasma's sticky-note widget: it is saved as a file in
+// ~/Clips and opened in KWrite where it was dropped, as if its window had
+// been dragged there (held at its center), so it can be moved, parked and
+// selected like any window (see dropToClip).
+//
 // Stacks: the windows in each stash and parking area form one column,
 // centered vertically, in the order of their vertical position (see
 // arrangeArea). Whenever a window arrives (keyboard or drop) or leaves
@@ -85,16 +91,23 @@
 #include <pointer_input.h>
 #include <scene/outlinedborderitem.h>
 #include <scene/windowitem.h>
+#include <utils/filedescriptor.h>
+#include <wayland/abstract_data_source.h>
 #include <wayland/seat.h>
 #include <wayland_server.h>
 #include <window.h>
 #include <workspace.h>
 
 #include <QAction>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QGuiApplication>
 #include <QMatrix4x4>
 #include <QPalette>
 #include <QPointer>
+#include <QProcess>
+#include <QSocketNotifier>
 #include <QTimer>
 #include <QTransform>
 
@@ -104,6 +117,9 @@
 #include <cmath>
 #include <map>
 #include <optional>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 using namespace KWin;
 
@@ -120,6 +136,7 @@ public:
         }
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
         connect(workspace(), &Workspace::windowActivated, this, &Glance::updateRing);
+        connect(workspace(), &Workspace::windowAdded, this, &Glance::placeClip);
         updateRing();
 
         disableKdeShortcuts();
@@ -140,6 +157,10 @@ public:
     {
         input()->uninstallInputEventFilter(&m_filter);
         removeRing();
+        if (m_clip) {
+            m_clip->notifier.reset();
+            close(m_clip->fd);
+        }
         disconnect(options, nullptr, this, nullptr);
         options->setElectricBorderTiling(m_savedTiling);
         for (const QPointer<QAction> &action : m_disabledActions) {
@@ -284,6 +305,9 @@ public:
             // follows the cursor, so it can't tell us).
             m_lastPress = event->position;
         }
+        if (!pressed && dropToClip(event)) {
+            return true;
+        }
         if (pressed && holdPress(event)) {
             return true;
         }
@@ -427,6 +451,22 @@ private:
     };
     std::optional<PendingPress> m_pending;
 
+    // A text drop being turned into a clip (see dropToClip): the text read so
+    // far from the dragging app, and the held-back release.
+    struct ClipRead
+    {
+        int fd;
+        std::unique_ptr<QSocketNotifier> notifier;
+        QByteArray text;
+        QPointF position;
+        quint32 nativeButton;
+        std::chrono::microseconds timestamp;
+    };
+    std::unique_ptr<ClipRead> m_clip;
+    // The KWrite started for the last clip, and where its window goes.
+    qint64 m_clipPid = 0;
+    QPointF m_clipPosition;
+
     // The focus ring (see updateRing) and the window it outlines.
     OutlinedBorderItem *m_ring = nullptr;
     QPointer<Window> m_ringWindow;
@@ -565,6 +605,11 @@ private:
     // extent and the half's share at least this much (intersection over
     // union), so a slightly moved or resized one still does.
     static constexpr qreal halfMatch = 0.8;
+
+    // Where clips are saved, relative to the home folder.
+    static constexpr const char *clipsFolder = "Clips";
+    // How long to wait for a dragging app to hand over its text.
+    static constexpr std::chrono::milliseconds clipTimeout{2000};
 
     // Width of the focus ring on screen (logical pixels).
     static constexpr qreal ringWidth = 2.0;
@@ -1201,6 +1246,165 @@ private:
                 arrangeArea(area, output, nullptr);
             }
         };
+    }
+
+    // --- Clips: text dropped on the desktop ---
+
+    // A text drag released over the desktop: rather than letting Plasma
+    // make a sticky-note widget of it, ask the dragging app for the text and
+    // hold the release back. Once the text is in (finishClip), the drag is
+    // cancelled, so nothing is dropped anywhere, and the release passed on.
+    // Returns whether the release was taken. Dragged files and links (they
+    // come with text/uri-list) are left to Plasma.
+    bool dropToClip(PointerButtonEvent *event)
+    {
+        auto seat = waylandServer()->seat();
+        if (m_clip || event->button != Qt::LeftButton || !seat->isDragPointer() || !seat->dragSource()) {
+            return false;
+        }
+        Window *under = pick(event->position);
+        if (under && !under->isDesktop()) {
+            return false;
+        }
+        const QStringList types = seat->dragSource()->mimeTypes();
+        if (types.contains(QStringLiteral("text/uri-list"))) {
+            return false;
+        }
+        QString mimeType;
+        for (const char *type : {"text/plain;charset=utf-8", "text/plain", "UTF8_STRING"}) {
+            if (types.contains(QLatin1String(type))) {
+                mimeType = QLatin1String(type);
+                break;
+            }
+        }
+        if (mimeType.isEmpty()) {
+            return false;
+        }
+        int fds[2];
+        if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) {
+            return false;
+        }
+        // The app writes into fds[1] (our copy is closed once sent) until
+        // it closes it; we read fds[0] as data arrives.
+        seat->dragSource()->requestData(mimeType, FileDescriptor(fds[1]));
+        m_clip = std::make_unique<ClipRead>(ClipRead{.fd = fds[0],
+                                                     .notifier = std::make_unique<QSocketNotifier>(fds[0], QSocketNotifier::Read),
+                                                     .text = {},
+                                                     .position = event->position,
+                                                     .nativeButton = event->nativeButton,
+                                                     .timestamp = event->timestamp});
+        connect(m_clip->notifier.get(), &QSocketNotifier::activated, this, &Glance::readClip);
+        QTimer::singleShot(clipTimeout, this, [this, fd = fds[0]]() {
+            if (m_clip && m_clip->fd == fd) {
+                qWarning("glance: clip: the app took too long to hand over the text");
+                finishClip();
+            }
+        });
+        return true;
+    }
+
+    void readClip()
+    {
+        char buffer[4096];
+        while (m_clip) {
+            const ssize_t n = read(m_clip->fd, buffer, sizeof(buffer));
+            if (n > 0) {
+                m_clip->text.append(buffer, n);
+            } else if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
+                return; // more to come
+            } else {
+                finishClip(); // end of data, or an error
+            }
+        }
+    }
+
+    // All text read (or given up): end the drag, pass the release on, and
+    // save and open the clip.
+    void finishClip()
+    {
+        const std::unique_ptr<ClipRead> clip = std::move(m_clip);
+        // We may be inside the notifier's own signal: delete it later.
+        clip->notifier->setEnabled(false);
+        clip->notifier.release()->deleteLater();
+        close(clip->fd);
+
+        auto seat = waylandServer()->seat();
+        seat->cancelDrag();
+        seat->setTimestamp(clip->timestamp);
+        seat->notifyPointerButton(clip->nativeButton, PointerButtonState::Released);
+        seat->notifyPointerFrame();
+
+        if (clip->text.trimmed().isEmpty()) {
+            qWarning("glance: clip: no text received");
+            return;
+        }
+        const QDir dir(QDir::home().filePath(QLatin1String(clipsFolder)));
+        if (!dir.mkpath(QStringLiteral("."))) {
+            qWarning("glance: clip: can't create %s", qPrintable(dir.path()));
+            return;
+        }
+        const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
+        QString path = dir.filePath(stamp + QStringLiteral(".txt"));
+        for (int i = 2; QFile::exists(path); ++i) {
+            path = dir.filePath(QStringLiteral("%1 (%2).txt").arg(stamp).arg(i));
+        }
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(clip->text) != clip->text.size()) {
+            qWarning("glance: clip: can't write %s", qPrintable(path));
+            return;
+        }
+        file.close();
+
+        // KWin's own environment for the apps it starts, without the plugin
+        // path that loads this effect from the build folder.
+        QProcessEnvironment env = kwinApp()->processStartupEnvironment();
+        env.remove(QStringLiteral("QT_PLUGIN_PATH"));
+        QProcess process;
+        process.setProgram(QStringLiteral("kwrite"));
+        process.setArguments({path});
+        process.setProcessEnvironment(env);
+        qint64 pid = 0;
+        if (!process.startDetached(&pid)) {
+            qWarning("glance: clip: can't start kwrite");
+            return;
+        }
+        m_clipPid = pid;
+        m_clipPosition = clip->position;
+        qInfo("glance: clip: %lld bytes -> %s", qlonglong(clip->text.size()), qPrintable(path));
+    }
+
+    // The clip's KWrite window appeared: put it where the text was dropped,
+    // as if it had been dragged there held at its center and dropped: full
+    // size in main, shrunk by the edge rule (see edgeScale) and parked if an
+    // edge went into an edge zone.
+    void placeClip(Window *window)
+    {
+        if (!m_clipPid || window->pid() != m_clipPid || !window->isNormalWindow() || !window->windowItem()) {
+            return;
+        }
+        m_clipPid = 0;
+        const QPointF pos = m_clipPosition;
+        const RectF screen = window->output()->geometryF();
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
+        const RectF frame = window->moveResizeGeometry();
+        const QSizeF size(frame.width(), frame.height());
+        const qreal zoneWidth = screen.width() * zoneFraction;
+        const qreal scale = std::max(minScale, std::min({1.0,
+                                                         edgeScale(pos.x() - screen.x(), size.width() / 2, zoneWidth),
+                                                         edgeScale(screen.x() + screen.width() - pos.x(), size.width() / 2, zoneWidth)}));
+        const QSizeF drawn = size * scale;
+        const qreal left = pos.x() - drawn.width() / 2;
+        const qreal x = left + shiftOntoScreen(left, drawn.width(), screen);
+        const qreal y = std::clamp(pos.y() - drawn.height() / 2, area.y(), std::max(area.y(), area.y() + area.height() - drawn.height()));
+        if (scale < parkBelow) {
+            const QRectF from = currentlyDrawn(window);
+            park(window, QRectF(QPointF(x, y), drawn), size);
+            animate(window, from);
+            arrange(window);
+        } else {
+            window->move(QPointF(x, y));
+        }
+        workspace()->activateWindow(window);
     }
 
     // --- Selecting and the focus ring ---

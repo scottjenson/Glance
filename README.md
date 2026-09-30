@@ -31,6 +31,9 @@ Key mechanics:
 - **The stash and parking areas keep their windows in a centered stack**,
   which rearranges itself as windows come and go.
 - **Dragging a window back into main** restores its original size.
+- **Text dropped on the desktop becomes a window:** drag text out of an app
+  onto empty desktop, and it is saved as a file in `~/Clips` and opened in
+  KWrite right there, so you can keep it at the side like any window.
 - **The active window has a thin outline** in your accent color, so you can
   tell which one is selected even when it is small.
 

@@ -30,6 +30,14 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   phone-like width so web pages reflow. Dropped in main (scale
   ≥ 0.99): back to its original size.
 - Scales are always relative to the window's original size.
+- **Respect mouse drags** (user's principle, 2026-09-30): a plain mouse
+  drop (a window, or a clip dropped on the desktop) should land where and
+  as large as the user put it, changed as little as possible. Snapping to
+  places is for the keyboard (Meta+arrows) and Meta+drag gestures. Known
+  tension: the stacks rule below re-forms a column when a window is
+  dropped into a stash or parking area, which moves the dropped window;
+  the user knows this isn't a perfect rule. Prefer the least movement
+  when designing crowding.
 - Regions (user's terms, settled 2026-09-30; use them everywhere: docs,
   comments, identifiers): **main** (center half), **stash** (everything
   between main and parking; its width depends on the monitor) and
@@ -119,6 +127,12 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   kwin/build` installs it (`kcoreaddons_add_plugin` with
   `INSTALL_NAMESPACE`; README's install steps); not installed on this VM,
   which loads it from the build folder instead.
+- `kwin/kwin-private/`: KWin headers that Fedora's kwin-devel doesn't
+  install but that we need (`wayland/abstract_data_source.h`, copied from
+  6.7.5; libkwin exports the class). Keep in step with the installed KWin.
+- `kwin/setup-kwrite.sh [size] [font]`: sets KWrite's editor font
+  (~/.config/kwriterc, "KTextEditor Renderer"/"Text Font"; default Noto
+  Sans Mono 16) for clips; run once on this VM (2026-09-30).
 - `kwin/run-nested.sh`: starts a nested KWin (a window in the desktop,
   2982x1090 logical at scale 2, override with WIDTH/HEIGHT) with
   QT_PLUGIN_PATH at the build folder and a Konsole inside. Must be run from
@@ -233,6 +247,20 @@ palette's Highlight (KDE accent); radius = `window->borderRadius()`. Items
 don't delete their children and a child must be deleted before its parent,
 so the ring is removed on `Window::closed`. All transform changes go
 through `setDrawTransform`, which keeps the ring width in step.
+
+**Clips** (`dropToClip`, `readClip`, `finishClip`, `placeClip`; built
+2026-09-30, the start of "erase the lines between windows, files and the
+clipboard"): a text drag released over the desktop (or nothing) would
+become a Plasma sticky-note widget, which is not a window. Our filter runs
+before KWin's DragAndDrop filter: it requests the text from the drag
+source into a pipe (`AbstractDataSource::requestData`), holds the release
+back, and when the data is in (or after `clipTimeout`) cancels the drag,
+passes the release on, saves the text to `~/Clips/<date time>.txt` and
+starts `kwrite <file>` with KWin's startup environment minus
+QT_PLUGIN_PATH. The window whose pid matches is placed as if dragged there
+held at its center and dropped (edge rule, parked if shrunk). Drags with
+`text/uri-list` (files, links) and drops on windows are left alone.
+Future: images, other kinds of clipboard content.
 
 Unloading resizes parked windows back to their original size.
 

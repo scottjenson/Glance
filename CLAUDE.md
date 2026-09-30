@@ -8,7 +8,8 @@ peripheral areas of the screen. Prototyped first in HTML/JavaScript on a
 Mac, then as a Wayfire plugin (now in `wayfire/`, reference only).
 
 **Goal: ship something people can try on KDE Plasma.** The product is the
-KWin effect in `kwin/`.
+KWin effect in `kwin/`. Target: desktops with ultrawide monitors, not
+laptops (don't suggest testing on a laptop).
 
 **Name:** Glance (chosen 2026-09-30: you glance at the windows on the
 sides). Formerly WideMonitorUX (project/repo) and edge-shrink (the effect).
@@ -254,7 +255,11 @@ or VM load); one unexplained freeze in main that didn't recur.
    install steps) is done; an MIT `LICENSE` file is not (metadata.json
    already says MIT). The user hasn't decided whether to hide
    their email in commits (GitHub noreply).
-4. Ideas (not agreed): live resizing during the drag; fade icon-sized
+4. Ideas (not agreed): trackpad gestures (discussed 2026-09-30, skipped
+   for now; KWin's input filters get swipe/pinch/hold events, KDE uses 3-
+   and 4-finger swipes itself; VMware Fusion only exposes a virtual mouse,
+   so testing would need a USB Magic Trackpad passed through with
+   `usb.generic.allowHID = "TRUE"`); live resizing during the drag; fade icon-sized
    windows or cap them at an icon size; top/bottom edges; config options;
    multiple monitors (the on-screen fit blocks dragging to another one).
 5. Long term: ask KWin upstream for a way to set a window's input

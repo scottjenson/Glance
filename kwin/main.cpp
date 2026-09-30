@@ -67,6 +67,7 @@
 #include <window.h>
 #include <workspace.h>
 
+#include <QAction>
 #include <QMatrix4x4>
 #include <QPointer>
 #include <QTransform>
@@ -91,6 +92,8 @@ public:
         }
         connect(workspace(), &Workspace::windowAdded, this, &EdgeShrink::watch);
 
+        disableQuickTiling();
+
         m_savedTiling = options->electricBorderTiling();
         options->setElectricBorderTiling(false);
         // Keep it off if the settings are reloaded.
@@ -108,6 +111,11 @@ public:
         input()->uninstallInputEventFilter(&m_filter);
         disconnect(options, nullptr, this, nullptr);
         options->setElectricBorderTiling(m_savedTiling);
+        for (const QPointer<QAction> &action : m_disabledActions) {
+            if (action) {
+                action->setEnabled(true);
+            }
+        }
         if (m_dragged && m_dragged->windowItem()) {
             m_dragged->windowItem()->setTransform(QTransform());
         }
@@ -164,8 +172,7 @@ public:
         Effect::postPaintScreen();
     }
 
-    // Meta+arrows (see the header comment). Keys we act on are not passed
-    // on, so KDE's own quick tiling on them doesn't run.
+    // Meta+arrows (see the header comment).
     bool onKey(KeyboardKeyEvent *event)
     {
         if (event->modifiers != Qt::MetaModifier) {
@@ -196,7 +203,10 @@ public:
                 break;
             }
         }
-        return true;
+        // Pass the key on: KDE's shortcut system must see it, or it takes
+        // releasing Meta as Meta tapped alone and opens the launcher. Its own
+        // quick tiling on these keys is disabled (see disableQuickTiling).
+        return false;
     }
 
     bool onMotion(PointerMotionEvent *event)
@@ -332,6 +342,9 @@ private:
     };
     std::optional<PendingPress> m_pending;
 
+    // KDE's quick-tile shortcut actions we disabled, to re-enable on unload.
+    std::vector<QPointer<QAction>> m_disabledActions;
+
     // Quick tiling setting to restore when unloaded.
     bool m_savedTiling = true;
 
@@ -420,6 +433,27 @@ private:
     }
 
     // --- Keyboard: stepping between places ---
+
+    // Our Meta+arrows replace KDE's quick tiling on the same keys. Rather
+    // than hiding the keys from KDE's shortcut system (which then opens the
+    // launcher when Meta is released), disable KWin's actions for them: the
+    // shortcut still matches, and a disabled action does nothing. Only while
+    // the effect is loaded; nothing is saved to the user's settings.
+    void disableQuickTiling()
+    {
+        for (const char *name : {"Window Quick Tile Left", "Window Quick Tile Right",
+                                 "Window Quick Tile Top", "Window Quick Tile Bottom"}) {
+            QAction *action = workspace()->findChild<QAction *>(QString::fromLatin1(name));
+            if (!action) {
+                qWarning("edge-shrink: KWin action \"%s\" not found", name);
+                continue;
+            }
+            if (action->isEnabled()) {
+                action->setEnabled(false);
+                m_disabledActions.push_back(action);
+            }
+        }
+    }
 
     enum class Side { Left, Right };
     // Where a window is, for Meta+Left/Right. Each side has a parking lot, a

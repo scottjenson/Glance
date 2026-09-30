@@ -42,13 +42,19 @@
 // of the middle, right half of the middle, right staging and right parking
 // lot; a free window in the middle first snaps to the half on that side.
 // Windows move horizontally and keep their vertical position. Meta+Up makes
-// a window fill the screen height; Meta+Down undoes that.
+// a window fill the screen height; Meta+Down undoes that. Keyboard moves
+// animate (the drawing glides to the new place while the app resizes).
+//
+// Making room: when a window arrives in a staging area or parking lot (by
+// keyboard or by a drop), windows there that overlap push apart vertically,
+// evenly, animated together (see arrange). Crowding comes later.
 //
 // Known gaps: touch and tablets aren't handled; in the forwarding case the
 // title bar doesn't respond and the cursor shape may be wrong.
 
 #include <core/output.h>
 #include <effect/effect.h>
+#include <effect/effecthandler.h>
 #include <effect/effectwindow.h>
 #include <input.h>
 #include <input_event.h>
@@ -66,6 +72,7 @@
 #include <QTransform>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <map>
 
@@ -125,6 +132,36 @@ public:
             data.setTransformed();
         }
         Effect::prePaintWindow(view, w, data);
+    }
+
+    // Advance animations: each frame, redraw animating windows at their
+    // current place; finished ones settle.
+    void prePaintScreen(ScreenPrePaintData &data) override
+    {
+        std::vector<Window *> animating;
+        for (auto &[window, parked] : m_parked) {
+            if (parked.animating) {
+                if (progress(parked) >= 1.0) {
+                    parked.animating = false;
+                }
+                animating.push_back(window);
+            }
+        }
+        for (Window *window : animating) {
+            applyParked(window);
+        }
+        Effect::prePaintScreen(data);
+    }
+
+    void postPaintScreen() override
+    {
+        for (const auto &[window, parked] : m_parked) {
+            if (parked.animating) {
+                effects->addRepaintFull();
+                break;
+            }
+        }
+        Effect::postPaintScreen();
     }
 
     // Meta+arrows (see the header comment). Keys we act on are not passed
@@ -263,6 +300,10 @@ private:
         QSizeF original;
         // Being resized back to `original`; done once it has that size.
         bool restoring = false;
+        // Animating from `from` to `shown` since `start`.
+        bool animating = false;
+        QRectF from = {};
+        std::chrono::steady_clock::time_point start = {};
     };
     std::map<Window *, Parked> m_parked;
 
@@ -387,6 +428,10 @@ private:
 
     // Scale of a window in staging when put there with the keyboard.
     static constexpr qreal stagingScale = 0.5;
+    // Length of keyboard moves and making-room animations.
+    static constexpr std::chrono::milliseconds animationTime{180};
+    // Vertical gap between windows that made room for each other.
+    static constexpr qreal arrangeGap = 8.0;
 
     Place placeOf(Window *window) const
     {
@@ -453,9 +498,12 @@ private:
         const RectF area = workspace()->clientArea(MaximizeArea, window);
         const qreal zoneWidth = screen.width() * zoneFraction;
 
+        // Where it is drawn now: the animation starts there.
+        const QRectF from = currentlyDrawn(window);
+
         // Its full (unparked) size, and the vertical center it keeps.
         auto it = m_parked.find(window);
-        const bool parked = it != m_parked.end();
+        const bool parked = it != m_parked.end() && !it->second.restoring;
         const RectF current = window->moveResizeGeometry();
         const QSizeF size = parked ? it->second.original : QSizeF(current.width(), current.height());
         const qreal centerY = parked ? it->second.shown.center().y() : current.y() + current.height() / 2;
@@ -469,15 +517,7 @@ private:
             const qreal height = std::min(size.height(), area.height());
             const qreal x = screen.x() + (place == Place::HalfLeft ? zoneWidth : 2 * zoneWidth);
             const RectF target(QPointF(x, topFor(height)), QSizeF(zoneWidth, height));
-            if (parked) {
-                // Leaving a parked state: keep drawing it scaled into the
-                // target until the app has its new size.
-                m_parked[window] = Parked{.shown = target, .original = target.size(), .restoring = true};
-                window->moveResize(target);
-                applyParked(window);
-            } else {
-                window->moveResize(target);
-            }
+            resizeAnimated(window, target, from);
             break;
         }
         case Place::StagingLeft:
@@ -492,6 +532,8 @@ private:
             const bool left = place == Place::StagingLeft || place == Place::ParkedLeft;
             const qreal x = left ? screen.x() + depth : screen.x() + screen.width() - depth - drawn.width();
             park(window, QRectF(QPointF(x, topFor(drawn.height())), drawn), size);
+            animate(window, from);
+            arrange(window);
             break;
         }
         case Place::Free:
@@ -499,10 +541,22 @@ private:
         }
     }
 
+    // Really resize (and move) a window to `target`, drawing it gliding
+    // there from `from`: until the app has its new size and the animation is
+    // over, it is drawn scaled (the "restoring" state).
+    void resizeAnimated(Window *window, const RectF &target, const QRectF &from)
+    {
+        m_parked[window] = Parked{.shown = QRectF(target.x(), target.y(), target.width(), target.height()),
+                                  .original = QSizeF(target.width(), target.height()),
+                                  .restoring = true};
+        window->moveResize(target);
+        animate(window, from);
+    }
+
     // Meta+Up: fill the screen height, keeping width and x.
     void fillHeight(Window *window)
     {
-        if (isParked(window)) {
+        if (isParkedNotRestoring(window)) {
             return;
         }
         const RectF area = workspace()->clientArea(MaximizeArea, window);
@@ -510,19 +564,20 @@ private:
         if (!m_beforeFillHeight.contains(window)) {
             m_beforeFillHeight[window] = {current.y(), current.height()};
         }
-        window->moveResize(RectF(current.x(), area.y(), current.width(), area.height()));
+        resizeAnimated(window, RectF(current.x(), area.y(), current.width(), area.height()), currentlyDrawn(window));
     }
 
     // Meta+Down: back to the height before Meta+Up.
     void undoFillHeight(Window *window)
     {
         auto it = m_beforeFillHeight.find(window);
-        if (it == m_beforeFillHeight.end() || isParked(window)) {
+        if (it == m_beforeFillHeight.end() || isParkedNotRestoring(window)) {
             return;
         }
         const RectF current = window->moveResizeGeometry();
-        window->moveResize(RectF(current.x(), it->second.first, current.width(), it->second.second));
+        const RectF target(current.x(), it->second.first, current.width(), it->second.second);
         m_beforeFillHeight.erase(it);
+        resizeAnimated(window, target, currentlyDrawn(window));
     }
 
     // --- Dragging ---
@@ -621,6 +676,7 @@ private:
 
         if (m_dragScale < parkBelow) {
             park(window, drawn, m_dragOriginal);
+            arrange(window);
         } else if (m_dragOriginal != QSizeF(frame.width(), frame.height())) {
             // Back to the original size, keeping the grabbed spot under the
             // cursor: the drawing grows around it until the app has resized.
@@ -685,10 +741,170 @@ private:
         return m_parked.contains(window);
     }
 
-    // The scale a parked window's current frame is drawn at.
+    bool isParkedNotRestoring(Window *window) const
+    {
+        auto it = m_parked.find(window);
+        return it != m_parked.end() && !it->second.restoring;
+    }
+
+    // --- Animation ---
+
+    static qreal progress(const Parked &parked)
+    {
+        const auto elapsed = std::chrono::steady_clock::now() - parked.start;
+        return std::clamp(std::chrono::duration<qreal>(elapsed) / animationTime, 0.0, 1.0);
+    }
+
+    // Where a managed window's frame is to be drawn right now: `shown`, or
+    // on the way there (ease-out).
+    static QRectF displayRect(const Parked &parked)
+    {
+        if (!parked.animating) {
+            return parked.shown;
+        }
+        const qreal t = progress(parked);
+        const qreal e = 1.0 - std::pow(1.0 - t, 3);
+        const QRectF &a = parked.from;
+        const QRectF &b = parked.shown;
+        return QRectF(a.x() + (b.x() - a.x()) * e, a.y() + (b.y() - a.y()) * e,
+                      a.width() + (b.width() - a.width()) * e, a.height() + (b.height() - a.height()) * e);
+    }
+
+    // Where a window is drawn now (managed or not).
+    QRectF currentlyDrawn(Window *window) const
+    {
+        if (isParked(window)) {
+            return drawnRect(window);
+        }
+        const RectF frame = window->frameGeometry();
+        return QRectF(frame.x(), frame.y(), frame.width(), frame.height());
+    }
+
+    // Start animating a managed window from `from` to its `shown` place.
+    void animate(Window *window, const QRectF &from)
+    {
+        auto it = m_parked.find(window);
+        if (it == m_parked.end()) {
+            return;
+        }
+        it->second.from = from;
+        it->second.start = std::chrono::steady_clock::now();
+        it->second.animating = true;
+        applyParked(window);
+        effects->addRepaintFull();
+    }
+
+    // --- Making room ---
+
+    // Staging area or parking lot, left or right, of a parked window.
+    int areaOf(Window *window) const
+    {
+        const Parked &parked = m_parked.at(window);
+        const RectF screen = window->output()->geometryF();
+        const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
+        const bool tiny = parked.shown.width() / parked.original.width() < minScale + 0.02;
+        return (left ? 0 : 2) + (tiny ? 0 : 1);
+    }
+
+    // `arriving` has just landed in a staging area or parking lot: push
+    // overlapping windows there apart vertically. Windows are ordered by
+    // their vertical center (the arriving one goes below one it lands on);
+    // overlapping ones form groups spaced by arrangeGap, each group centered
+    // on where its windows were, kept on screen. Moved windows animate.
+    void arrange(Window *arriving)
+    {
+        if (!isParkedNotRestoring(arriving)) {
+            return;
+        }
+        const int area = areaOf(arriving);
+        const RectF bounds = workspace()->clientArea(MaximizeArea, arriving);
+
+        struct Item
+        {
+            Window *window;
+            qreal top;
+            qreal height;
+            qreal key;
+        };
+        std::vector<Item> items;
+        for (const auto &[window, parked] : m_parked) {
+            if (parked.restoring || window->output() != arriving->output() || areaOf(window) != area) {
+                continue;
+            }
+            const qreal height = parked.shown.height();
+            qreal key = parked.shown.center().y();
+            if (window == arriving) {
+                // Landing on another window puts it below that one.
+                key += height / 2;
+            }
+            items.push_back(Item{window, parked.shown.y(), height, key});
+        }
+        std::sort(items.begin(), items.end(), [](const Item &a, const Item &b) {
+            return a.key < b.key;
+        });
+
+        // Groups of consecutive items: first and last index, and top.
+        struct Group
+        {
+            size_t first;
+            size_t last;
+            qreal top;
+        };
+        auto heightOf = [&](const Group &g) {
+            qreal h = 0;
+            for (size_t i = g.first; i <= g.last; ++i) {
+                h += items[i].height + (i > g.first ? arrangeGap : 0);
+            }
+            return h;
+        };
+        auto place = [&](Group &g) {
+            // Center the group on where its windows want to be.
+            qreal sum = 0;
+            qreal offset = 0;
+            for (size_t i = g.first; i <= g.last; ++i) {
+                sum += items[i].top - offset;
+                offset += items[i].height + arrangeGap;
+            }
+            const qreal n = qreal(g.last - g.first + 1);
+            const qreal h = heightOf(g);
+            g.top = std::clamp(sum / n, bounds.y(), std::max(bounds.y(), bounds.y() + bounds.height() - h));
+        };
+        std::vector<Group> groups;
+        for (size_t i = 0; i < items.size(); ++i) {
+            groups.push_back(Group{i, i, items[i].top});
+            place(groups.back());
+            while (groups.size() > 1) {
+                Group &a = groups[groups.size() - 2];
+                const Group &b = groups.back();
+                if (a.top + heightOf(a) + arrangeGap <= b.top) {
+                    break;
+                }
+                a.last = b.last;
+                groups.pop_back();
+                place(groups.back());
+            }
+        }
+
+        for (const Group &g : groups) {
+            qreal top = g.top;
+            for (size_t i = g.first; i <= g.last; ++i) {
+                Parked &parked = m_parked.at(items[i].window);
+                if (std::abs(parked.shown.y() - top) > 0.5) {
+                    const QRectF from = displayRect(parked);
+                    parked.shown.moveTop(top);
+                    animate(items[i].window, from);
+                }
+                top += items[i].height + arrangeGap;
+            }
+        }
+    }
+
+    // --- Drawing and input for managed windows ---
+
+    // The scale a managed window's current frame is drawn at.
     qreal scaleOf(Window *window) const
     {
-        return m_parked.at(window).shown.width() / window->frameGeometry().width();
+        return displayRect(m_parked.at(window)).width() / window->frameGeometry().width();
     }
 
     // Draw a parked window at its place, whatever its frame's current
@@ -702,7 +918,7 @@ private:
         }
         const Parked &parked = it->second;
         const RectF frame = window->frameGeometry();
-        if (parked.restoring && std::abs(frame.width() - parked.original.width()) < 0.5
+        if (parked.restoring && !parked.animating && std::abs(frame.width() - parked.original.width()) < 0.5
             && std::abs(frame.height() - parked.original.height()) < 0.5) {
             const QPointF topLeft = parked.shown.topLeft();
             m_parked.erase(it);
@@ -714,7 +930,7 @@ private:
         }
 
         const qreal scale = scaleOf(window);
-        const QPointF offset = parked.shown.topLeft() - frame.topLeft();
+        const QPointF offset = displayRect(parked).topLeft() - frame.topLeft();
         QTransform transform;
         transform.translate(offset.x(), offset.y());
         transform.scale(scale, scale);
@@ -725,7 +941,7 @@ private:
     QRectF drawnRect(Window *window) const
     {
         const auto frame = window->frameGeometry();
-        return QRectF(m_parked.at(window).shown.topLeft(), QSizeF(frame.width(), frame.height()) * scaleOf(window));
+        return QRectF(displayRect(m_parked.at(window)).topLeft(), QSizeF(frame.width(), frame.height()) * scaleOf(window));
     }
 
     // Move a parked window's frame so that the point of the window drawn at
@@ -735,7 +951,7 @@ private:
         if (workspace()->moveResizeWindow() == window) {
             return;
         }
-        const QPointF drawn = m_parked.at(window).shown.topLeft();
+        const QPointF drawn = displayRect(m_parked.at(window)).topLeft();
         const QPointF topLeft = pos - (pos - drawn) / scaleOf(window);
         if (topLeft != window->frameGeometry().topLeft()) {
             window->move(topLeft);
@@ -750,7 +966,7 @@ private:
             return window->inputTransformation();
         }
 
-        const QPointF drawn = it->second.shown.topLeft();
+        const QPointF drawn = displayRect(it->second).topLeft();
         const qreal scale = scaleOf(window);
         const QPointF frame = window->frameGeometry().topLeft();
         const QPointF buffer = window->bufferGeometry().topLeft();

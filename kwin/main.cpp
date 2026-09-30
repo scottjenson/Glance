@@ -1,19 +1,23 @@
 // Glance, a KWin effect: windows shrink as they are dragged toward the left or
 // right screen edge, and stay shrunk ("parked") where they are dropped.
 //
+// Regions: main (the middle half of the screen, full size), stash (between
+// main and the edge, smaller) and parking (the very edge, icon-sized).
+// "Parked" means dropped while shrunk, in a stash or a parking area.
+//
 // Dragging: while KWin moves a window interactively (title bar or Meta+drag),
 // the window is drawn shrunk around the cursor once its left or right edge
-// goes into the outer quarter of the screen (the middle half is full size),
-// reaching minScale at the screen edge. Quick tiling by dragging to the side
+// goes into the outer quarter of the screen (main stays full size), reaching
+// minScale at the screen edge. Quick tiling by dragging to the side
 // is turned off while the effect is loaded, since it uses the same edges.
 //
-// Parking: dropped while shrunk, the window stays exactly where and as large
+// Parked: dropped while shrunk, the window stays exactly where and as large
 // as it was drawn (its "shown" rectangle). The app is also really resized,
 // down to a phone-like width (see layoutSize), so web pages reflow; the rest
 // of the shrink is a transform on the window's scene item, which always fits
 // the window's current frame into the shown rectangle, also while the app is
-// still catching up with the new size. Dragged back into the middle, the
-// window is resized to its original size.
+// still catching up with the new size. Dragged back into main, the window is
+// resized to its original size.
 //
 // Input to a parked window: whenever the pointer is over one, its frame is
 // moved ("re-anchored") so that the point under the pointer is the same point
@@ -38,9 +42,9 @@
 // Not for KDE title bars (KWin handles those) or presses with modifiers.
 //
 // Keyboard (replaces KDE's quick tiling on Meta+arrows): Meta+Left/Right
-// step the active window between left parking lot, left staging, left half
-// of the middle, right half of the middle, right staging and right parking
-// lot; a free window in the middle first snaps to the half on that side.
+// step the active window between left parking, left stash, left half of
+// main, right half of main, right stash and right parking; a free window in
+// main first snaps to the half on that side.
 // Windows move horizontally and keep their vertical position. Meta+Up makes
 // a window fill the screen height; Meta+Down undoes that. Keyboard moves
 // animate (the drawing glides to the new place while the app resizes).
@@ -48,13 +52,13 @@
 // Meta+drag gestures: while Meta is held during a drag, the direction and
 // distance from the press decide a target, and the window snaps there (with
 // a short glide) as a preview: up = Meta+Up, down = Meta+Down; left/right
-// walk the ladder parking L, staging L, left half, right half, staging R,
+// walk the ladder parking L, stash L, left half, right half, stash R,
 // parking R, one step per threshold (a free window's first step is the half
-// on that side; see halfMatch for "in a half"); a short diagonal = the half of the middle on that side, at
+// on that side; see halfMatch for "in a half"); a short diagonal = the half of main on that side, at
 // full height if upward (see gestureFor). Releasing the mouse with
 // Meta held commits it; releasing Meta returns to a normal drag.
 //
-// Stacks: the windows in each staging area and parking lot form one column,
+// Stacks: the windows in each stash and parking area form one column,
 // centered vertically, in the order of their vertical position (see
 // arrangeArea). Whenever a window arrives (keyboard or drop) or leaves
 // (keyboard, dragged out, closed), the column re-forms, animated. Crowding
@@ -317,13 +321,13 @@ private:
     Filter m_filter;
 
     enum class Side { Left, Right };
-    // Where a window is, for Meta+Left/Right. Each side has a parking lot, a
-    // staging area and a half of the middle; Free is anywhere else.
-    enum class Place { ParkedLeft, StagingLeft, HalfLeft, HalfRight, StagingRight, ParkedRight, Free };
+    // Where a window is, for Meta+Left/Right. Each side has a parking area, a
+    // stash and a half of main; Free is anywhere else.
+    enum class Place { ParkingLeft, StashLeft, HalfLeft, HalfRight, StashRight, ParkingRight, Free };
 
     // --- Tuning knobs ---
     // Width of the left and right edge zones, where shrinking happens, as a
-    // fraction of the screen width: the middle half stays full size.
+    // fraction of the screen width: main (the middle half) stays full size.
     static constexpr qreal zoneFraction = 0.25;
     // Window size at the very edge of the screen (1.0 = full size).
     static constexpr qreal minScale = 0.15;
@@ -520,13 +524,13 @@ private:
     }
 
 
-    // A window counts as being in a half of the middle when its horizontal
+    // A window counts as being in a half of main when its horizontal
     // extent and the half's share at least this much (intersection over
     // union), so a slightly moved or resized one still does.
     static constexpr qreal halfMatch = 0.8;
 
-    // Scale of a window in staging when put there with the keyboard.
-    static constexpr qreal stagingScale = 0.5;
+    // Scale of a window in a stash when put there with the keyboard.
+    static constexpr qreal stashScale = 0.5;
     // Length of keyboard moves and making-room animations.
     static constexpr std::chrono::milliseconds animationTime{180};
     // Vertical gap between windows that made room for each other.
@@ -538,12 +542,12 @@ private:
     static constexpr qreal gestureStepEach = 250.0;
     static constexpr qreal gestureCone = 0.577;
     // A diagonal drag at least this long (and not yet at gestureStep1
-    // sideways) snaps to the half of the middle on that side.
+    // sideways) snaps to the half of main on that side.
     static constexpr qreal gestureDiagonal = 100.0;
 
     // The places Meta+Left/Right and gestures step along.
-    static constexpr Place placeOrder[] = {Place::ParkedLeft, Place::StagingLeft, Place::HalfLeft,
-                                           Place::HalfRight, Place::StagingRight, Place::ParkedRight};
+    static constexpr Place placeOrder[] = {Place::ParkingLeft, Place::StashLeft, Place::HalfLeft,
+                                           Place::HalfRight, Place::StashRight, Place::ParkingRight};
     static int placeIndex(Place place)
     {
         return int(std::find(std::begin(placeOrder), std::end(placeOrder), place) - std::begin(placeOrder));
@@ -558,15 +562,15 @@ private:
             const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
             const bool tiny = parked.shown.width() / parked.original.width() < minScale + 0.02;
             if (tiny) {
-                return left ? Place::ParkedLeft : Place::ParkedRight;
+                return left ? Place::ParkingLeft : Place::ParkingRight;
             }
-            return left ? Place::StagingLeft : Place::StagingRight;
+            return left ? Place::StashLeft : Place::StashRight;
         }
         const RectF frame = window->moveResizeGeometry();
         return placeOfFrame(window, QRectF(frame.x(), frame.y(), frame.width(), frame.height()));
     }
 
-    // For a window not parked: in a half of the middle (see halfMatch), or
+    // For a window not parked: in a half of main (see halfMatch), or
     // free.
     Place placeOfFrame(Window *window, const QRectF &frame) const
     {
@@ -586,8 +590,8 @@ private:
         return Place::Free;
     }
 
-    // One step towards `side` along: parked L, staging L, half L, half R,
-    // staging R, parked R. A free window goes to the half on that side.
+    // One step towards `side` along: parking L, stash L, half L, half R,
+    // stash R, parking R. A free window goes to the half on that side.
     void stepSideways(Window *window, Side side)
     {
         const Place from = placeOf(window);
@@ -631,8 +635,8 @@ private:
     }
 
     // Where a window of full size `size`, centered at `centerY`, goes in
-    // `place`: for the halves of the middle its new frame, for staging and
-    // parking lot where it is drawn.
+    // `place`: for the halves of main its new frame, for a stash or parking
+    // area where it is drawn.
     QRectF placeRect(Window *window, Place place, const QSizeF &size, qreal centerY) const
     {
         const RectF screen = window->output()->geometryF();
@@ -648,16 +652,16 @@ private:
             const qreal x = screen.x() + (place == Place::HalfLeft ? zoneWidth : 2 * zoneWidth);
             return QRectF(QPointF(x, topFor(height)), QSizeF(zoneWidth, height));
         }
-        case Place::StagingLeft:
-        case Place::StagingRight:
-        case Place::ParkedLeft:
-        case Place::ParkedRight: {
-            const bool staging = place == Place::StagingLeft || place == Place::StagingRight;
-            const qreal scale = staging ? stagingScale : minScale;
+        case Place::StashLeft:
+        case Place::StashRight:
+        case Place::ParkingLeft:
+        case Place::ParkingRight: {
+            const bool stash = place == Place::StashLeft || place == Place::StashRight;
+            const qreal scale = stash ? stashScale : minScale;
             const QSizeF drawn = size * scale;
             // Where the drag rule gives this scale: the outer edge this far in.
             const qreal depth = (scale - minScale) / (1.0 - minScale) * zoneWidth;
-            const bool left = place == Place::StagingLeft || place == Place::ParkedLeft;
+            const bool left = place == Place::StashLeft || place == Place::ParkingLeft;
             const qreal x = left ? screen.x() + depth : screen.x() + screen.width() - depth - drawn.width();
             return QRectF(QPointF(x, topFor(drawn.height())), drawn);
         }
@@ -676,10 +680,10 @@ private:
         case Place::HalfRight:
             resizeAnimated(window, RectF(rect.x(), rect.y(), rect.width(), rect.height()), from);
             break;
-        case Place::StagingLeft:
-        case Place::StagingRight:
-        case Place::ParkedLeft:
-        case Place::ParkedRight:
+        case Place::StashLeft:
+        case Place::StashRight:
+        case Place::ParkingLeft:
+        case Place::ParkingRight:
             park(window, rect, size);
             animate(window, from);
             arrange(window);
@@ -830,7 +834,7 @@ private:
         // From the current frame size to the original size.
         const qreal grow = m_dragOriginal.width() / frame.width();
 
-        // Full size while the window stays within the middle of the screen;
+        // Full size while the window stays within main (the middle half);
         // shrinks as its left or right edge goes into the edge zone.
         const qreal zoneWidth = screen.width() * zoneFraction;
         qreal total = std::min({1.0,
@@ -850,20 +854,20 @@ private:
     }
 
     // The gesture target for a Meta+drag that has moved `delta` from the
-    // press, if any. Left/right: from the middle (free or a half), staging on
-    // that side, then (further) its parking lot; from staging or a parking
-    // lot, one or two steps along placeOrder, not past the half of the
-    // middle on that side. Up/down (windows in the middle): fill height /
+    // press, if any. Left/right: from main (free or a half), the stash on that
+    // side, then (further) its parking area; from a stash or a parking area,
+    // one or two steps along placeOrder, not past the half of main on that
+    // side. Up/down (windows in main): fill height /
     // undo it.
     std::optional<Gesture> gestureFor(Window *window, const QPointF &delta) const
     {
         const qreal ax = std::abs(delta.x());
         const qreal ay = std::abs(delta.y());
-        const bool middle = m_dragStartPlace == Place::Free || m_dragStartPlace == Place::HalfLeft
+        const bool inMain = m_dragStartPlace == Place::Free || m_dragStartPlace == Place::HalfLeft
             || m_dragStartPlace == Place::HalfRight;
         const bool diagonal = ay > ax * gestureCone && ax > ay * gestureCone;
-        if (middle && diagonal && ax < gestureStep1 && std::hypot(ax, ay) >= gestureDiagonal) {
-            // Half of the middle on that side; upward also fills the height.
+        if (inMain && diagonal && ax < gestureStep1 && std::hypot(ax, ay) >= gestureDiagonal) {
+            // Half of main on that side; upward also fills the height.
             const Place half = delta.x() < 0 ? Place::HalfLeft : Place::HalfRight;
             QRectF rect = placeRect(window, half, m_dragOriginal, m_dragStartCenterY);
             const bool up = delta.y() < 0;
@@ -874,8 +878,8 @@ private:
             }
             return Gesture{.key = int(half) + (up ? 200 : 0), .drawn = rect, .place = half, .fill = up};
         }
-        // Far enough sideways, staging and parking lot win over up/down.
-        if (ay <= ax * gestureCone || (middle && ax >= gestureStep1)) {
+        // Far enough sideways, stash and parking win over up/down.
+        if (ay <= ax * gestureCone || (inMain && ax >= gestureStep1)) {
             if (ax < gestureStep1) {
                 return std::nullopt;
             }
@@ -895,7 +899,7 @@ private:
             const Place to = placeOrder[j];
             return Gesture{.key = int(to), .drawn = placeRect(window, to, m_dragOriginal, m_dragStartCenterY), .place = to};
         }
-        if (ax <= ay * gestureCone && middle && ay >= gestureStep1) {
+        if (ax <= ay * gestureCone && inMain && ay >= gestureStep1) {
             const RectF area = workspace()->clientArea(MaximizeArea, window);
             const QRectF &start = m_dragStartFrame;
             if (delta.y() < 0) {
@@ -915,7 +919,7 @@ private:
     {
         const QRectF &start = m_dragStartFrame;
         if (gesture.place && gesture.fill) {
-            // A half of the middle at full height.
+            // A half of main at full height.
             m_beforeFillHeight[window] = {start.y(), start.height()};
             const QRectF &r = gesture.drawn;
             resizeAnimated(window, RectF(r.x(), r.y(), r.width(), r.height()), from);
@@ -1084,7 +1088,7 @@ private:
 
     // --- Making room ---
 
-    // Staging area or parking lot, left or right, of a parked window.
+    // Stash or parking area, left or right, of a parked window.
     int areaOf(Window *window) const
     {
         const Parked &parked = m_parked.at(window);
@@ -1135,7 +1139,7 @@ private:
         }
     }
 
-    // `window` has just arrived in a staging area or parking lot.
+    // `window` has just arrived in a stash or parking area.
     void arrange(Window *window)
     {
         if (isParkedNotRestoring(window)) {

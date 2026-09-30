@@ -12,27 +12,29 @@ KWin effect in `kwin/`.
 
 **Name:** Glance (chosen 2026-09-30: you glance at the windows on the
 sides). Formerly WideMonitorUX (project/repo) and edge-shrink (the effect).
-Renamed in code, scripts and docs; the project folder is being renamed to
-~/Glance by the user; the GitHub repo (still WideMonitorUX) is to be
-renamed in a separate step (`gh repo rename`, then update the clone URL
-in README.md). "Overview" was ruled out: KDE's own Meta+W effect.
+Renamed everywhere: code, scripts, docs, the project folder (~/Glance) and
+the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
+"Overview" was ruled out: KDE's own Meta+W effect.
 
 ## Design rules (agreed with the user)
-- Screen: the middle half is full size; the left and right quarters are
+- Screen: main (the middle half) is full size; the left and right quarters are
   edge zones (`zoneFraction = 0.25`, relative to the screen width).
-- A window is full size as long as it lies entirely within the middle half.
+- A window is full size as long as it lies entirely within main.
   Once its left or right (drawn) edge enters an edge zone, it shrinks,
   scaled around the cursor (the grabbed spot stays under it), linearly with
   that edge's depth into the zone, reaching `minScale` (0.15) exactly when
   the edge meets the screen edge.
 - Dropped while shrunk: it stays exactly where and as large as drawn
   ("parked"), stays fully usable, and the app is really resized to a
-  phone-like width so web pages reflow. Dropped in the middle (scale
+  phone-like width so web pages reflow. Dropped in main (scale
   ≥ 0.99): back to its original size.
 - Scales are always relative to the window's original size.
-- Regions (user's terms): the **middle** (center half), the **parking lot**
-  (the very edge, icon-sized windows, ~15%), and **staging** (everything in
-  between; its width depends on the monitor).
+- Regions (user's terms, settled 2026-09-30; use them everywhere: docs,
+  comments, identifiers): **main** (center half), **stash** (everything
+  between main and parking; its width depends on the monitor) and
+  **parking** (the very edge, icon-sized windows, ~15%). Formerly called
+  middle, staging and parking lot. "Parked" (verb/state) = dropped while
+  shrunk, in a stash or a parking area (`m_parked` holds both).
 - Modifier: Meta (Super; Command on the Mac keyboard) is the window
   system's key; Ctrl/Shift/Alt belong to apps. The user is fine being
   aggressive with Meta ("opinionated window manager"), as long as what KDE
@@ -43,12 +45,11 @@ in README.md). "Overview" was ruled out: KDE's own Meta+W effect.
 - **Keyboard, phase 1** (agreed 2026-09-29, may evolve; replaces KDE's
   quick tiling on Meta+arrows, intercepted by our input filter, active
   window only):
-  - Meta+Left from a free window in the middle: snap to the left half of
-    the middle (x = middle's left edge, width = half the middle; height and
-    vertical position unchanged; real resize). Again: 50% size in left
-    staging. Again: parked in the left parking lot (15%). Meta+Right
-    mirrors and walks back (parked L → staging L → left half → right half
-    → staging R → parked R).
+  - Meta+Left from a free window in main: snap to the left half of main
+    (x = main's left edge, width = half of main; height and vertical
+    position unchanged; real resize). Again: 50% size in the left stash.
+    Again: left parking (15%). Meta+Right mirrors and walks back
+    (parking L → stash L → left half → right half → stash R → parking R).
   - Meta+Up: fill the full screen height (keep width and x). Meta+Down:
     undo Meta+Up for now (meaning still open).
   - Keyboard moves animate (180 ms, ease-out); the app resizes during the
@@ -61,13 +62,13 @@ in README.md). "Overview" was ruled out: KDE's own Meta+W effect.
     Quick Tile Left/Right/Top/Bottom" QActions (children of Workspace) are
     disabled while the effect is loaded. `cancelModiferOnlySequence` is
     not exported to plugins.
-- **Stacks (built 2026-09-29):** each staging area and parking lot holds its
+- **Stacks (built 2026-09-29):** each stash and parking area holds its
   windows as one column, centred vertically, ordered by vertical position
   (an arriving window that lands on another goes below it). Arrivals
   (keyboard, drop) and departures (keyboard, dragged out, closed) re-form
   the column, animated. The user said fixed slots would feel weird; it
-  should be fluid. Still open: crowding (parking lot should hold 10-15,
-  staging 2-3); the user mentioned it may become tiling-like (windows also
+  should be fluid. Still open: crowding (parking should hold 10-15,
+  a stash 2-3); the user mentioned it may become tiling-like (windows also
   resized vertically to fit).
 
 ## Environment
@@ -86,7 +87,8 @@ in README.md). "Overview" was ruled out: KDE's own Meta+W effect.
   logical). Check with `kscreen-doctor -o` (desktop env, see below).
 
 ## Git / GitHub
-- Repo: https://github.com/scottjenson/WideMonitorUX (**public**), branch
+- Repo: https://github.com/scottjenson/Glance (**public**; renamed from
+  WideMonitorUX on 2026-09-30), branch
   `main`, remote `origin` over HTTPS. `gh` is logged in and is the git
   credential helper, so `git push` works without prompts.
 - Local git identity (repo-only config): Scott Jenson <scott@jenson.org>.
@@ -102,7 +104,10 @@ in README.md). "Overview" was ruled out: KDE's own Meta+W effect.
 - `kwin/CMakeLists.txt`: builds `kwin/build/bin/kwin/effects/plugins/glance.so`.
   Needs `find_package(ECM <version>)` (else no output folder), Qt
   Widgets/DBus/Quick (KWin's CMake target needs them), C++23, and
-  `AUTOMOC_MACRO_NAMES KWIN_EFFECT_FACTORY`. Not installed yet.
+  `AUTOMOC_MACRO_NAMES KWIN_EFFECT_FACTORY`. `sudo cmake --install
+  kwin/build` installs it (`kcoreaddons_add_plugin` with
+  `INSTALL_NAMESPACE`; README's install steps); not installed on this VM,
+  which loads it from the build folder instead.
 - `kwin/run-nested.sh`: starts a nested KWin (a window in the desktop,
   2982x1090 logical at scale 2, override with WIDTH/HEIGHT) with
   QT_PLUGIN_PATH at the build folder and a Konsole inside. Must be run from
@@ -162,7 +167,7 @@ minScale doesn't fit, `shiftOntoScreen` slides it back on screen.
 KWin's own move logic (window.cpp `nextInteractiveMoveGeometry`) also snaps
 to edges (`adjustWindowPosition`) and keeps ≥100 px visible.
 
-**Parking** (`dragFinished`, on `interactiveMoveResizeFinished`): state per
+**Parked windows** (`dragFinished`, on `interactiveMoveResizeFinished`): state per
 window in `m_parked` (`shown` rect in global coordinates, `original` size,
 `restoring`). `applyParked` (also on every `frameGeometryChanged`) fits the
 *current* frame into `shown` by width (scale = shown.width / frame.width),
@@ -172,7 +177,7 @@ so nothing jumps while the app catches up with a resize. Real resize via
 ≤ original; else the smallest size keeping the shape that meets both
 minimums, capped at the original (Firefox: 500 px wide). 1x/2x are for
 text quality (drawn at 1/2, bilinear averages exact 2x2 blocks). Logs one
-`glance:` line per resize. Dropped in the middle: `moveResize` to the
+`glance:` line per resize. Dropped in main: `moveResize` to the
 original size (grabbed spot under the cursor), `restoring` until it has it.
 
 **Input to parked windows** (`route`, `reanchor`, `pick`): KWin picks the
@@ -221,14 +226,14 @@ edge stays sharp-ish while growing (KWin samples the app's real buffer). Earlier
 dragging out by the title bar, real resize with reflow (Firefox, Konsole),
 restore to original size. Open observations: some jank (possibly the
 re-anchoring on every pointer motion, which moves the frame and repaints;
-or VM load); one unexplained freeze in the middle zone that didn't recur.
+or VM load); one unexplained freeze in main that didn't recur.
 
 ## Next steps
 1. Mouse accelerators: Meta+drag gestures (built 2026-09-30; see the
    header comment in main.cpp). While Meta is held during a drag, the
    window snaps (glides) to the gesture target as a preview; releasing the
    mouse commits, releasing Meta returns to a normal drag. Sideways walks
-   the ladder parking L, staging L, left half, right half, staging R,
+   the ladder parking L, stash L, left half, right half, stash R,
    parking R, one step per threshold (150 px, then every 250 px; a free
    window's first step is the half on that side). "In a half" (keyboard
    and gestures) = the window's horizontal extent and the half's share
@@ -243,10 +248,11 @@ or VM load); one unexplained freeze in the middle zone that didn't recur.
    windows; text quality (the Wayfire halving scaler, below; pixel-exact
    placement at 1x/2x); fractional KDE scales.
 3. Packaging (not yet: the user wants quality-of-life features first;
-   shipping is the long-term goal): install target, Fedora COPR / Arch AUR, like other
+   shipping is the long-term goal): Fedora COPR / Arch AUR, like other
    third-party KWin effects (Better Blur, KDE Rounded Corners). Internal
-   API, so it must be rebuilt per Plasma release. `README.md` and MIT
-   `LICENSE` (offered, not done). The user hasn't decided whether to hide
+   API, so it must be rebuilt per Plasma release. `README.md` (with
+   install steps) is done; an MIT `LICENSE` file is not (metadata.json
+   already says MIT). The user hasn't decided whether to hide
    their email in commits (GitHub noreply).
 4. Ideas (not agreed): live resizing during the drag; fade icon-sized
    windows or cap them at an icon size; top/bottom edges; config options;

@@ -1,6 +1,8 @@
 # Glance for KWin (KDE Plasma's compositor): effect.
-# Builds kwin/build/bin/kwin/effects/plugins/glance.so. It is not installed:
-# a nested KWin loads it from the build folder via QT_PLUGIN_PATH.
+# Builds kwin/build/bin/kwin/effects/plugins/glance.so. `cmake --install`
+# puts it in KWin's effects plugin folder (kcoreaddons_add_plugin below).
+# For development it can instead be loaded from the build folder via
+# QT_PLUGIN_PATH (run-nested.sh, use-in-session.sh).
 cmake_minimum_required(VERSION 3.20)
 project(glance LANGUAGES CXX)
 

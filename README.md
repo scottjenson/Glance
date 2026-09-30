@@ -14,36 +14,35 @@ it stays live and usable.
 The screen has three kinds of areas:
 
 - **Main** (the center half): windows here are full size.
-- **Stash** (the "stash"): between the middle and the edge. Windows here
-  are shown smaller.
+- **Stash**: between main and the edge. Windows here are shown smaller.
 - **Parking**: the very edge. Windows here are icon-sized.
 
 Key mechanics:
 
 - **Dragging a window toward a side shrinks it.** It stays full size while it
-  lies in the middle, then shrinks as its edge moves into the stash area,
-  reaching its smallest size at the screen edge.
+  lies in main, then shrinks as its edge moves into the stash, reaching its
+  smallest size at the screen edge.
 - **Dropping it keeps it there**, exactly as large as it was drawn.
 - **Small windows stay usable.** You can click, type and scroll in them. The
   app is really resized to a narrow width, so web pages switch to their
   mobile layout.
 - **Icon-sized windows can be grabbed anywhere:** a drag moves the window,
   and a click still goes to the app.
-- **Staging and the parking lot keep their windows in a centered stack**,
+- **The stash and parking areas keep their windows in a centered stack**,
   which rearranges itself as windows come and go.
-- **Dragging a window back into the middle** restores its original size.
+- **Dragging a window back into main** restores its original size.
 
 ## Accelerators
 
 The Meta key (Super / Windows / Command) is the window system's key:
 
 - **Meta + Left / Right** steps the active window between the six places:
-  parking lot, staging, and the halves of the middle, on either side.
+  parking, stash, and the halves of main, on either side.
 - **Meta + Up** makes it fill the screen height; **Meta + Down** undoes that.
 - **Meta + drag** does the same with the mouse: drag sideways and the window
   snaps from place to place as you go. Drag up for full height, or
-  diagonally for the half of the middle on that side. Let go of the mouse
-  to keep it there, or let go of Meta to go back to a normal drag.
+  diagonally for the half of main on that side. Let go of the mouse to keep
+  it there, or let go of Meta to go back to a normal drag.
 
 ## Status
 
@@ -57,8 +56,8 @@ You build it yourself against your installed Plasma. On Fedora (KDE):
 
 ```sh
 sudo dnf install git cmake gcc-c++ extra-cmake-modules kwin-devel libepoxy-devel
-git clone https://github.com/scottjenson/WideMonitorUX.git
-cd WideMonitorUX
+git clone https://github.com/scottjenson/Glance.git
+cd Glance
 cmake -S kwin -B kwin/build
 cmake --build kwin/build
 sudo cmake --install kwin/build

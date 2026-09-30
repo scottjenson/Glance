@@ -147,12 +147,28 @@ desktop with the window's coordinates (desktop rubber band). Not done during KWi
 (`workspace()->moveResizeWindow()`). Resetting: KWin only recomputes the
 pointer transformation on enter or geometry change.
 
+**Tiny parked windows act like icons** (`holdPress`, `pendingMotion`,
+`releasePending`; decided with the user 2026-09-29): parked windows drawn
+below `iconBelow` (0.25) of their original size hold back a plain left
+press. Moving more than `dragThreshold` (6 px) starts KWin's own move
+(`performMousePressCommand(Options::MouseMove, pressPos)`; the frame was
+re-anchored at the press, so the grabbed spot stays under the cursor);
+releasing sooner delivers press + release to the app as a click (original
+timestamp, window activated). Rationale: at that size the title bar is
+too small to grab, and the idea is that apps reformat into widgets (e.g. a
+music player becomes play/pause), so clicks and scrolling must still work.
+Not for KDE title bars (`pointer->decoration()`), other buttons, or presses
+with modifiers. Larger parked windows (the user expects people to use
+windows at 50-60%) stay normal windows: nothing is taken from their content.
+
 Unloading resizes parked windows back to their original size.
 
 ## Status (2026-09-29)
 Running in the user's real Plasma session (via use-in-session.sh). Konsole
 and Firefox (Wayland, client-side title bar with tabs) shrink, park, take
-input, and drag back out. Earlier, tested in the nested KWin, all working: shrink while dragging
+input, and drag back out; tiny parked windows drag from anywhere and pass
+clicks through. Unlike the Wayfire version, a window dragged out of the
+edge stays sharp-ish while growing (KWin samples the app's real buffer). Earlier, tested in the nested KWin, all working: shrink while dragging
 (edge-driven rule), parking, clicks/selection/scrolling in parked windows,
 dragging out by the title bar, real resize with reflow (Firefox, Konsole),
 restore to original size. Open observations: some jank (possibly the
@@ -160,13 +176,7 @@ re-anchoring on every pointer motion, which moves the frame and repaints;
 or VM load); one unexplained freeze in the middle zone that didn't recur.
 
 ## Next steps
-1. Open design question (asked, not answered): how to grab icon-sized
-   parked windows. At 15% the title bar is tiny, and apps like Firefox fill
-   it with tabs. Proposed: below some size (e.g. 1/3), press-and-drag
-   anywhere on a parked window moves it (click and scroll still go to the
-   app); larger parked windows behave normally. Alternatives: drag anywhere
-   at any parked size; or keep title bar / Meta+drag only.
-2. Polish: re-anchor less often (e.g. on press/scroll, or after enough
+1. Polish: re-anchor less often (e.g. on press/scroll, or after enough
    movement); overlapping parked windows; title-bar buttons of parked
    windows; text quality (the Wayfire halving scaler, below; pixel-exact
    placement at 1x/2x); fractional KDE scales.

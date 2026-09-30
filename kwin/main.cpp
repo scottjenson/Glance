@@ -29,6 +29,14 @@
 // as if it weren't scaled, and it also treats the window as still covering
 // its full-size area.
 //
+// Tiny parked windows (below iconBelow of their original size) act like
+// icons: a left-button press on one is held back.
+// Dragging it more than a few pixels moves the window (KWin's own move, so
+// it grows back out of the edge zone); releasing it without dragging passes
+// the press and release to the app as a click. So small parked windows can
+// be dragged from anywhere and still work as widgets (buttons, scrolling).
+// Not for KDE title bars (KWin handles those) or presses with modifiers.
+//
 // Known gaps: touch and tablets aren't handled; in the forwarding case the
 // title bar doesn't respond and the cursor shape may be wrong.
 
@@ -114,6 +122,9 @@ public:
 
     bool onMotion(PointerMotionEvent *event)
     {
+        if (m_pending) {
+            return pendingMotion(event);
+        }
         if (!route(event->position, event->buttons != Qt::NoButton)) {
             return false;
         }
@@ -127,6 +138,12 @@ public:
     bool onButton(PointerButtonEvent *event)
     {
         const bool pressed = event->state == PointerButtonState::Pressed;
+        if (pressed && holdPress(event)) {
+            return true;
+        }
+        if (!pressed && m_pending && event->button == Qt::LeftButton) {
+            return releasePending(event);
+        }
         // Keep the target of a press until its release.
         if (!route(event->position, !pressed || event->buttons != event->button)) {
             return false;
@@ -181,6 +198,12 @@ private:
     static constexpr qreal zoneFraction = 0.25;
     // Window size at the very edge of the screen (1.0 = full size).
     static constexpr qreal minScale = 0.15;
+    // Parked windows drawn smaller than this (relative to the original size)
+    // act like icons: drag anywhere to move, click passes through. Larger
+    // ones stay normal windows, so their content keeps every interaction.
+    static constexpr qreal iconBelow = 0.25;
+    // How far (logical pixels) a press on an icon must move to become a drag.
+    static constexpr qreal dragThreshold = 6.0;
     // Dropped at this scale or larger, a window goes back to full size.
     static constexpr qreal parkBelow = 0.99;
     // On parking, the app is resized no narrower than this (keeping its
@@ -211,6 +234,17 @@ private:
     QPointer<Window> m_target;
     bool m_forwarding = false;
 
+    // A left-button press on a parked window, held back until we know
+    // whether it is a click or a drag.
+    struct PendingPress
+    {
+        QPointer<Window> window;
+        QPointF position;
+        quint32 nativeButton;
+        std::chrono::microseconds timestamp;
+    };
+    std::optional<PendingPress> m_pending;
+
     // Quick tiling setting to restore when unloaded.
     bool m_savedTiling = true;
 
@@ -228,6 +262,73 @@ private:
         connect(window, &Window::closed, this, [this, window]() {
             m_parked.erase(window);
         });
+    }
+
+    // --- Parked windows as icons: click or drag ---
+
+    // A plain left press on an icon-like parked window (not on a KDE title
+    // bar): hold it back. Returns whether it was held.
+    bool holdPress(PointerButtonEvent *event)
+    {
+        if (event->button != Qt::LeftButton || event->buttons != Qt::LeftButton
+            || event->modifiers != Qt::NoModifier || workspace()->moveResizeWindow()) {
+            return false;
+        }
+        Window *window = pick(event->position);
+        if (!window || !isParked(window)) {
+            return false;
+        }
+        const Parked &parked = m_parked.at(window);
+        if (parked.restoring || parked.shown.width() / parked.original.width() >= iconBelow) {
+            return false;
+        }
+        // Line the frame up with the pointer, so KWin sees what's under it.
+        route(event->position, false);
+        if (input()->pointer()->decoration()) {
+            return false;
+        }
+        m_pending = PendingPress{window, event->position, event->nativeButton, event->timestamp};
+        return true;
+    }
+
+    // While a press is held: far enough away, it becomes a move of the
+    // window. Until then the app doesn't see the pointer move.
+    bool pendingMotion(PointerMotionEvent *event)
+    {
+        const QPointF delta = event->position - m_pending->position;
+        if (std::hypot(delta.x(), delta.y()) < dragThreshold) {
+            return true;
+        }
+        const PendingPress press = *m_pending;
+        m_pending.reset();
+        if (press.window) {
+            // The frame was anchored at the press position, so KWin's move
+            // keeps the grabbed spot under the cursor. KWin then handles
+            // this and the following motion and the release.
+            press.window->performMousePressCommand(Options::MouseMove, press.position);
+        }
+        return false;
+    }
+
+    // Released without dragging: it was a click. Give the app the press and
+    // this release.
+    bool releasePending(PointerButtonEvent *event)
+    {
+        const PendingPress press = *m_pending;
+        m_pending.reset();
+        if (!press.window) {
+            return true;
+        }
+        workspace()->activateWindow(press.window);
+        route(event->position, false); // points the seat at the window
+        auto seat = waylandServer()->seat();
+        seat->setTimestamp(press.timestamp);
+        seat->notifyPointerButton(press.nativeButton, PointerButtonState::Pressed);
+        seat->notifyPointerFrame();
+        seat->setTimestamp(event->timestamp);
+        seat->notifyPointerButton(event->nativeButton, PointerButtonState::Released);
+        seat->notifyPointerFrame();
+        return true;
     }
 
     // --- Dragging ---

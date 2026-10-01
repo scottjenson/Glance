@@ -49,14 +49,15 @@
 // a window fill the screen height; Meta+Down undoes that. Keyboard moves
 // animate (the drawing glides to the new place while the app resizes).
 //
-// Meta+drag gestures: while Meta is held during a drag, the direction and
-// distance from the press decide a target, and the window snaps there (with
-// a short glide) as a preview: up = Meta+Up, down = Meta+Down; left/right
-// walk the ladder parking L, stash L, left half, right half, stash R,
-// parking R, one step per threshold (a free window's first step is the half
-// on that side; see halfMatch for "in a half"); a short diagonal = the half of main on that side, at
-// full height if upward (see gestureFor). Releasing the mouse with
-// Meta held commits it; releasing Meta returns to a normal drag.
+// Meta+drag: moves the window like a title-bar drag (following the
+// pointer, shrinking by the edge rule), with two additions. Acceleration:
+// horizontally the window gets ahead of the pointer, more the longer you
+// keep moving fast in one direction (gain up to leadMaxGain); reversing
+// or slowing down goes back to 1:1, so corrections are precise. The
+// screen edges stop it, and overshoot isn't stored. Pause to snap: holding
+// still for snapDwell snaps the window to where it is (a half of main, a
+// stash, or parking at the very edge); releasing keeps that, moving on
+// cancels it (see leadStep).
 //
 // Selecting (Meta+Alt+arrows, KDE's own keys for this): activates the
 // nearest window in that direction, judged by where windows are drawn (KDE's
@@ -169,6 +170,17 @@ public:
         clipAction->setText(QStringLiteral("Glance: Clip the Selected Text"));
         KGlobalAccel::self()->setGlobalShortcut(clipAction, QKeySequence(Qt::META | Qt::Key_C));
         connect(clipAction, &QAction::triggered, this, &Glance::clipSelection);
+
+        m_snapDwell.setSingleShot(true);
+        m_snapDwell.setInterval(snapDwell);
+        connect(&m_snapDwell, &QTimer::timeout, this, [this]() {
+            if (m_dragged && !m_snapped && (input()->keyboardModifiers() & Qt::MetaModifier)) {
+                m_snapped = snapTarget(m_dragged);
+                m_snapAt = input()->pointer()->pos();
+                m_leadRun = 0;
+                dragStep(m_dragged);
+            }
+        });
 
         m_previewOpen.setSingleShot(true);
         m_previewOpen.setInterval(previewDelay);
@@ -480,6 +492,20 @@ private:
     qreal m_dragStartCenterY = 0;
     QRectF m_dragDisplayed;
     std::optional<Gesture> m_dragGesture;
+    // Acceleration state of the current Meta+drag (see leadStep): how far
+    // the window is ahead of the pointer horizontally, the direction and
+    // length of the current run, movement against it so far (jitter until
+    // reversalJitter), the last pointer position and recent ones (for the
+    // speed); the pause-to-snap target, where the pointer was then, and
+    // the timer.
+    qreal m_leadX = 0;
+    int m_leadDir = 0;
+    qreal m_leadRun = 0;
+    qreal m_leadAgainst = 0;
+    QPointF m_leadLast;
+    std::vector<std::pair<std::chrono::steady_clock::time_point, QPointF>> m_leadSamples;
+    std::optional<Gesture> m_snapped;
+    QPointF m_snapAt;
     int m_dragModeKey = -1;
     bool m_dragAnimating = false;
     QRectF m_dragAnimFrom;
@@ -554,6 +580,7 @@ private:
     QPointer<Window> m_preview;
     QPointer<Window> m_previewCandidate;
     QTimer m_previewOpen;
+    QTimer m_snapDwell;
     QTimer m_previewClose;
 
     // The focus ring (see updateRing) and the window it outlines.
@@ -718,15 +745,19 @@ private:
     static constexpr std::chrono::milliseconds animationTime{180};
     // Vertical gap between windows that made room for each other.
     static constexpr qreal arrangeGap = 8.0;
-    // Meta+drag gestures: distance (logical px) from the press for the first
-    // step, then for each further step, and how far off an axis (as tan of
-    // the angle) a drag may go and still count as that direction (30 deg).
-    static constexpr qreal gestureStep1 = 150.0;
-    static constexpr qreal gestureStepEach = 250.0;
-    static constexpr qreal gestureCone = 0.577;
-    // A diagonal drag at least this long (and not yet at gestureStep1
-    // sideways) snaps to the half of main on that side.
-    static constexpr qreal gestureDiagonal = 100.0;
+    // Meta+drag acceleration (see leadStep): the highest gain, reached after
+    // moving leadBuild (fraction of the screen width) in one direction; a
+    // reversal is this much movement the other way (less is jitter); below
+    // leadSlow (logical px/s over the last leadSampleTime) it's 1:1 again.
+    // Pause to snap: holding still this long snaps; moving this far from
+    // there cancels it.
+    static constexpr qreal leadMaxGain = 4.0;
+    static constexpr qreal leadBuild = 0.05;
+    static constexpr qreal reversalJitter = 5.0;
+    static constexpr qreal leadSlow = 300.0;
+    static constexpr std::chrono::milliseconds leadSampleTime{80};
+    static constexpr std::chrono::milliseconds snapDwell{500};
+    static constexpr qreal snapCancel = 6.0;
 
     // The places Meta+Left/Right and gestures step along.
     static constexpr Place placeOrder[] = {Place::ParkingLeft, Place::StashLeft, Place::HalfLeft,
@@ -970,6 +1001,14 @@ private:
             m_dragDisplayed = currentlyDrawn(window);
             m_dragGesture.reset();
             m_dragModeKey = -1;
+            m_leadX = 0;
+            m_leadDir = 0;
+            m_leadRun = 0;
+            m_leadAgainst = 0;
+            m_leadLast = cursor;
+            m_leadSamples.clear();
+            m_snapped.reset();
+            m_snapDwell.stop();
             m_dragAnimating = false;
             const auto closeRanks = leaving(window);
             m_parked.erase(window);
@@ -977,11 +1016,12 @@ private:
             closeRanks();
         }
 
-        std::optional<Gesture> gesture;
-        if (input()->keyboardModifiers() & Qt::MetaModifier) {
-            gesture = gestureFor(window, cursor - m_dragPress);
-        }
-        const QRectF want = gesture ? gesture->drawn : followRect(window, frame, cursor);
+        const std::optional<Gesture> gesture = leadStep(window, cursor);
+        // The edge rule around where the window is: the pointer plus the
+        // window's lead (the frame shifted with it keeps the grab offset).
+        const QRectF want = gesture ? gesture->drawn
+                                    : followRect(window, RectF(frame.x() + m_leadX, frame.y(), frame.width(), frame.height()),
+                                                 cursor + QPointF(m_leadX, 0));
         const int key = gesture ? gesture->key : -1;
         if (key != m_dragModeKey) {
             m_dragModeKey = key;
@@ -1037,64 +1077,95 @@ private:
                       frame.width() * scale, frame.height() * scale);
     }
 
-    // The gesture target for a Meta+drag that has moved `delta` from the
-    // press, if any. Left/right: from main (free or a half), the stash on that
-    // side, then (further) its parking area; from a stash or a parking area,
-    // one or two steps along placeOrder, not past the half of main on that
-    // side. Up/down (windows in main): fill height /
-    // undo it.
-    std::optional<Gesture> gestureFor(Window *window, const QPointF &delta) const
+    // Acceleration and pause to snap, on every drag step: updates the
+    // window's lead (m_leadX) and returns the snap target, if snapped.
+    // Each horizontal pointer movement moves the window that much times the
+    // gain, which grows from 1 to leadMaxGain over the run (movement in one
+    // direction); a reversal (reversalJitter the other way) or moving slower
+    // than leadSlow starts a new run at 1. The lead keeps the window between
+    // the screen edges, so overshoot isn't stored. Without Meta the gain is
+    // 1 (the lead stays) and nothing snaps.
+    std::optional<Gesture> leadStep(Window *window, const QPointF &cursor)
     {
-        const qreal ax = std::abs(delta.x());
-        const qreal ay = std::abs(delta.y());
-        const bool inMain = m_dragStartPlace == Place::Free || m_dragStartPlace == Place::HalfLeft
-            || m_dragStartPlace == Place::HalfRight;
-        const bool diagonal = ay > ax * gestureCone && ax > ay * gestureCone;
-        if (inMain && diagonal && ax < gestureStep1 && std::hypot(ax, ay) >= gestureDiagonal) {
-            // Half of main on that side; upward also fills the height.
-            const Place half = delta.x() < 0 ? Place::HalfLeft : Place::HalfRight;
-            QRectF rect = placeRect(window, half, m_dragOriginal, m_dragStartCenterY);
-            const bool up = delta.y() < 0;
-            if (up) {
-                const RectF area = workspace()->clientArea(MaximizeArea, window);
-                rect.setTop(area.y());
-                rect.setHeight(area.height());
-            }
-            return Gesture{.key = int(half) + (up ? 200 : 0), .drawn = rect, .place = half, .fill = up};
+        const auto now = std::chrono::steady_clock::now();
+        const bool moved = cursor != m_leadLast;
+        const qreal dx = cursor.x() - m_leadLast.x();
+        m_leadLast = cursor;
+        if (moved) {
+            m_leadSamples.emplace_back(now, cursor);
+            std::erase_if(m_leadSamples, [&](const auto &sample) {
+                return now - sample.first > leadSampleTime;
+            });
         }
-        // Far enough sideways, stash and parking win over up/down.
-        if (ay <= ax * gestureCone || (inMain && ax >= gestureStep1)) {
-            if (ax < gestureStep1) {
-                return std::nullopt;
+        if (m_snapped) {
+            if (std::hypot(cursor.x() - m_snapAt.x(), cursor.y() - m_snapAt.y()) < snapCancel) {
+                return m_snapped;
             }
-            const int steps = 1 + int((ax - gestureStep1) / gestureStepEach);
-            const bool left = delta.x() < 0;
-            // A free window's first step is the half on that side.
-            int j;
-            if (m_dragStartPlace == Place::Free) {
-                j = left ? placeIndex(Place::HalfLeft) + 1 - steps : placeIndex(Place::HalfRight) - 1 + steps;
-            } else {
-                j = placeIndex(m_dragStartPlace) + (left ? -steps : steps);
-            }
-            j = std::clamp(j, 0, 5);
-            if (placeOrder[j] == m_dragStartPlace) {
-                return std::nullopt;
-            }
-            const Place to = placeOrder[j];
-            return Gesture{.key = int(to), .drawn = placeRect(window, to, m_dragOriginal, m_dragStartCenterY), .place = to};
+            m_snapped.reset(); // moving on: follow again
         }
-        if (ax <= ay * gestureCone && inMain && ay >= gestureStep1) {
-            const RectF area = workspace()->clientArea(MaximizeArea, window);
-            const QRectF &start = m_dragStartFrame;
-            if (delta.y() < 0) {
-                return Gesture{.key = 100, .drawn = QRectF(start.x(), area.y(), start.width(), area.height()), .fill = true};
-            }
-            auto it = m_beforeFillHeight.find(window);
-            if (it != m_beforeFillHeight.end()) {
-                return Gesture{.key = 101, .drawn = QRectF(start.x(), it->second.first, start.width(), it->second.second), .unfill = true};
+        if (!(input()->keyboardModifiers() & Qt::MetaModifier)) {
+            m_snapDwell.stop();
+            m_leadRun = 0;
+            return std::nullopt;
+        }
+        if (!moved) {
+            return std::nullopt;
+        }
+        m_snapDwell.start();
+
+        // Slow: 1:1 (precise).
+        const auto &[t0, p0] = m_leadSamples.front();
+        const qreal dt = std::chrono::duration<qreal>(now - t0).count();
+        if (dt <= 0 || std::abs(cursor.x() - p0.x()) / dt < leadSlow) {
+            m_leadRun = 0;
+            m_leadAgainst = 0;
+            return std::nullopt;
+        }
+        if (dx == 0) {
+            return std::nullopt;
+        }
+        const int dir = dx < 0 ? -1 : 1;
+        qreal gain = 1.0;
+        if (m_leadDir == 0 || dir == m_leadDir) {
+            m_leadDir = dir;
+            m_leadRun += std::abs(dx);
+            m_leadAgainst = 0;
+            const RectF screen = window->moveResizeOutput()->geometryF();
+            gain = 1.0 + (leadMaxGain - 1.0) * std::min(1.0, m_leadRun / (screen.width() * leadBuild));
+        } else {
+            m_leadAgainst += std::abs(dx);
+            if (m_leadAgainst >= reversalJitter) {
+                m_leadDir = dir; // reversed: a new run, at 1:1
+                m_leadRun = m_leadAgainst;
+                m_leadAgainst = 0;
             }
         }
+        m_leadX += (gain - 1.0) * dx;
+        const RectF screen = window->moveResizeOutput()->geometryF();
+        const qreal x = std::clamp(cursor.x() + m_leadX, screen.x(), screen.x() + screen.width());
+        m_leadX = x - cursor.x();
         return std::nullopt;
+    }
+
+    // Pause to snap: the place where the dragged window is drawn. In an edge
+    // zone the stash on that side, or parking if it is about as small as
+    // parking icons; else the half of main its center is in.
+    std::optional<Gesture> snapTarget(Window *window) const
+    {
+        const QRectF drawn = m_dragDisplayed;
+        const QPointF center = drawn.center();
+        const RectF screen = window->moveResizeOutput()->geometryF();
+        const qreal zoneWidth = screen.width() * zoneFraction;
+        const bool tiny = drawn.width() / m_dragOriginal.width() < minScale + 0.05;
+        Place place;
+        if (center.x() < screen.x() + zoneWidth) {
+            place = tiny ? Place::ParkingLeft : Place::StashLeft;
+        } else if (center.x() > screen.x() + screen.width() - zoneWidth) {
+            place = tiny ? Place::ParkingRight : Place::StashRight;
+        } else {
+            place = center.x() < screen.x() + screen.width() / 2 ? Place::HalfLeft : Place::HalfRight;
+        }
+        return Gesture{.key = int(place), .drawn = placeRect(window, place, m_dragOriginal, center.y()), .place = place};
     }
 
     // Released with a gesture target: go there, gliding from where it is
@@ -1108,7 +1179,7 @@ private:
             const QRectF &r = gesture.drawn;
             resizeAnimated(window, RectF(r.x(), r.y(), r.width(), r.height()), from);
         } else if (gesture.place) {
-            commitPlace(window, *gesture.place, m_dragOriginal, m_dragStartCenterY, from);
+            commitPlace(window, *gesture.place, m_dragOriginal, gesture.drawn.center().y(), from);
         } else if (gesture.fill) {
             const RectF area = workspace()->clientArea(MaximizeArea, window);
             if (!m_beforeFillHeight.contains(window)) {
@@ -1133,6 +1204,8 @@ private:
         }
         m_dragged = nullptr;
         m_dragAnimating = false;
+        m_snapDwell.stop();
+        m_snapped.reset();
         const std::optional<Gesture> gesture = m_dragGesture;
         m_dragGesture.reset();
         if (!window->windowItem()) {
@@ -1153,16 +1226,22 @@ private:
             arrange(window);
         } else if (m_dragOriginal != QSizeF(frame.width(), frame.height())) {
             // Back to the original size, keeping the grabbed spot under the
-            // cursor: the drawing grows around it until the app has resized.
+            // cursor (plus the window's lead): the drawing grows around it
+            // until the app has resized.
             const QPointF cursor = input()->pointer()->pos();
+            const QPointF lead(m_leadX, 0);
             const qreal grow = m_dragOriginal.width() / frame.width();
-            const QRectF target(cursor - (cursor - frame.topLeft()) * grow, m_dragOriginal);
+            const QRectF target(cursor + lead - (cursor - frame.topLeft()) * grow, m_dragOriginal);
             m_parked[window] = Parked{.shown = target, .original = m_dragOriginal, .restoring = true};
             qInfo("glance: %s: restore to %.0fx%.0f", qPrintable(window->caption()),
                   m_dragOriginal.width(), m_dragOriginal.height());
             window->moveResize(RectF(target.topLeft(), m_dragOriginal));
             applyParked(window);
         } else {
+            // Full size: where it is drawn (ahead of the pointer by the lead).
+            if (m_leadX != 0) {
+                window->move(frame.topLeft() + QPointF(m_leadX, 0));
+            }
             setDrawTransform(window, QTransform());
         }
     }

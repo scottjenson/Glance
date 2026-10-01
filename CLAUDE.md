@@ -33,7 +33,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 - **Respect mouse drags** (user's principle, 2026-09-30): a plain mouse
   drop (a window, or a clip dropped on the desktop) should land where and
   as large as the user put it, changed as little as possible. Snapping to
-  places is for the keyboard (Meta+arrows) and Meta+drag gestures. Known
+  places is for the keyboard (Meta+arrows) and Meta+drag throws. Known
   tension: the stacks rule below re-forms a column when a window is
   dropped into a stash or parking area, which moves the dropped window;
   the user knows this isn't a perfect rule. Prefer the least movement
@@ -342,20 +342,29 @@ app scope (they used to live in KWin's service cgroup). Check with
 logouts from sessions without any clips.
 
 ## Next steps
-1. Mouse accelerators: Meta+drag gestures (built 2026-09-30; see the
-   header comment in main.cpp). While Meta is held during a drag, the
-   window snaps (glides) to the gesture target as a preview; releasing the
-   mouse commits, releasing Meta returns to a normal drag. Sideways walks
-   the ladder parking L, stash L, left half, right half, stash R,
-   parking R, one step per threshold (150 px, then every 250 px; a free
-   window's first step is the half on that side). "In a half" (keyboard
-   and gestures) = the window's horizontal extent and the half's share
-   >= 80% (IoU, `halfMatch`), so a nudged window counts as in it. Up/down
-   = Meta+Up/Down. A short diagonal (>= 100 px, under 150 px sideways) =
-   the half on that side, full height if upward. The user felt snapping
-   may be a bit quick; the distances are "pinned" for later tuning.
-   Gesture distance is measured from our own recorded press position:
-   KWin's `interactiveMoveResizeAnchor()` follows the cursor during a move.
+1. Mouse accelerators: Meta+drag acceleration + pause to snap (designed
+   with the user 2026-10-01 after two rounds: distance-based snapping
+   spoiled Meta+drag as "grab anywhere and move a bit"; velocity throws
+   felt chaotic, burned through the ladder, gave no feedback; see
+   `leadStep`). Meta+drag moves like a title-bar drag, but horizontally
+   the window gets ahead of the pointer (`m_leadX`; the pointer can't be
+   moved: VMware's pointer is absolute). Gain grows from 1 to
+   `leadMaxGain` (4) over a run of `leadBuild` (5% of screen width) in
+   one direction; a reversal (>= `reversalJitter`, 5 px, against it) or
+   moving slower than `leadSlow` (300 px/s) restarts at 1:1, so
+   corrections are precise (user's Fitts's-law point). Screen edges stop
+   the window and overshoot isn't stored. Holding still `snapDwell`
+   (500 ms) snaps to where the window is (`snapTarget`: half of main by
+   its center, the stash in an edge zone, parking if about parking-size);
+   release keeps it, moving `snapCancel` cancels. Without Meta: gain 1, no
+   snapping. Vertical throws/fill were dropped (Meta+Up/Down remain). All
+   numbers are first guesses to tune by feel. User verdict (2026-10-01):
+   "feels like I'm in control"; the pointer not lining up with the window
+   is "a little weird" but worth the trade-off; parameters may be tuned
+   with more use. "In a half" (keyboard) = the
+   window's horizontal extent and the half's share >= 80% (IoU,
+   `halfMatch`). The drag's start place uses our own recorded press:
+   KWin's `interactiveMoveResizeAnchor()` follows the cursor.
 2. Polish: re-anchor less often (e.g. on press/scroll, or after enough
    movement); overlapping parked windows; title-bar buttons of parked
    windows; text quality (the Wayfire halving scaler, below; pixel-exact

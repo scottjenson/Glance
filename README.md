@@ -55,10 +55,11 @@ The Meta key (Super / Windows / Command) is the window system's key:
 - **Meta + double-click** a window to focus on it: it fills the nearer half
   of main, top to bottom, and every other window moves to the sides.
   On the empty desktop it clears main. Do it again to undo.
-- **Meta + drag** does the same with the mouse: drag sideways and the window
-  snaps from place to place as you go. Drag up for full height, or
-  diagonally for the half of main on that side. Let go of the mouse to keep
-  it there, or let go of Meta to go back to a normal drag.
+- **Meta + drag** moves a window from anywhere inside it, and it
+  accelerates: keep moving quickly to one side and the window gets ahead of
+  the pointer, so it crosses a wide screen with a short movement. Slow
+  down or turn back and it follows exactly again. Hold still for a moment
+  and it snaps into the half of main, stash or parking it is in.
 
 ## Status
 

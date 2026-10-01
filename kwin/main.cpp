@@ -65,6 +65,14 @@
 // Focus ring: the active window gets a thin outline in the accent color, as
 // wide on screen at any scale, so it stands out also when tiny.
 //
+// Previews: hovering an icon-sized parked window makes it fly out beside
+// its column, toward main, at 1:1 with the app's (resized) layout, so it is
+// sharp and readable; its home spot stays reserved and the column doesn't
+// move. The first waits previewDelay; moving along the column then switches
+// at once (the old one glides back while the new one comes out). The pointer
+// can move into the preview to use it; leaving both closes it after
+// previewGrace (see updateHover).
+//
 // Clips: text dragged out of an app and dropped on the desktop becomes a
 // window instead of Plasma's sticky-note widget: it is saved as a file in
 // ~/Clips and opened in KWrite where it was dropped, as if its window had
@@ -137,6 +145,21 @@ public:
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
         connect(workspace(), &Workspace::windowActivated, this, &Glance::updateRing);
         connect(workspace(), &Workspace::windowAdded, this, &Glance::placeClip);
+
+        m_previewOpen.setSingleShot(true);
+        m_previewOpen.setInterval(previewDelay);
+        connect(&m_previewOpen, &QTimer::timeout, this, [this]() {
+            if (m_previewCandidate && isIcon(m_previewCandidate)) {
+                openPreview(m_previewCandidate);
+            }
+        });
+        m_previewClose.setSingleShot(true);
+        m_previewClose.setInterval(previewGrace);
+        connect(&m_previewClose, &QTimer::timeout, this, [this]() {
+            if (Window *window = previewWindow()) {
+                closePreview(window);
+            }
+        });
         updateRing();
 
         disableKdeShortcuts();
@@ -287,6 +310,7 @@ public:
         if (m_pending) {
             return pendingMotion(event);
         }
+        updateHover(event->position, event->buttons);
         if (!route(event->position, event->buttons != Qt::NoButton)) {
             return false;
         }
@@ -396,6 +420,8 @@ private:
         QSizeF original;
         // Being resized back to `original`; done once it has that size.
         bool restoring = false;
+        // Drawn here instead of `shown` while hovered (see updateHover).
+        std::optional<QRectF> preview = std::nullopt;
         // Animating from `from` to `shown` since `start`.
         bool animating = false;
         QRectF from = {};
@@ -467,6 +493,13 @@ private:
     qint64 m_clipPid = 0;
     QPointF m_clipPosition;
 
+    // The previewed window, the one the pointer waits on, and the timers to
+    // open and close previews (see updateHover).
+    QPointer<Window> m_preview;
+    QPointer<Window> m_previewCandidate;
+    QTimer m_previewOpen;
+    QTimer m_previewClose;
+
     // The focus ring (see updateRing) and the window it outlines.
     OutlinedBorderItem *m_ring = nullptr;
     QPointer<Window> m_ringWindow;
@@ -522,7 +555,7 @@ private:
             return false;
         }
         const Parked &parked = m_parked.at(window);
-        if (parked.restoring || parked.shown.width() / parked.original.width() >= iconBelow) {
+        if (parked.restoring || parked.preview || parked.shown.width() / parked.original.width() >= iconBelow) {
             return false;
         }
         // Line the frame up with the pointer, so KWin sees what's under it.
@@ -605,6 +638,12 @@ private:
     // extent and the half's share at least this much (intersection over
     // union), so a slightly moved or resized one still does.
     static constexpr qreal halfMatch = 0.8;
+
+    // Hover previews: wait before the first one opens, grace before one
+    // closes after the pointer left, and the gap to its column.
+    static constexpr std::chrono::milliseconds previewDelay{300};
+    static constexpr std::chrono::milliseconds previewGrace{300};
+    static constexpr qreal previewGap = 8.0;
 
     // Where clips are saved, relative to the home folder.
     static constexpr const char *clipsFolder = "Clips";
@@ -1134,11 +1173,12 @@ private:
     // on the way there (ease-out).
     static QRectF displayRect(const Parked &parked)
     {
+        const QRectF &target = parked.preview ? *parked.preview : parked.shown;
         if (!parked.animating) {
-            return parked.shown;
+            return target;
         }
         const qreal t = progress(parked);
-        return lerpRect(parked.from, parked.shown, 1.0 - std::pow(1.0 - t, 3));
+        return lerpRect(parked.from, target, 1.0 - std::pow(1.0 - t, 3));
     }
 
     static QRectF lerpRect(const QRectF &a, const QRectF &b, qreal e)
@@ -1246,6 +1286,119 @@ private:
                 arrangeArea(area, output, nullptr);
             }
         };
+    }
+
+    // --- Hover previews ---
+
+    // A parked window shown small enough to act like an icon (see iconBelow).
+    bool isIcon(Window *window) const
+    {
+        auto it = m_parked.find(window);
+        return it != m_parked.end() && !it->second.restoring
+            && it->second.shown.width() / it->second.original.width() < iconBelow;
+    }
+
+    // The previewed window, if it still is one.
+    Window *previewWindow()
+    {
+        if (m_preview && !(isParked(m_preview) && m_parked.at(m_preview).preview)) {
+            m_preview = nullptr;
+        }
+        return m_preview;
+    }
+
+    // The icon whose home spot in its column is at `pos` (the spot counts
+    // also while that window is out as a preview), half the gap around it
+    // included so moving along the column never falls between two.
+    Window *iconAt(const QPointF &pos) const
+    {
+        for (const auto &[window, parked] : m_parked) {
+            if (isIcon(window) && !window->isMinimized() && window->isOnCurrentDesktop()
+                && parked.shown.adjusted(0, -arrangeGap / 2, 0, arrangeGap / 2).contains(pos)) {
+                return window;
+            }
+        }
+        return nullptr;
+    }
+
+    // On every pointer motion: the icon under the pointer comes out after
+    // previewDelay, or at once if another is out already (that one glides
+    // back at the same time). Over the preview itself it stays out; anywhere
+    // else it goes back after previewGrace. Nothing changes while a button is
+    // held, a window is moved, or something is dragged.
+    void updateHover(const QPointF &pos, Qt::MouseButtons buttons)
+    {
+        if (buttons != Qt::NoButton || workspace()->moveResizeWindow() || waylandServer()->seat()->isDrag()) {
+            m_previewOpen.stop();
+            return;
+        }
+        Window *preview = previewWindow();
+        if (preview && drawnRect(preview).contains(pos)) {
+            m_previewOpen.stop();
+            m_previewClose.stop();
+            return;
+        }
+        Window *icon = iconAt(pos);
+        if (!icon) {
+            m_previewOpen.stop();
+            m_previewCandidate = nullptr;
+            if (preview && !m_previewClose.isActive()) {
+                m_previewClose.start();
+            }
+            return;
+        }
+        m_previewClose.stop();
+        if (icon == preview) {
+            m_previewOpen.stop();
+        } else if (preview) {
+            m_previewOpen.stop();
+            openPreview(icon);
+        } else if (icon != m_previewCandidate || !m_previewOpen.isActive()) {
+            m_previewCandidate = icon;
+            m_previewOpen.start();
+        }
+    }
+
+    // Beside its column, toward main: 1:1 with the app's current layout,
+    // scaled down only to fit the screen, vertically centered on its spot.
+    QRectF previewRect(Window *window) const
+    {
+        const Parked &parked = m_parked.at(window);
+        const RectF screen = window->output()->geometryF();
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
+        const RectF frame = window->frameGeometry();
+        const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
+        const qreal room = left ? screen.x() + screen.width() - parked.shown.right() - previewGap
+                                : parked.shown.left() - previewGap - screen.x();
+        const qreal scale = std::min({1.0, area.height() / frame.height(), room / frame.width()});
+        const QSizeF size = QSizeF(frame.width(), frame.height()) * scale;
+        const qreal x = left ? parked.shown.right() + previewGap : parked.shown.left() - previewGap - size.width();
+        const qreal y = std::clamp(parked.shown.center().y() - size.height() / 2, area.y(),
+                                   std::max(area.y(), area.y() + area.height() - size.height()));
+        return QRectF(QPointF(x, y), size);
+    }
+
+    void openPreview(Window *window)
+    {
+        if (Window *old = previewWindow(); old && old != window) {
+            closePreview(old);
+        }
+        m_previewCandidate = nullptr;
+        const QRectF from = currentlyDrawn(window);
+        m_parked.at(window).preview = previewRect(window);
+        m_preview = window;
+        workspace()->raiseWindow(window);
+        animate(window, from);
+    }
+
+    void closePreview(Window *window)
+    {
+        const QRectF from = currentlyDrawn(window);
+        m_parked.at(window).preview.reset();
+        if (window == m_preview) {
+            m_preview = nullptr;
+        }
+        animate(window, from);
     }
 
     // --- Clips: text dropped on the desktop ---

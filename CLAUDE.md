@@ -81,6 +81,13 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   accent-colored outline (like a dialog's keyboard focus ring), same width
   on screen at any scale. Dimming inactive windows was rejected: stashed
   windows are meant to be used, not faded.
+- **Hover previews** (built 2026-09-30, user: "this works"): hovering an
+  icon-sized parked window flies it out beside its column toward main
+  (fly-out chosen over dock-style magnification: the column never moves,
+  so all icons stay visible). Scrubbing along the column: the first opens
+  after 300 ms, then switches at once, old and new animating
+  simultaneously (user's explicit wish). Pointer can move into the
+  preview to use it; leaving closes it after 300 ms.
 - **Stacks (built 2026-09-29):** each stash and parking area holds its
   windows as one column, centred vertically, ordered by vertical position
   (an arriving window that lands on another goes below it). Arrivals
@@ -247,6 +254,16 @@ palette's Highlight (KDE accent); radius = `window->borderRadius()`. Items
 don't delete their children and a child must be deleted before its parent,
 so the ring is removed on `Window::closed`. All transform changes go
 through `setDrawTransform`, which keeps the ring width in step.
+
+**Hover previews** (`updateHover`, `iconAt`, `previewRect`,
+`openPreview`, `closePreview`): `Parked::preview` is drawn instead of
+`shown` (`displayRect`), so drawing, picking and re-anchoring follow it;
+`shown` (the home spot) is untouched. `iconAt` hit-tests home spots
+(± half `arrangeGap`), also while that window is out. Preview size = the
+current frame at 1:1 (the app's resized layout, so sharp), capped to the
+screen. Previewed windows are raised and don't hold presses back.
+Timers `m_previewOpen` (`previewDelay`) and `m_previewClose`
+(`previewGrace`). Not while a button is held, a move is on or a DnD drag.
 
 **Clips** (`dropToClip`, `readClip`, `finishClip`, `placeClip`; built
 2026-09-30, the start of "erase the lines between windows, files and the

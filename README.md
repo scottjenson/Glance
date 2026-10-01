@@ -26,6 +26,9 @@ Key mechanics:
 - **Small windows stay usable.** You can click, type and scroll in them. The
   app is really resized to a narrow width, so web pages switch to their
   mobile layout.
+- **Hover over an icon-sized window to read it:** it slides out beside its
+  column at a readable size. Move along the column to flip through them, or
+  move into the preview to use it.
 - **Icon-sized windows can be grabbed anywhere:** a drag moves the window,
   and a click still goes to the app.
 - **The stash and parking areas keep their windows in a centered stack**,

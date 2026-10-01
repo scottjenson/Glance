@@ -79,7 +79,10 @@
 // been dragged there (held at its center), so it can be moved, parked and
 // selected like any window (see dropToClip). Dropped in the parking band
 // (the outer clipParkingBand of an edge zone, also onto parking icons), it
-// becomes a parking icon in that column instead.
+// becomes a parking icon in that column instead. Meta+C (a KDE global
+// shortcut, changeable in System Settings) clips the text selected in the
+// active window the same way, into parking on the side nearer that window
+// (see clipSelection).
 //
 // Stacks: the windows in each stash and parking area form one column,
 // centered vertically, in the order of their vertical position (see
@@ -103,10 +106,14 @@
 #include <scene/windowitem.h>
 #include <utils/filedescriptor.h>
 #include <wayland/abstract_data_source.h>
+#include <wayland/clientconnection.h>
 #include <wayland/seat.h>
+#include <wayland/surface.h>
 #include <wayland_server.h>
 #include <window.h>
 #include <workspace.h>
+
+#include <KGlobalAccel>
 
 #include <QAction>
 #include <QDateTime>
@@ -147,6 +154,12 @@ public:
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
         connect(workspace(), &Workspace::windowActivated, this, &Glance::updateRing);
         connect(workspace(), &Workspace::windowAdded, this, &Glance::placeClip);
+
+        auto clipAction = new QAction(this);
+        clipAction->setObjectName(QStringLiteral("Glance Clip Selection"));
+        clipAction->setText(QStringLiteral("Glance: Clip the Selected Text"));
+        KGlobalAccel::self()->setGlobalShortcut(clipAction, QKeySequence(Qt::META | Qt::Key_C));
+        connect(clipAction, &QAction::triggered, this, &Glance::clipSelection);
 
         m_previewOpen.setSingleShot(true);
         m_previewOpen.setInterval(previewDelay);
@@ -479,16 +492,19 @@ private:
     };
     std::optional<PendingPress> m_pending;
 
-    // A text drop being turned into a clip (see dropToClip): the text read so
-    // far from the dragging app, and the held-back release.
+    // Text being turned into a clip (see startClip): the text read so far,
+    // where the clip goes, and for a drop (see dropToClip) the held-back
+    // release.
     struct ClipRead
     {
-        int fd;
-        std::unique_ptr<QSocketNotifier> notifier;
-        QByteArray text;
+        int fd = -1;
+        std::unique_ptr<QSocketNotifier> notifier = nullptr;
+        QByteArray text = {};
         QPointF position;
-        quint32 nativeButton;
-        std::chrono::microseconds timestamp;
+        std::optional<Place> place = std::nullopt;
+        bool fromDrag = false;
+        quint32 nativeButton = 0;
+        std::chrono::microseconds timestamp = {};
     };
     std::unique_ptr<ClipRead> m_clip;
     // The KWrite started for the last clip, where its window goes, and
@@ -1426,33 +1442,73 @@ private:
         if (under && !under->isDesktop() && !(isIcon(under) && parkingSide(event->position))) {
             return false;
         }
-        const QStringList types = seat->dragSource()->mimeTypes();
-        if (types.contains(QStringLiteral("text/uri-list"))) {
-            return false;
-        }
-        QString mimeType;
-        for (const char *type : {"text/plain;charset=utf-8", "text/plain", "UTF8_STRING"}) {
-            if (types.contains(QLatin1String(type))) {
-                mimeType = QLatin1String(type);
-                break;
-            }
-        }
+        const QString mimeType = clipMimeType(seat->dragSource()->mimeTypes());
         if (mimeType.isEmpty()) {
             return false;
         }
+        return startClip(seat->dragSource(), mimeType,
+                         ClipRead{.position = event->position,
+                                  .place = parkingSide(event->position),
+                                  .fromDrag = true,
+                                  .nativeButton = event->nativeButton,
+                                  .timestamp = event->timestamp});
+    }
+
+    // Meta+C: clip the text selected in the active window (the primary
+    // selection, if that window's app owns it: the primary selection
+    // outlives the highlight and may belong to another app) into parking on
+    // the side nearer the window.
+    void clipSelection()
+    {
+        Window *window = workspace()->activeWindow();
+        AbstractDataSource *source = waylandServer()->seat()->primarySelection();
+        if (m_clip || !window || !window->surface() || !source) {
+            return;
+        }
+        if (source->client() != window->surface()->client()->client()) {
+            qInfo("glance: clip: no text selected in %s", qPrintable(window->caption()));
+            return;
+        }
+        const QString mimeType = clipMimeType(source->mimeTypes());
+        if (mimeType.isEmpty()) {
+            return;
+        }
+        const QRectF drawn = currentlyDrawn(window);
+        const RectF screen = window->output()->geometryF();
+        const bool left = drawn.center().x() < screen.x() + screen.width() / 2;
+        startClip(source, mimeType,
+                  ClipRead{.position = drawn.center(), .place = left ? Place::ParkingLeft : Place::ParkingRight});
+    }
+
+    // Plain text offered as one of `types`, or empty. Files and links (they
+    // come with text/uri-list) don't count.
+    static QString clipMimeType(const QStringList &types)
+    {
+        if (types.contains(QStringLiteral("text/uri-list"))) {
+            return {};
+        }
+        for (const char *type : {"text/plain;charset=utf-8", "text/plain", "UTF8_STRING"}) {
+            if (types.contains(QLatin1String(type))) {
+                return QLatin1String(type);
+            }
+        }
+        return {};
+    }
+
+    // Ask `source` for its text; it arrives in readClip, and finishClip
+    // makes the clip. Returns whether it started.
+    bool startClip(AbstractDataSource *source, const QString &mimeType, ClipRead clip)
+    {
         int fds[2];
         if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) {
             return false;
         }
         // The app writes into fds[1] (our copy is closed once sent) until
         // it closes it; we read fds[0] as data arrives.
-        seat->dragSource()->requestData(mimeType, FileDescriptor(fds[1]));
-        m_clip = std::make_unique<ClipRead>(ClipRead{.fd = fds[0],
-                                                     .notifier = std::make_unique<QSocketNotifier>(fds[0], QSocketNotifier::Read),
-                                                     .text = {},
-                                                     .position = event->position,
-                                                     .nativeButton = event->nativeButton,
-                                                     .timestamp = event->timestamp});
+        source->requestData(mimeType, FileDescriptor(fds[1]));
+        clip.fd = fds[0];
+        clip.notifier = std::make_unique<QSocketNotifier>(fds[0], QSocketNotifier::Read);
+        m_clip = std::make_unique<ClipRead>(std::move(clip));
         connect(m_clip->notifier.get(), &QSocketNotifier::activated, this, &Glance::readClip);
         QTimer::singleShot(clipTimeout, this, [this, fd = fds[0]]() {
             if (m_clip && m_clip->fd == fd) {
@@ -1478,8 +1534,8 @@ private:
         }
     }
 
-    // All text read (or given up): end the drag, pass the release on, and
-    // save and open the clip.
+    // All text read (or given up): for a drop, end the drag and pass the
+    // release on; save and open the clip.
     void finishClip()
     {
         const std::unique_ptr<ClipRead> clip = std::move(m_clip);
@@ -1488,11 +1544,13 @@ private:
         clip->notifier.release()->deleteLater();
         close(clip->fd);
 
-        auto seat = waylandServer()->seat();
-        seat->cancelDrag();
-        seat->setTimestamp(clip->timestamp);
-        seat->notifyPointerButton(clip->nativeButton, PointerButtonState::Released);
-        seat->notifyPointerFrame();
+        if (clip->fromDrag) {
+            auto seat = waylandServer()->seat();
+            seat->cancelDrag();
+            seat->setTimestamp(clip->timestamp);
+            seat->notifyPointerButton(clip->nativeButton, PointerButtonState::Released);
+            seat->notifyPointerFrame();
+        }
 
         if (clip->text.trimmed().isEmpty()) {
             qWarning("glance: clip: no text received");
@@ -1530,7 +1588,7 @@ private:
         }
         m_clipPid = pid;
         m_clipPosition = clip->position;
-        m_clipPlace = parkingSide(clip->position);
+        m_clipPlace = clip->place;
         qInfo("glance: clip: %lld bytes -> %s", qlonglong(clip->text.size()), qPrintable(path));
     }
 

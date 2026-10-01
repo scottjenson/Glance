@@ -38,6 +38,8 @@ Key mechanics:
   onto empty desktop, and it is saved as a file in `~/Clips` and opened in
   KWrite right there, so you can keep it at the side like any window. Drop
   it at the very edge of the screen and it goes straight to parking.
+- **Meta + C clips the selected text:** highlight text in any window and
+  press Meta+C, and it becomes a clip in parking on that window's side.
 - **The active window has a thin outline** in your accent color, so you can
   tell which one is selected even when it is small.
 
@@ -66,7 +68,7 @@ no package yet. The source is in `kwin/`.
 You build it yourself against your installed Plasma. On Fedora (KDE):
 
 ```sh
-sudo dnf install git cmake gcc-c++ extra-cmake-modules kwin-devel libepoxy-devel
+sudo dnf install git cmake gcc-c++ extra-cmake-modules kwin-devel libepoxy-devel kf6-kglobalaccel-devel
 git clone https://github.com/scottjenson/Glance.git
 cd Glance
 cmake -S kwin -B kwin/build

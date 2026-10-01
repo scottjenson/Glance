@@ -106,7 +106,8 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   for checking internals (`dnf download --source kwin`, then
   `rpm2cpio kwin-*.src.rpm | cpio -idm` and untar).
 - Build packages (installed): `kwin-devel`, `extra-cmake-modules`,
-  `libepoxy-devel` (kwin-devel doesn't pull it in).
+  `libepoxy-devel` (kwin-devel doesn't pull it in),
+  `kf6-kglobalaccel-devel` (for the Meta+C shortcut; installed 2026-10-01).
 - Display: VMware "Use full resolution for Retina display" is on; the VM
   screen is about 6000x2450 px (it follows the VM window size). KDE scale
   changes: 200% earlier, **150%** since 2026-09-29 evening (4004x1630
@@ -281,6 +282,13 @@ except on parking icons in the parking band. Parking band (built
 2026-10-01, the user asked for this snap explicitly): text dropped within
 `clipParkingBand` (0.15 of the edge zone, ~150 px) of a screen edge
 becomes a parking icon in that column (`commitPlace`, `m_clipPlace`).
+Meta+C (`clipSelection`, built 2026-10-01; Meta+Left/Right was rejected
+for this: it already moves windows, and the primary selection outlives the
+highlight): a KGlobalAccel shortcut ("Glance Clip Selection", listed in
+System Settings under KWin, rebindable). Clips the primary selection if
+its source's client is the active window's client, into parking on the
+side nearer that window. Drops and Meta+C share `startClip`/`finishClip`
+(`ClipRead::fromDrag` says whether a drag must be cancelled).
 Future: images, other kinds of clipboard content.
 
 Unloading resizes parked windows back to their original size.
@@ -361,7 +369,11 @@ CLAUDE.md as of commit 6f217f6.
   VMware Fusion's Mac shortcut mappings turned Command+click into
   Ctrl+click (Firefox opened new tabs, KDE's Meta+drag did nothing); the
   user turned that mapping off in Fusion's Keyboard & Mouse settings
-  (2026-09-30). If Meta+click stops working, check there first.
+  (2026-09-30). If Meta+click stops working, check there first. Same for
+  keys: Fusion's Key Mappings turned Command+C into Ctrl+C, so Meta+C never
+  reached KWin; the user turned that mapping off (2026-10-01) and copies
+  with Ctrl+C in the VM. If a Meta+letter shortcut does nothing (no
+  `glance:` log line), check Fusion's Key Mappings.
 - Mac→VM clipboard (VMware Tools, `vmtoolsd -n vmusr`) is unreliable and
   adds a trailing NUL byte; keep commands for the user short or put them
   in scripts.

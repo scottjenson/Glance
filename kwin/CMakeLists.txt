@@ -18,10 +18,11 @@ include(KDECompilerSettings NO_POLICY_SCOPE)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Quick)
 find_package(KF6CoreAddons REQUIRED)
+find_package(KF6GlobalAccel REQUIRED)
 find_package(KWin REQUIRED)
 
 kcoreaddons_add_plugin(glance SOURCES main.cpp INSTALL_NAMESPACE "kwin/effects/plugins")
-target_link_libraries(glance PRIVATE KWin::kwin)
+target_link_libraries(glance PRIVATE KWin::kwin KF6::GlobalAccel)
 # KWin headers missing from kwin-devel (see the note in each).
 target_include_directories(glance SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/kwin-private)
 # Let moc see the Q_OBJECT inside KWin's effect factory macro.

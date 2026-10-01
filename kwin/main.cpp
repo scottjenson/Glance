@@ -66,13 +66,14 @@
 // Focus ring: the active window gets a thin outline in the accent color, as
 // wide on screen at any scale, so it stands out also when tiny.
 //
-// Previews: hovering an icon-sized parked window makes it fly out beside
-// its column, toward main, at 1:1 with the app's (resized) layout, so it is
-// sharp and readable; its home spot stays reserved and the column doesn't
-// move. The first waits previewDelay; moving along the column then switches
-// at once (the old one glides back while the new one comes out). The pointer
-// can move into the preview to use it; leaving both closes it after
-// previewGrace (see updateHover).
+// Previews: hovering an icon-sized parked window makes it grow in place to
+// previewGrow times its size (at most 1:1 with the app's resized layout,
+// so it stays sharp), anchored at its screen edge and centered on its spot,
+// over its neighbours, which stay put and partly visible. The pointer stays
+// over it, so it can still be dragged, and clicks pass through as for any
+// icon. The first waits previewDelay; moving into a neighbour's spot then
+// switches at once (both animate); leaving closes it after previewGrace
+// (see updateHover).
 //
 // Declutter (Meta+double-click): on a window, it takes the half of main
 // nearest to it at full height, and every other window in main goes to the
@@ -638,7 +639,7 @@ private:
             return false;
         }
         const Parked &parked = m_parked.at(window);
-        if (parked.restoring || parked.preview || parked.shown.width() / parked.original.width() >= iconBelow) {
+        if (parked.restoring || parked.shown.width() / parked.original.width() >= iconBelow) {
             return false;
         }
         // Line the frame up with the pointer, so KWin sees what's under it.
@@ -722,11 +723,12 @@ private:
     // union), so a slightly moved or resized one still does.
     static constexpr qreal halfMatch = 0.8;
 
-    // Hover previews: wait before the first one opens, grace before one
-    // closes after the pointer left, and the gap to its column.
+    // Hover previews: how much a hovered icon grows, the wait before the
+    // first one opens, and the grace before one closes after the pointer
+    // left.
+    static constexpr qreal previewGrow = 2.0;
     static constexpr std::chrono::milliseconds previewDelay{300};
     static constexpr std::chrono::milliseconds previewGrace{300};
-    static constexpr qreal previewGap = 8.0;
 
     // Where clips are saved, relative to the home folder.
     static constexpr const char *clipsFolder = "Clips";
@@ -1639,11 +1641,12 @@ private:
         return nullptr;
     }
 
-    // On every pointer motion: the icon under the pointer comes out after
-    // previewDelay, or at once if another is out already (that one glides
-    // back at the same time). Over the preview itself it stays out; anywhere
-    // else it goes back after previewGrace. Nothing changes while a button is
-    // held, a window is moved, or something is dragged.
+    // On every pointer motion: the icon whose home spot is under the pointer
+    // grows after previewDelay, or at once if another is grown already (that
+    // one shrinks at the same time), also where the grown one covers that
+    // spot. Elsewhere over the grown one it stays; anywhere else it shrinks
+    // after previewGrace. Nothing changes while a button is held, a window is
+    // moved, or something is dragged.
     void updateHover(const QPointF &pos, Qt::MouseButtons buttons)
     {
         if (buttons != Qt::NoButton || workspace()->moveResizeWindow() || waylandServer()->seat()->isDrag()) {
@@ -1651,12 +1654,12 @@ private:
             return;
         }
         Window *preview = previewWindow();
-        if (preview && drawnRect(preview).contains(pos)) {
+        Window *icon = iconAt(pos);
+        if (!icon && preview && drawnRect(preview).contains(pos)) {
             m_previewOpen.stop();
             m_previewClose.stop();
             return;
         }
-        Window *icon = iconAt(pos);
         if (!icon) {
             m_previewOpen.stop();
             m_previewCandidate = nullptr;
@@ -1677,8 +1680,9 @@ private:
         }
     }
 
-    // Beside its column, toward main: 1:1 with the app's current layout,
-    // scaled down only to fit the screen, vertically centered on its spot.
+    // In place: previewGrow times its home spot (at most 1:1 with the app's
+    // current layout, and the screen height), at its screen edge, centered
+    // vertically on its spot.
     QRectF previewRect(Window *window) const
     {
         const Parked &parked = m_parked.at(window);
@@ -1686,11 +1690,10 @@ private:
         const RectF area = workspace()->clientArea(MaximizeArea, window);
         const RectF frame = window->frameGeometry();
         const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-        const qreal room = left ? screen.x() + screen.width() - parked.shown.right() - previewGap
-                                : parked.shown.left() - previewGap - screen.x();
-        const qreal scale = std::min({1.0, area.height() / frame.height(), room / frame.width()});
+        const qreal scale = std::min({previewGrow * parked.shown.width() / frame.width(), 1.0,
+                                      area.height() / frame.height()});
         const QSizeF size = QSizeF(frame.width(), frame.height()) * scale;
-        const qreal x = left ? parked.shown.right() + previewGap : parked.shown.left() - previewGap - size.width();
+        const qreal x = left ? parked.shown.left() : parked.shown.right() - size.width();
         const qreal y = std::clamp(parked.shown.center().y() - size.height() / 2, area.y(),
                                    std::max(area.y(), area.y() + area.height() - size.height()));
         return QRectF(QPointF(x, y), size);

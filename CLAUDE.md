@@ -91,13 +91,16 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   that fits its column (so it lines up). Later (agreed): double-clicking
   two windows to share main; real crowding handling; QoL tweaks the user
   noticed but hasn't listed yet.
-- **Hover previews** (built 2026-09-30, user: "this works"): hovering an
-  icon-sized parked window flies it out beside its column toward main
-  (fly-out chosen over dock-style magnification: the column never moves,
-  so all icons stay visible). Scrubbing along the column: the first opens
-  after 300 ms, then switches at once, old and new animating
-  simultaneously (user's explicit wish). Pointer can move into the
-  preview to use it; leaving closes it after 300 ms.
+- **Hover previews** (built 2026-09-30; redesigned 2026-10-01): hovering
+  an icon-sized parked window grows it **in place** to 2x (`previewGrow`),
+  anchored at its edge and centered on its spot, over its neighbours,
+  which stay put and about half visible (user's idea). The first fly-out
+  version moved the window beside the column, away from the pointer, so
+  it couldn't be grabbed, and big apps (1:1 layout) got huge. Grown icons
+  keep icon behaviour (drag anywhere, clicks pass through). Scrubbing:
+  first after 300 ms, then switching at once by home spots, both
+  animating simultaneously (user's explicit wish). Leaving: shrinks after
+  300 ms. 2x may be too small to read; 2.5x is the fallback.
 - **Stacks (built 2026-09-29):** each stash and parking area holds its
   windows as one column, centred vertically, ordered by vertical position
   (an arriving window that lands on another goes below it). Arrivals
@@ -280,11 +283,12 @@ aren't rescaled. `moveTo`/`placeRect`/`commitPlace` take a stash scale.
 `openPreview`, `closePreview`): `Parked::preview` is drawn instead of
 `shown` (`displayRect`), so drawing, picking and re-anchoring follow it;
 `shown` (the home spot) is untouched. `iconAt` hit-tests home spots
-(± half `arrangeGap`), also while that window is out. Preview size = the
-current frame at 1:1 (the app's resized layout, so sharp), capped to the
-screen. Previewed windows are raised and don't hold presses back.
-Timers `m_previewOpen` (`previewDelay`) and `m_previewClose`
-(`previewGrace`). Not while a button is held, a move is on or a DnD drag.
+(± half `arrangeGap`), also under the grown window, and wins over it (so
+scrubbing works through it). Preview = `previewGrow` x the home spot,
+capped at 1:1 with the current frame and the screen height, at the
+screen edge, centered on the spot. Grown windows are raised. Timers
+`m_previewOpen` (`previewDelay`) and `m_previewClose` (`previewGrace`).
+Not while a button is held, a move is on or a DnD drag.
 
 **Clips** (`dropToClip`, `readClip`, `finishClip`, `placeClip`; built
 2026-09-30, the start of "erase the lines between windows, files and the

@@ -52,6 +52,9 @@ The Meta key (Super / Windows / Command) is the window system's key:
 - **Meta + Up** makes it fill the screen height; **Meta + Down** undoes that.
 - **Meta + Alt + arrows** selects the nearest window in that direction (the
   same keys as in plain KDE), including small windows at the sides.
+- **Meta + double-click** a window to focus on it: it fills the nearer half
+  of the middle, top to bottom, and every other window moves to the sides.
+  On the empty desktop it clears the middle. Do it again to undo.
 - **Meta + drag** does the same with the mouse: drag sideways and the window
   snaps from place to place as you go. Drag up for full height, or
   diagonally for the half of main on that side. Let go of the mouse to keep

@@ -73,6 +73,14 @@
 // can move into the preview to use it; leaving both closes it after
 // previewGrace (see updateHover).
 //
+// Declutter (Meta+double-click): on a window, it takes the half of main
+// nearest to it at full height, and every other window in main goes to the
+// stashes, split so both end up holding about as many (keeping their left-
+// to-right order); on the desktop, everything in main goes to the sides.
+// Each stash then shows all its windows at one scale, as large as fits the
+// screen height, so its column lines up. The same Meta+double-click again
+// undoes it (see declutter).
+//
 // Clips: text dragged out of an app and dropped on the desktop becomes a
 // window instead of Plasma's sticky-note widget: it is saved as a file in
 // ~/Clips and opened in KWrite where it was dropped, as if its window had
@@ -125,6 +133,7 @@
 #include <QPointer>
 #include <QProcess>
 #include <QSocketNotifier>
+#include <QStyleHints>
 #include <QTimer>
 #include <QTransform>
 
@@ -344,6 +353,9 @@ public:
             // follows the cursor, so it can't tell us).
             m_lastPress = event->position;
         }
+        if (metaDoubleClick(event)) {
+            return true;
+        }
         if (!pressed && dropToClip(event)) {
             return true;
         }
@@ -512,6 +524,30 @@ private:
     qint64 m_clipPid = 0;
     QPointF m_clipPosition;
     std::optional<Place> m_clipPlace;
+
+    // The last Meta+left press (for double-clicks), and whether the release
+    // of a double-click's second press is to be swallowed too.
+    std::optional<std::pair<QPointF, std::chrono::microseconds>> m_metaPress;
+    bool m_swallowRelease = false;
+
+    // How windows were before the last declutter, for undoing it: the
+    // target (null for the desktop), the half it went to, and each window's
+    // state then.
+    struct Saved
+    {
+        QPointer<Window> window;
+        std::optional<Parked> parked; // parked then, else free:
+        RectF frame;
+        MaximizeMode maximize = MaximizeRestore;
+    };
+    struct Declutter
+    {
+        bool desktop;
+        QPointer<Window> target;
+        Place half = Place::Free;
+        std::vector<Saved> saved;
+    };
+    std::optional<Declutter> m_declutter;
 
     // The previewed window, the one the pointer waits on, and the timers to
     // open and close previews (see updateHover).
@@ -756,7 +792,8 @@ private:
         moveTo(window, to);
     }
 
-    void moveTo(Window *window, Place place)
+    // `scale`: for a stash, the scale to show it at.
+    void moveTo(Window *window, Place place, qreal scale = stashScale)
     {
         // KDE's own maximized or tiled state would fight our geometry.
         if (window->maximizeMode() != MaximizeRestore) {
@@ -777,14 +814,14 @@ private:
         const RectF current = window->moveResizeGeometry();
         const QSizeF size = parked ? it->second.original : QSizeF(current.width(), current.height());
         const qreal centerY = parked ? it->second.shown.center().y() : current.y() + current.height() / 2;
-        commitPlace(window, place, size, centerY, from);
+        commitPlace(window, place, size, centerY, from, scale);
         closeRanks();
     }
 
     // Where a window of full size `size`, centered at `centerY`, goes in
     // `place`: for the halves of main its new frame, for a stash or parking
-    // area where it is drawn.
-    QRectF placeRect(Window *window, Place place, const QSizeF &size, qreal centerY) const
+    // area where it is drawn (a stash at `stash` scale).
+    QRectF placeRect(Window *window, Place place, const QSizeF &size, qreal centerY, qreal stash = stashScale) const
     {
         const RectF screen = window->output()->geometryF();
         const RectF area = workspace()->clientArea(MaximizeArea, window);
@@ -803,8 +840,7 @@ private:
         case Place::StashRight:
         case Place::ParkingLeft:
         case Place::ParkingRight: {
-            const bool stash = place == Place::StashLeft || place == Place::StashRight;
-            const qreal scale = stash ? stashScale : minScale;
+            const qreal scale = place == Place::StashLeft || place == Place::StashRight ? stash : minScale;
             const QSizeF drawn = size * scale;
             // Where the drag rule gives this scale: the outer edge this far in.
             const qreal depth = (scale - minScale) / (1.0 - minScale) * zoneWidth;
@@ -819,9 +855,10 @@ private:
     }
 
     // Put a window in `place` (see placeRect), gliding from `from`.
-    void commitPlace(Window *window, Place place, const QSizeF &size, qreal centerY, const QRectF &from)
+    void commitPlace(Window *window, Place place, const QSizeF &size, qreal centerY, const QRectF &from,
+                     qreal stash = stashScale)
     {
-        const QRectF rect = placeRect(window, place, size, centerY);
+        const QRectF rect = placeRect(window, place, size, centerY, stash);
         switch (place) {
         case Place::HalfLeft:
         case Place::HalfRight:
@@ -1309,6 +1346,185 @@ private:
                 arrangeArea(area, output, nullptr);
             }
         };
+    }
+
+    // --- Declutter ---
+
+    // Meta+double-click (left button). The first click is left to KWin (a
+    // Meta+press starts a move, which a release without motion ends); the
+    // second press and its release are taken. Returns whether the event was.
+    bool metaDoubleClick(PointerButtonEvent *event)
+    {
+        if (event->state == PointerButtonState::Released) {
+            if (m_swallowRelease && event->button == Qt::LeftButton) {
+                m_swallowRelease = false;
+                return true;
+            }
+            return false;
+        }
+        if (event->button != Qt::LeftButton || event->modifiers != Qt::MetaModifier
+            || event->buttons != Qt::LeftButton) {
+            m_metaPress.reset();
+            return false;
+        }
+        const std::chrono::milliseconds interval{QGuiApplication::styleHints()->mouseDoubleClickInterval()};
+        if (m_metaPress && event->timestamp - m_metaPress->second <= interval
+            && std::hypot(event->position.x() - m_metaPress->first.x(), event->position.y() - m_metaPress->first.y()) <= dragThreshold
+            && !workspace()->moveResizeWindow()) {
+            m_metaPress.reset();
+            Window *under = pick(event->position);
+            if (under && !under->isDesktop() && !manageable(under)) {
+                return false; // a panel or the like: not ours
+            }
+            m_swallowRelease = true;
+            declutter(under && !under->isDesktop() ? under : nullptr, event->position);
+            return true;
+        }
+        m_metaPress = std::make_pair(event->position, event->timestamp);
+        return false;
+    }
+
+    // A window declutter (and the keyboard moves) may put somewhere else.
+    bool manageable(Window *window) const
+    {
+        return !window->isDeleted() && window->isNormalWindow() && !window->isFullScreen() && window->isMovable()
+            && window->isResizable() && !window->isMinimized() && window->isShown() && !window->skipSwitcher()
+            && window->isOnCurrentDesktop() && window->isOnCurrentActivity() && window->windowItem();
+    }
+
+    // `target` (or, if null, the desktop at `pos`) was Meta+double-clicked:
+    // undo the last declutter if it was for the same target and the target
+    // is still where it put it; else declutter.
+    void declutter(Window *target, const QPointF &pos)
+    {
+        const bool again = m_declutter
+            && (target ? m_declutter->target == target && placeOf(target) == m_declutter->half : m_declutter->desktop);
+        if (again) {
+            undoDeclutter();
+            return;
+        }
+        LogicalOutput *output = target ? target->output() : workspace()->outputAt(pos);
+        if (!output) {
+            return;
+        }
+        const RectF screen = output->geometryF();
+        const qreal middle = screen.x() + screen.width() / 2;
+
+        Declutter saved{.desktop = !target, .target = target, .half = Place::Free, .saved = {}};
+        std::vector<Window *> movers; // from main to a stash
+        std::vector<Window *> stashed[2]; // already in the left / right stash
+        for (Window *window : workspace()->stackingOrder()) {
+            if (!manageable(window) || window->output() != output) {
+                continue;
+            }
+            auto it = m_parked.find(window);
+            const bool parked = it != m_parked.end() && !it->second.restoring;
+            saved.saved.push_back(Saved{.window = window,
+                                        .parked = parked ? std::optional<Parked>(it->second) : std::nullopt,
+                                        .frame = window->moveResizeGeometry(),
+                                        .maximize = window->maximizeMode()});
+            if (window == target) {
+                continue;
+            }
+            if (!parked) {
+                movers.push_back(window);
+            } else if (const int area = areaOf(window); area == 1 || area == 3) {
+                stashed[area == 1 ? 0 : 1].push_back(window);
+            }
+        }
+
+        // Balance the stashes: the leftmost `toLeft` movers go left, the rest
+        // right, so both end up with about as many windows.
+        std::sort(movers.begin(), movers.end(), [this](Window *a, Window *b) {
+            return currentlyDrawn(a).center().x() < currentlyDrawn(b).center().x();
+        });
+        const int count = int(movers.size());
+        const int toLeft = std::clamp(int(std::lround((count + int(stashed[1].size()) - int(stashed[0].size())) / 2.0)), 0, count);
+        stashed[0].insert(stashed[0].end(), movers.begin(), movers.begin() + toLeft);
+        stashed[1].insert(stashed[1].end(), movers.begin() + toLeft, movers.end());
+
+        if (target) {
+            saved.half = currentlyDrawn(target).center().x() < middle ? Place::HalfLeft : Place::HalfRight;
+            fillHalf(target, saved.half);
+        }
+        // Each stash at one scale, so its column lines up.
+        for (int side = 0; side < 2; ++side) {
+            if (movers.empty() || stashed[side].empty()) {
+                continue;
+            }
+            const Place stash = side == 0 ? Place::StashLeft : Place::StashRight;
+            const qreal scale = fittingScale(output, stashed[side]);
+            for (Window *window : stashed[side]) {
+                moveTo(window, stash, scale);
+            }
+        }
+        if (target) {
+            workspace()->activateWindow(target);
+        }
+        m_declutter = std::move(saved);
+    }
+
+    // `window` into `half` of main at the full usable height, gliding.
+    void fillHalf(Window *window, Place half)
+    {
+        if (window->maximizeMode() != MaximizeRestore) {
+            window->maximize(MaximizeRestore);
+        }
+        if (window->quickTileMode() != QuickTileMode(QuickTileFlag::None)) {
+            window->setQuickTileModeAtCurrentPosition(QuickTileFlag::None);
+        }
+        m_beforeFillHeight.erase(window);
+        const QRectF from = currentlyDrawn(window);
+        const auto closeRanks = leaving(window);
+        const RectF screen = window->output()->geometryF();
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
+        const qreal zoneWidth = screen.width() * zoneFraction;
+        const qreal x = screen.x() + (half == Place::HalfLeft ? zoneWidth : 2 * zoneWidth);
+        resizeAnimated(window, RectF(x, area.y(), zoneWidth, area.height()), from);
+        closeRanks();
+    }
+
+    // The scale (at most stashScale, a little above minScale so it stays a
+    // stash) at which `windows`, at their full sizes, fit in one column.
+    qreal fittingScale(LogicalOutput *output, const std::vector<Window *> &windows) const
+    {
+        const RectF area = workspace()->clientArea(MaximizeArea, output);
+        qreal heights = 0;
+        for (Window *window : windows) {
+            auto it = m_parked.find(window);
+            heights += it != m_parked.end() && !it->second.restoring ? it->second.original.height()
+                                                                     : window->moveResizeGeometry().height();
+        }
+        const qreal room = area.height() - arrangeGap * (int(windows.size()) - 1);
+        return std::clamp(room / heights, minScale + 0.03, stashScale);
+    }
+
+    // Everything back as it was before the last declutter (windows closed
+    // since are skipped).
+    void undoDeclutter()
+    {
+        const Declutter declutter = std::move(*m_declutter);
+        m_declutter.reset();
+        for (const Saved &saved : declutter.saved) {
+            Window *window = saved.window;
+            if (!window || window->isDeleted() || !window->windowItem()) {
+                continue;
+            }
+            const QRectF from = currentlyDrawn(window);
+            if (saved.parked) {
+                park(window, saved.parked->shown, saved.parked->original);
+                animate(window, from);
+            } else if (saved.maximize != MaximizeRestore) {
+                m_parked.erase(window);
+                setDrawTransform(window, QTransform());
+                window->maximize(saved.maximize);
+            } else if (isParked(window) || window->moveResizeGeometry() != saved.frame) {
+                resizeAnimated(window, saved.frame, from);
+            }
+        }
+        if (declutter.target) {
+            workspace()->activateWindow(declutter.target);
+        }
     }
 
     // --- Hover previews ---

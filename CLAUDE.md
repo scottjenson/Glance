@@ -367,14 +367,23 @@ logouts from sessions without any clips.
    install steps) is done; an MIT `LICENSE` file is not (metadata.json
    already says MIT). The user hasn't decided whether to hide
    their email in commits (GitHub noreply).
-4. Ideas (not agreed): trackpad gestures (discussed 2026-09-30, skipped
+4. Clips back into documents (user's goal, 2026-10-01: "move information
+   around", reversibly; not now). Today getting a clip's text back means
+   click, select all, copy, paste. Likely answer: our own small clip app
+   (Qt): text shown large without menus, the window body is a drag source
+   (title bar still moves it), one file per clip as now, images later,
+   could reformat when parked; Glance would launch it instead of KWrite.
+   Cheap stopgap offered: an action on a clip window (e.g. clicking a
+   parked clip) copies its file with `wl-copy`. CopyQ was considered
+   (items drag out, but it's one list window, not a window per clip).
+5. Ideas (not agreed): trackpad gestures (discussed 2026-09-30, skipped
    for now; KWin's input filters get swipe/pinch/hold events, KDE uses 3-
    and 4-finger swipes itself; VMware Fusion only exposes a virtual mouse,
    so testing would need a USB Magic Trackpad passed through with
    `usb.generic.allowHID = "TRUE"`); live resizing during the drag; fade icon-sized
    windows or cap them at an icon size; top/bottom edges; config options;
    multiple monitors (the on-screen fit blocks dragging to another one).
-5. Long term: ask KWin upstream for a way to set a window's input
+6. Long term: ask KWin upstream for a way to set a window's input
    transform. Fallback platform if KWin ever fails: a GNOME Shell extension.
 
 ## Wayfire prototype (wayfire/, reference only; keeps its old edge-shrink names)

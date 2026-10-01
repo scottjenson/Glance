@@ -295,7 +295,9 @@ source into a pipe (`AbstractDataSource::requestData`), holds the release
 back, and when the data is in (or after `clipTimeout`) cancels the drag,
 passes the release on, saves the text to `~/Clips/<date time>.txt` and
 starts `kwrite <file>` with KWin's startup environment minus
-QT_PLUGIN_PATH. The window whose pid matches is placed as if dragged there
+QT_PLUGIN_PATH, via `systemd-run --user --scope --slice=app.slice` (its
+own app scope like Plasma-started apps, not part of KWin's service; the
+scope execs KWrite, so the pid stays KWrite's). The window whose pid matches is placed as if dragged there
 held at its center and dropped (edge rule, parked if shrunk). Drags with
 `text/uri-list` (files, links) and drops on windows are left alone,
 except on parking icons in the parking band. Parking band (built
@@ -324,6 +326,20 @@ dragging out by the title bar, real resize with reflow (Firefox, Konsole),
 restore to original size. Open observations: some jank (possibly the
 re-anchoring on every pointer motion, which moves the frame and repaints;
 or VM load); one unexplained freeze in main that didn't recur.
+
+## Open issue: plasmashell hangs at logout (2026-10-01)
+abrt-applet reports a "crash" after some logins: at logout plasmashell
+doesn't exit, systemd kills it after 40 s (SIGABRT, core dump). Stack:
+`WaylandClipboard::~WaylandClipboard` (kguiaddons, Klipper) waiting in
+`QThread::wait`. KWin doesn't crash. All 21 logouts before 2026-09-30
+14:30 were clean; 4 of 9 hung after clips (drag/primary-selection
+reads, KWrite starts) were introduced; correlation with clip use per
+session isn't exact, and KDE has known clipboard-thread issues
+(kguiaddons MR 55). First step taken: clip KWrites run in their own
+app scope (they used to live in KWin's service cgroup). Check with
+`journalctl --user -o short-iso | grep -E "Stopping plasma-plasmashell|stop-sigterm"`
+(a "timed out" line right after a stop = hang). If it persists: compare
+logouts from sessions without any clips.
 
 ## Next steps
 1. Mouse accelerators: Meta+drag gestures (built 2026-09-30; see the

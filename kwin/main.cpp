@@ -1790,12 +1790,19 @@ private:
         file.close();
 
         // KWin's own environment for the apps it starts, without the plugin
-        // path that loads this effect from the build folder.
+        // path that loads this effect from the build folder. Started in its
+        // own systemd scope in app.slice, like apps Plasma starts: otherwise
+        // it would belong to KWin's service, be stopped in an odd order at
+        // logout and die with KWin. systemd-run --scope execs KWrite in its
+        // own process, so the pid is KWrite's (see placeClip).
         QProcessEnvironment env = kwinApp()->processStartupEnvironment();
         env.remove(QStringLiteral("QT_PLUGIN_PATH"));
+        const QString unit = QStringLiteral("app-org.kde.kwrite-glance-%1.scope").arg(QDateTime::currentMSecsSinceEpoch());
         QProcess process;
-        process.setProgram(QStringLiteral("kwrite"));
-        process.setArguments({path});
+        process.setProgram(QStringLiteral("systemd-run"));
+        process.setArguments({QStringLiteral("--user"), QStringLiteral("--scope"), QStringLiteral("--slice=app.slice"),
+                              QStringLiteral("--unit=") + unit, QStringLiteral("--collect"), QStringLiteral("--quiet"),
+                              QStringLiteral("--"), QStringLiteral("kwrite"), path});
         process.setProcessEnvironment(env);
         qint64 pid = 0;
         if (!process.startDetached(&pid)) {

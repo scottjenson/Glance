@@ -276,7 +276,11 @@ passes the release on, saves the text to `~/Clips/<date time>.txt` and
 starts `kwrite <file>` with KWin's startup environment minus
 QT_PLUGIN_PATH. The window whose pid matches is placed as if dragged there
 held at its center and dropped (edge rule, parked if shrunk). Drags with
-`text/uri-list` (files, links) and drops on windows are left alone.
+`text/uri-list` (files, links) and drops on windows are left alone,
+except on parking icons in the parking band. Parking band (built
+2026-10-01, the user asked for this snap explicitly): text dropped within
+`clipParkingBand` (0.15 of the edge zone, ~150 px) of a screen edge
+becomes a parking icon in that column (`commitPlace`, `m_clipPlace`).
 Future: images, other kinds of clipboard content.
 
 Unloading resizes parked windows back to their original size.

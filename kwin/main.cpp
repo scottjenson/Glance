@@ -77,7 +77,9 @@
 // window instead of Plasma's sticky-note widget: it is saved as a file in
 // ~/Clips and opened in KWrite where it was dropped, as if its window had
 // been dragged there (held at its center), so it can be moved, parked and
-// selected like any window (see dropToClip).
+// selected like any window (see dropToClip). Dropped in the parking band
+// (the outer clipParkingBand of an edge zone, also onto parking icons), it
+// becomes a parking icon in that column instead.
 //
 // Stacks: the windows in each stash and parking area form one column,
 // centered vertically, in the order of their vertical position (see
@@ -489,9 +491,11 @@ private:
         std::chrono::microseconds timestamp;
     };
     std::unique_ptr<ClipRead> m_clip;
-    // The KWrite started for the last clip, and where its window goes.
+    // The KWrite started for the last clip, where its window goes, and
+    // whether it goes to parking (see placeClip).
     qint64 m_clipPid = 0;
     QPointF m_clipPosition;
+    std::optional<Place> m_clipPlace;
 
     // The previewed window, the one the pointer waits on, and the timers to
     // open and close previews (see updateHover).
@@ -647,6 +651,9 @@ private:
 
     // Where clips are saved, relative to the home folder.
     static constexpr const char *clipsFolder = "Clips";
+    // Text dropped this close to a screen edge (fraction of the edge zone's
+    // width) becomes a parking icon (see placeClip).
+    static constexpr qreal clipParkingBand = 0.15;
     // How long to wait for a dragging app to hand over its text.
     static constexpr std::chrono::milliseconds clipTimeout{2000};
 
@@ -1416,7 +1423,7 @@ private:
             return false;
         }
         Window *under = pick(event->position);
-        if (under && !under->isDesktop()) {
+        if (under && !under->isDesktop() && !(isIcon(under) && parkingSide(event->position))) {
             return false;
         }
         const QStringList types = seat->dragSource()->mimeTypes();
@@ -1523,7 +1530,27 @@ private:
         }
         m_clipPid = pid;
         m_clipPosition = clip->position;
+        m_clipPlace = parkingSide(clip->position);
         qInfo("glance: clip: %lld bytes -> %s", qlonglong(clip->text.size()), qPrintable(path));
+    }
+
+    // ParkingLeft/Right if `pos` is in that side's parking band (see
+    // clipParkingBand).
+    std::optional<Place> parkingSide(const QPointF &pos) const
+    {
+        LogicalOutput *output = workspace()->outputAt(pos);
+        if (!output) {
+            return std::nullopt;
+        }
+        const RectF screen = output->geometryF();
+        const qreal band = screen.width() * zoneFraction * clipParkingBand;
+        if (pos.x() - screen.x() < band) {
+            return Place::ParkingLeft;
+        }
+        if (screen.x() + screen.width() - pos.x() < band) {
+            return Place::ParkingRight;
+        }
+        return std::nullopt;
     }
 
     // The clip's KWrite window appeared: put it where the text was dropped,
@@ -1541,6 +1568,12 @@ private:
         const RectF area = workspace()->clientArea(MaximizeArea, window);
         const RectF frame = window->moveResizeGeometry();
         const QSizeF size(frame.width(), frame.height());
+        if (m_clipPlace) {
+            // Dropped in the parking band: a parking icon in that column.
+            commitPlace(window, *m_clipPlace, size, pos.y(), currentlyDrawn(window));
+            workspace()->activateWindow(window);
+            return;
+        }
         const qreal zoneWidth = screen.width() * zoneFraction;
         const qreal scale = std::max(minScale, std::min({1.0,
                                                          edgeScale(pos.x() - screen.x(), size.width() / 2, zoneWidth),

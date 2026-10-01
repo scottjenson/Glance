@@ -77,10 +77,17 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   `switchWindow` scoring). KDE's own "Switch Window Left/Right/Up/Down"
   actions are disabled while loaded (they use real frames, wrong for
   parked windows); keys passed on, as for Meta+arrows.
-- **Focus ring** (agreed 2026-09-30): the active window gets a thin
-  accent-colored outline (like a dialog's keyboard focus ring), same width
-  on screen at any scale. Dimming inactive windows was rejected: stashed
-  windows are meant to be used, not faded.
+- **Focus ring** (agreed 2026-09-30, made stronger 2026-10-01): the
+  active window has a 4 px accent-colored outline, same width on screen at
+  any scale. A window selected with Meta+Alt+arrows bounces like a pressed
+  button (user's design): frames 100%, 99%, 98%, 99%, 100%, 60 ms apart
+  (`bounceFrames`, `bounceStep`; tried before: 3 frames to 96% at
+  150/100 ms, "chunky"; 5 frames to 96%, "too violent"; the user wants
+  a tiny wiggle), stepped; every step, no
+  movement-vs-release logic. Tried and rejected the same day: a glow
+  blooming on arrival ("overdone") and a ring travelling between windows
+  (unclear whether it helped). Dimming inactive windows was rejected:
+  stashed windows are meant to be used, not faded.
 - **Declutter** (built 2026-10-01; from the user's talk, where it was a
   shake gesture, now Meta+double-click): on a window, it fills the half of
   main nearest to it at full height and every other window in main goes
@@ -260,14 +267,20 @@ Not for KDE title bars (`pointer->decoration()`), other buttons, or presses
 with modifiers. Larger parked windows (the user expects people to use
 windows at 50-60%) stay normal windows: nothing is taken from their content.
 
-**Focus ring** (`updateRing`): a KWin `OutlinedBorderItem` (exported,
-header installed; what KDE uses for decoration outlines) as a child of the
-active window's `WindowItem`, so it moves/scales/stacks with the window.
-Thickness = `ringWidth` (2 px) / the item's scale; color = the app
-palette's Highlight (KDE accent); radius = `window->borderRadius()`. Items
-don't delete their children and a child must be deleted before its parent,
-so the ring is removed on `Window::closed`. All transform changes go
-through `setDrawTransform`, which keeps the ring width in step.
+**Focus ring** (`updateRing`, `startBounce`, `paintWindow`): the ring is
+a KWin `OutlinedBorderItem` (exported, header installed) as a child of
+the active window's `WindowItem`, so it moves/scales/stacks with it; its
+width is divided by the item's scale. Color = the app palette's Highlight
+(KDE accent); radius = `window->borderRadius()`. Items don't delete their
+children and a child must be deleted before its parent, so the ring is
+removed on `Window::closed`. All transform changes go through
+`setDrawTransform`, which keeps the ring width in step. The bounce is
+done in `paintWindow` with the paint data's scale + translation (scale
+works around the window item's origin: `renderItem` applies it after
+`item->position()`; so translate by the item-local center·(1−s)), not with
+the item transform, so it doesn't touch our own drawing; two
+`QTimer::singleShot`s (counter guards stale ones); `isActive()` is true
+while bouncing.
 
 **Declutter** (`metaDoubleClick`, `declutter`, `fillHalf`,
 `fittingScale`, `undoDeclutter`): the first Meta+click goes to KWin (its

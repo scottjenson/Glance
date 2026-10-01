@@ -63,8 +63,11 @@
 // nearest window in that direction, judged by where windows are drawn (KDE's
 // version uses the real frames, which are wrong for parked windows).
 //
-// Focus ring: the active window gets a thin outline in the accent color, as
-// wide on screen at any scale, so it stands out also when tiny.
+// Focus ring: the active window gets an outline in the accent color, as
+// wide on screen at any scale, so it stands out also when tiny. A window
+// selected with Meta+Alt+arrows also dips like a pressed button: it steps
+// through bounceFrames (100% down to 98% and back), bounceStep apart (see
+// startBounce).
 //
 // Previews: hovering an icon-sized parked window makes it grow in place to
 // previewGrow times its size (at most 1:1 with the app's resized layout,
@@ -243,15 +246,31 @@ public:
     // Only take part in painting while something is scaled.
     bool isActive() const override
     {
-        return !m_parked.empty() || m_dragged;
+        return !m_parked.empty() || m_dragged || m_bounce;
     }
 
     void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
     {
-        if (isParked(w->window()) || w->window() == m_dragged) {
+        if (isParked(w->window()) || w->window() == m_dragged || (w->window() == m_bounce && m_bounceScale != 1.0)) {
             data.setTransformed();
         }
         Effect::prePaintWindow(view, w, data);
+    }
+
+    // A bouncing window: scaled to its current frame's scale around the center
+    // of where it is drawn. The paint data's scale works around the window
+    // item's origin (it comes before the item's position), so the
+    // translation moves that center back.
+    void paintWindow(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask,
+                     const Region &deviceRegion, WindowPaintData &data) override
+    {
+        if (w->window() == m_bounce && m_bounceScale != 1.0) {
+            const QPointF center = currentlyDrawn(m_bounce).center() - m_bounce->windowItem()->position();
+            data.setXScale(data.xScale() * m_bounceScale);
+            data.setYScale(data.yScale() * m_bounceScale);
+            data.translate(center.x() * (1.0 - m_bounceScale), center.y() * (1.0 - m_bounceScale));
+        }
+        Effect::paintWindow(renderTarget, viewport, w, mask, deviceRegion, data);
     }
 
     // Advance animations: each frame, redraw animating windows at their
@@ -587,6 +606,11 @@ private:
     // The focus ring (see updateRing) and the window it outlines.
     OutlinedBorderItem *m_ring = nullptr;
     QPointer<Window> m_ringWindow;
+    // The window bouncing after Meta+Alt+arrows, its current scale, and
+    // which bounce it is (later timers of an earlier one do nothing).
+    QPointer<Window> m_bounce;
+    qreal m_bounceScale = 1.0;
+    int m_bounceCount = 0;
 
     // KDE's shortcut actions we disabled, to re-enable on unload.
     std::vector<QPointer<QAction>> m_disabledActions;
@@ -739,7 +763,11 @@ private:
     static constexpr std::chrono::milliseconds clipTimeout{2000};
 
     // Width of the focus ring on screen (logical pixels).
-    static constexpr qreal ringWidth = 2.0;
+    static constexpr qreal ringWidth = 4.0;
+    // Bounce of a window selected with Meta+Alt+arrows: its scale frame by
+    // frame (the first is shown at once), and the time between frames.
+    static constexpr qreal bounceFrames[] = {1.0, 0.99, 0.98, 0.99, 1.0};
+    static constexpr std::chrono::milliseconds bounceStep{60};
 
     // Scale of a window in a stash when put there with the keyboard.
     static constexpr qreal stashScale = 0.5;
@@ -2013,6 +2041,7 @@ private:
         }
         if (best) {
             workspace()->activateWindow(best);
+            startBounce(best);
         }
     }
 
@@ -2063,6 +2092,28 @@ private:
         delete m_ring;
         m_ring = nullptr;
         m_ringWindow = nullptr;
+    }
+
+    // Bounce `window` like a pressed button: through bounceFrames, one every
+    // bounceStep (see paintWindow). Stepped, not animated in between.
+    void startBounce(Window *window)
+    {
+        const int count = ++m_bounceCount;
+        m_bounce = window;
+        m_bounceScale = bounceFrames[0];
+        const int frames = int(std::size(bounceFrames));
+        for (int i = 1; i < frames; ++i) {
+            QTimer::singleShot(i * bounceStep, this, [this, count, i, frames]() {
+                if (count != m_bounceCount || !m_bounce) {
+                    return;
+                }
+                m_bounceScale = bounceFrames[i];
+                if (i == frames - 1) {
+                    m_bounce = nullptr;
+                }
+                effects->addRepaintFull();
+            });
+        }
     }
 
     // --- Drawing and input for managed windows ---

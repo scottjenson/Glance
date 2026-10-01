@@ -40,8 +40,9 @@ Key mechanics:
   it at the very edge of the screen and it goes straight to parking.
 - **Meta + C clips the selected text:** highlight text in any window and
   press Meta+C, and it becomes a clip in parking on that window's side.
-- **The active window has a thin outline** in your accent color, so you can
-  tell which one is selected even when it is small.
+- **The active window has an outline** in your accent color, so you can
+  tell which one is selected even when it is small. Selected from the
+  keyboard (Meta + Alt + arrows), it gives a little bounce, like a button.
 
 ## Accelerators
 

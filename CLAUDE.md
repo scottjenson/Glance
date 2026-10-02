@@ -65,9 +65,9 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/declutter.md](docs/declutter.md) | Meta+double-click declutter and undo |
 | [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
 | [docs/clips.md](docs/clips.md) | Text drops and Meta+C become clip windows |
+| [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map (phase 1; phase 2 listed there) |
 | [docs/logout-hang.md](docs/logout-hang.md) | Open issue: plasmashell hangs at logout |
 | [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
-| **[plans/alt-tab.md](plans/alt-tab.md)** | **Active:** Alt+Tab hunt and return, the desktop map |
 | [plans/backlog.md](plans/backlog.md) | Agreed-but-unbuilt items, polish, packaging, ideas |
 | [plans/clips-back.md](plans/clips-back.md) | Getting clips back into documents |
 
@@ -77,12 +77,11 @@ table and Status.
 ## Status (2026-10-02)
 Running in the user's real Plasma session (via use-in-session.sh; after a
 rebuild the user logs out and back in). Built and working: everything in
-the docs table. Last changes (2026-10-02, tested by the user, committed):
-the half/full views (Meta+Up/Down as fixed views), full-width windows to
-and from the stash, stash windows centred in the zone, the bounce on any
-focus change, and Meta+drag snapping mode. Next: build Alt+Tab phase 1
-(design and build plan in [plans/alt-tab.md](plans/alt-tab.md); all four
-parts at once, agreed with the user, not started).
+the docs table. Last change (2026-10-02, tested by the user, committed):
+Alt+Tab phase 1 (quick switch, map, label, spreading piles; the focus
+ring follows the selection). Next: not decided; candidates are Alt+Tab
+phase 2 ([docs/alt-tab.md](docs/alt-tab.md)) and the
+[backlog](plans/backlog.md).
 
 ## How the effect works (kwin/main.cpp, the basics)
 - It is a KWin **effect**, not a plain `KWin::Plugin`, so `prePaintWindow`
@@ -180,6 +179,16 @@ the agent can run itself:
 `XDG_RUNTIME_DIR=/run/user/1000 QT_PLUGIN_PATH=$PWD/kwin/build/bin
 QT_FORCE_STDERR_LOGGING=1 kwin_wayland --virtual --socket es-check
 --exit-with-session "sleep 3"`.
+
+Headless screenshot loop (the agent can check drawing itself, no logout):
+a virtual KWin on its own D-Bus, with windows, `GLANCE_TEST_MAP=1` (opens
+the Alt+Tab map 3 s after loading) and Spectacle; then measure the PNG:
+`GLANCE_TEST_MAP=1 XDG_RUNTIME_DIR=/run/user/1000
+QT_PLUGIN_PATH=$PWD/kwin/build/bin dbus-run-session -- kwin_wayland
+--virtual --width 4004 --height 1630 --scale 1.5 --socket glance-test
+--exit-with-session "sh -c 'konsole -qwindowgeometry 3900x1500+50+50 &
+sleep 3.6; spectacle -b -n -f -o <file>.png'"`. Use big windows: small
+ones near the centre hide clipping bugs.
 
 ## Notes for the agent
 - The user is new to Linux/Wayland development: explain Linux-specific steps

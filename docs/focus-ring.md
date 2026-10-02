@@ -13,6 +13,9 @@ Tried and rejected the same day: a glow blooming on arrival ("overdone") and
 a ring travelling between windows (unclear whether it helped). Dimming
 inactive windows was rejected: stashed windows are meant to be used, not
 faded (permanent dimming; the Alt+Tab map dims only while Alt is held).
+The ring goes to the *highlighted* window: the active one, or during
+Alt+Tab the selected one ([alt-tab.md](alt-tab.md)); in the map its
+width also allows for the map's scale.
 
 ## How it works
 `updateRing`, `startBounce`, `paintWindow`: the ring is

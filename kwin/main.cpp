@@ -108,16 +108,30 @@
 // (keyboard, dragged out, closed), the column re-forms, animated. Crowding
 // (a column taller than the screen) comes later.
 //
+// Alt+Tab (and Meta+Tab; replaces KDE's window switcher): hunt and return.
+// Windows in the order they were last used; a quick Alt+Tab goes back to the
+// previous one, so two windows toggle with a tap. Holding Alt shows the map:
+// the whole desktop drawn at mapScale in the middle of the screen, same
+// layout, dimmed except the selected window, overlapping windows spread into
+// rows above and below their pile; a label in the centre names the selected
+// window (icon and title). Tab / Shift+Tab move the selection, releasing Alt
+// focuses it where it is, Esc cancels. Nothing moves: only the drawing
+// changes (see switchKey, openMap, spreadPiles).
+//
 // Known gaps: touch and tablets aren't handled; in the forwarding case the
 // title bar doesn't respond and the cursor shape may be wrong.
 
 #include <core/output.h>
+#include <core/rendertarget.h>
+#include <core/renderviewport.h>
 #include <effect/effect.h>
 #include <effect/effecthandler.h>
 #include <effect/effectwindow.h>
 #include <input.h>
 #include <input_event.h>
+#include <keyboard_input.h>
 #include <main.h>
+#include <opengl/glutils.h>
 #include <options.h>
 #include <pointer_input.h>
 #include <scene/outlinedborderitem.h>
@@ -137,8 +151,12 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFontMetricsF>
 #include <QGuiApplication>
+#include <QIcon>
+#include <QImage>
 #include <QMatrix4x4>
+#include <QPainter>
 #include <QPalette>
 #include <QPointer>
 #include <QProcess>
@@ -152,6 +170,7 @@
 #include <chrono>
 #include <cmath>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <set>
 
@@ -168,10 +187,15 @@ public:
     {
         input()->installInputEventFilter(&m_filter);
 
+        // Until windows get used, the front one counts as the most recent.
+        const auto &stacking = workspace()->stackingOrder();
+        m_recent.assign(stacking.rbegin(), stacking.rend());
+        noteActivated(workspace()->activeWindow());
         for (Window *window : workspace()->windows()) {
             watch(window);
         }
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
+        connect(workspace(), &Workspace::windowActivated, this, &Glance::noteActivated);
         connect(workspace(), &Workspace::windowActivated, this, &Glance::updateRing);
         connect(workspace(), &Workspace::windowAdded, this, &Glance::placeClip);
 
@@ -207,7 +231,22 @@ public:
                 closePreview(window);
             }
         });
+        m_hold.setSingleShot(true);
+        m_hold.setInterval(holdDelay);
+        connect(&m_hold, &QTimer::timeout, this, [this]() {
+            if (m_switch) {
+                openMap();
+            }
+        });
         updateRing();
+        // For checking the map without a keyboard (e.g. in a headless KWin
+        // with a screenshot): GLANCE_TEST_MAP=1 opens it 3 s after loading.
+        if (qEnvironmentVariableIsSet("GLANCE_TEST_MAP")) {
+            QTimer::singleShot(3000, this, [this]() {
+                startSwitch(Qt::AltModifier);
+                step(1); // the hold timer then opens the map
+            });
+        }
 
         disableKdeShortcuts();
 
@@ -227,6 +266,14 @@ public:
     {
         input()->uninstallInputEventFilter(&m_filter);
         removeRing();
+        if (m_switch) {
+            input()->keyboard()->update(); // give the keyboard back
+        }
+        // A texture can only be deleted with its GL context current.
+        if (m_label && !effects->makeOpenGLContextCurrent()) {
+            (void)m_label.release();
+        }
+        m_label.reset();
         if (m_clip) {
             m_clip->notifier.reset();
             close(m_clip->fd);
@@ -253,13 +300,19 @@ public:
     // Only take part in painting while something is scaled.
     bool isActive() const override
     {
-        return !m_parked.empty() || m_dragged || m_bounce;
+        return !m_parked.empty() || m_dragged || m_bounce || m_map;
     }
 
     void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
     {
         if (isParked(w->window()) || w->window() == m_dragged || (w->window() == m_bounce && m_bounceScale != 1.0)) {
             data.setTransformed();
+        }
+        if (m_map) {
+            data.setTransformed();
+            if (!inMap(w->window())) {
+                data.setTranslucent(); // fades out
+            }
         }
         Effect::prePaintWindow(view, w, data);
     }
@@ -268,6 +321,9 @@ public:
     // of where it is drawn. The paint data's scale works around the window
     // item's origin (it comes before the item's position), so the
     // translation moves that center back.
+    // With the Alt+Tab map up, then, every window in it is drawn where the
+    // map has it (see mapped), dimmed unless selected; the others (panels,
+    // notifications) fade out.
     void paintWindow(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask,
                      const Region &deviceRegion, WindowPaintData &data) override
     {
@@ -277,7 +333,47 @@ public:
             data.setYScale(data.yScale() * m_bounceScale);
             data.translate(center.x() * (1.0 - m_bounceScale), center.y() * (1.0 - m_bounceScale));
         }
+        if (m_map) {
+            Window *window = w->window();
+            if (inMap(window) && window->windowItem() && currentlyDrawn(window).width() > 0) {
+                // Drawn at `item` + translation + scale * (item-local point):
+                // take the window from where it is drawn to where the map
+                // draws it, on top of the above.
+                const QRectF from = currentlyDrawn(window);
+                const QRectF to = mapped(window, from);
+                const qreal k = to.width() / from.width();
+                const QPointF item = window->windowItem()->position();
+                data.setXScale(data.xScale() * k);
+                data.setYScale(data.yScale() * k);
+                data.setXTranslation(to.x() - item.x() + k * (item.x() + data.xTranslation() - from.x()));
+                data.setYTranslation(to.y() - item.y() + k * (item.y() + data.yTranslation() - from.y()));
+                if (window != mapSelected()) {
+                    data.multiplyBrightness(1.0 - (1.0 - mapDim) * m_mapOpen);
+                }
+            } else {
+                data.multiplyOpacity(1.0 - m_mapOpen);
+            }
+            // The map paints the whole screen as transformed, and KWin then
+            // gives each window an unlimited region. With that, its renderer
+            // cuts windows off at the screen's edge as if they weren't
+            // scaled (clipQuads in scene/itemrenderer_opengl.cpp uses only
+            // the translation), so shrunk windows lose their right and
+            // bottom parts. A finite region makes it clip on the GPU instead,
+            // which is right.
+            Effect::paintWindow(renderTarget, viewport, w, mask, Region(viewport.deviceRect()), data);
+            return;
+        }
         Effect::paintWindow(renderTarget, viewport, w, mask, deviceRegion, data);
+    }
+
+    // The Alt+Tab label, over everything.
+    void paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport, int mask, const Region &deviceRegion,
+                     LogicalOutput *screen) override
+    {
+        Effect::paintScreen(renderTarget, viewport, mask, deviceRegion, screen);
+        if (m_map && m_mapOpen > 0.0 && effects->isOpenGLCompositing()) {
+            paintLabel(renderTarget, viewport, screen);
+        }
     }
 
     // Advance animations: each frame, redraw animating windows at their
@@ -299,12 +395,22 @@ public:
         if (m_dragged && m_dragAnimating) {
             dragStep(m_dragged);
         }
+        if (m_map) {
+            m_mapOpen = mapProgress();
+            if (m_map->closing && m_mapOpen <= 0.0) {
+                m_map.reset();
+                effects->addRepaintFull();
+            } else {
+                data.mask |= PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS;
+            }
+            updateRing(); // its width follows the map's scale
+        }
         Effect::prePaintScreen(data);
     }
 
     void postPaintScreen() override
     {
-        if (m_dragAnimating) {
+        if (m_dragAnimating || m_map) {
             effects->addRepaintFull();
         }
         for (const auto &[window, parked] : m_parked) {
@@ -327,6 +433,9 @@ public:
                     dragStep(m_dragged);
                 }
             });
+        }
+        if (m_switch || startsSwitch(event)) {
+            return switchKey(event);
         }
         const Qt::Key key = event->key;
         if (key != Qt::Key_Left && key != Qt::Key_Right && key != Qt::Key_Up && key != Qt::Key_Down) {
@@ -370,6 +479,9 @@ public:
 
     bool onMotion(PointerMotionEvent *event)
     {
+        if (m_switch || m_map) {
+            return true; // the pointer does nothing while switching
+        }
         if (m_pending) {
             return pendingMotion(event);
         }
@@ -387,6 +499,9 @@ public:
     bool onButton(PointerButtonEvent *event)
     {
         const bool pressed = event->state == PointerButtonState::Pressed;
+        if (pressed && (m_switch || m_map)) {
+            return true;
+        }
         if (pressed) {
             // Where a drag that may follow started (KWin's own move anchor
             // follows the cursor, so it can't tell us).
@@ -421,6 +536,9 @@ public:
 
     bool onAxis(PointerAxisEvent *event)
     {
+        if (m_switch || m_map) {
+            return true;
+        }
         if (!route(event->position, event->buttons != Qt::NoButton)) {
             return false;
         }
@@ -620,6 +738,46 @@ private:
     qreal m_bounceScale = 1.0;
     int m_bounceCount = 0;
 
+    // Alt+Tab: windows, most recently used first (see noteActivated; KWin's
+    // own focus chain isn't exported to plugins).
+    std::vector<Window *> m_recent;
+    // A switch in progress (see switchKey): the windows in recency order
+    // when it started, the selected one (-1 before the first Tab) and the
+    // modifier it is held with (Alt or Meta). The timer shows the map.
+    struct Switch
+    {
+        std::vector<QPointer<Window>> windows;
+        int index = -1;
+        Qt::KeyboardModifier modifier = Qt::AltModifier;
+    };
+    std::optional<Switch> m_switch;
+    QPointer<Window> m_chosen;
+    QTimer m_hold;
+    // The map while it is up or closing (see openMap): its centre, the
+    // windows in it (others fade out), where piled windows spread to
+    // (see spreadPiles), when it opened, and when it started closing and
+    // how far open it was then. `chosen` stays undimmed while it closes.
+    struct Map
+    {
+        QPointF center;
+        std::set<Window *> windows = {};
+        std::map<Window *, QRectF> spread = {};
+        std::chrono::steady_clock::time_point opened = {};
+        bool closing = false;
+        std::chrono::steady_clock::time_point closed = {};
+        qreal openAtClose = 0;
+        QPointer<Window> chosen = nullptr;
+    };
+    std::optional<Map> m_map;
+    // How far open the map is in this frame (0 to 1).
+    qreal m_mapOpen = 0;
+    // The label's texture, its size on screen, and what it shows.
+    std::unique_ptr<GLTexture> m_label;
+    QSizeF m_labelSize;
+    QPointer<Window> m_labelWindow;
+    QString m_labelCaption;
+    qreal m_labelScale = 0;
+
     // KDE's shortcut actions we disabled, to re-enable on unload.
     std::vector<QPointer<QAction>> m_disabledActions;
 
@@ -628,6 +786,9 @@ private:
 
     void watch(Window *window)
     {
+        if (!std::ranges::contains(m_recent, window)) {
+            m_recent.push_back(window); // new, not used yet
+        }
         connect(window, &Window::interactiveMoveResizeStepped, this, [this, window]() {
             dragStep(window);
         });
@@ -641,7 +802,7 @@ private:
             }
         });
         connect(window, &Window::fullScreenChanged, this, [this, window]() {
-            if (window == workspace()->activeWindow()) {
+            if (window == highlighted()) {
                 updateRing();
             }
         });
@@ -649,6 +810,7 @@ private:
             if (window == m_ringWindow) {
                 removeRing(); // while its parent item still exists
             }
+            std::erase(m_recent, window);
             const auto closeRanks = leaving(window);
             m_parked.erase(window);
             m_wasFull.erase(window);
@@ -731,21 +893,41 @@ private:
     // Meta is released), disable KWin's actions for them: the shortcut still
     // matches, and a disabled action does nothing. Only while the effect is
     // loaded; nothing is saved to the user's settings.
+    // Our Alt+Tab replaces KDE's window switcher (all its "Walk Through
+    // Windows" actions, also those for the current app's windows).
     void disableKdeShortcuts()
     {
         for (const char *name : {"Window Quick Tile Left", "Window Quick Tile Right",
                                  "Window Quick Tile Top", "Window Quick Tile Bottom",
                                  "Switch Window Left", "Switch Window Right",
                                  "Switch Window Up", "Switch Window Down"}) {
-            QAction *action = workspace()->findChild<QAction *>(QString::fromLatin1(name));
-            if (!action) {
-                qWarning("glance: KWin action \"%s\" not found", name);
-                continue;
+            disableAction(workspace(), name);
+        }
+        // The switcher's actions belong to KWin's TabBox object, whose class
+        // header kwin-devel doesn't install. It derives from QObject alone,
+        // so its pointer is the QObject's.
+        if (QObject *tabBox = reinterpret_cast<QObject *>(workspace()->tabbox())) {
+            for (const char *name : {"Walk Through Windows", "Walk Through Windows (Reverse)",
+                                     "Walk Through Windows Alternative", "Walk Through Windows Alternative (Reverse)",
+                                     "Walk Through Windows of Current Application",
+                                     "Walk Through Windows of Current Application (Reverse)",
+                                     "Walk Through Windows of Current Application Alternative",
+                                     "Walk Through Windows of Current Application Alternative (Reverse)"}) {
+                disableAction(tabBox, name);
             }
-            if (action->isEnabled()) {
-                action->setEnabled(false);
-                m_disabledActions.push_back(action);
-            }
+        }
+    }
+
+    void disableAction(QObject *owner, const char *name)
+    {
+        QAction *action = owner->findChild<QAction *>(QString::fromLatin1(name));
+        if (!action) {
+            qWarning("glance: KWin action \"%s\" not found", name);
+            return;
+        }
+        if (action->isEnabled()) {
+            action->setEnabled(false);
+            m_disabledActions.push_back(action);
         }
     }
 
@@ -798,6 +980,29 @@ private:
     static constexpr qreal leadSlow = 300.0;
     static constexpr std::chrono::milliseconds leadSampleTime{80};
     static constexpr std::chrono::milliseconds snapDwell{500};
+    // Alt+Tab (see switchKey): Alt held this long after Tab shows the map;
+    // the map's scale (0.5: the desktop fits in main's width); how long it
+    // takes to open (shrink and spread at once) and to close;
+    // the brightness of windows other than the selection. Windows
+    // overlapping more than pileOverlap (of the smaller one's area) form a
+    // pile; the gap between spread windows, and their smallest scale.
+    static constexpr std::chrono::milliseconds holdDelay{200};
+    static constexpr qreal mapScale = 0.5;
+    static constexpr std::chrono::milliseconds mapTime{200};
+    static constexpr qreal mapDim = 0.45;
+    static constexpr qreal pileOverlap = 0.1;
+    static constexpr qreal spreadGap = 12.0;
+    static constexpr qreal spreadMinScale = 0.05;
+    // The label (logical pixels): icon size, title text size, the widest
+    // the title gets (longer ones are cut with "..."), the narrowest the
+    // card gets, padding, gap between icon and title, corner radius.
+    static constexpr qreal labelIconSize = 128.0;
+    static constexpr int labelTextSize = 36;
+    static constexpr qreal labelMaxWidth = 1000.0;
+    static constexpr qreal labelMinWidth = 320.0;
+    static constexpr qreal labelPadding = 32.0;
+    static constexpr qreal labelGap = 16.0;
+    static constexpr qreal labelRadius = 24.0;
     static constexpr qreal snapFullBand = 0.2;
 
     // The places Meta+Left/Right and gestures step along.
@@ -2088,19 +2293,10 @@ private:
         Window *best = nullptr;
         qreal bestScore = 0;
         for (Window *window : workspace()->stackingOrder()) {
-            // Only windows one can see (not e.g. KDE's hidden Xwayland Video
-            // Bridge, which then can't be activated and blocks the way).
-            if (window == active || window->isDeleted() || !window->wantsTabFocus() || window->skipSwitcher()
-                || window->isMinimized() || !window->isShown() || window->isHiddenByShowDesktop()
-                || !window->readyForPainting() || !window->isOnCurrentDesktop() || !window->isOnCurrentActivity()) {
+            if (window == active || !switchable(window)) {
                 continue;
             }
-            const QRectF drawn = currentlyDrawn(window);
-            const RectF screen = window->output()->geometryF();
-            if (!drawn.intersects(QRectF(screen.x(), screen.y(), screen.width(), screen.height()))) {
-                continue;
-            }
-            const QPointF to = drawn.center();
+            const QPointF to = currentlyDrawn(window).center();
             qreal distance;
             qreal offset;
             switch (key) {
@@ -2135,6 +2331,373 @@ private:
         }
     }
 
+    // A window one can select (Meta+Alt+arrows, Alt+Tab): one that is shown
+    // on the screen (not e.g. KDE's hidden Xwayland Video Bridge, which then
+    // can't be activated and blocks the way).
+    bool switchable(Window *window) const
+    {
+        if (window->isDeleted() || !window->wantsTabFocus() || window->skipSwitcher() || window->isMinimized()
+            || !window->isShown() || window->isHiddenByShowDesktop() || !window->readyForPainting()
+            || !window->isOnCurrentDesktop() || !window->isOnCurrentActivity()) {
+            return false;
+        }
+        const RectF screen = window->output()->geometryF();
+        return currentlyDrawn(window).intersects(QRectF(screen.x(), screen.y(), screen.width(), screen.height()));
+    }
+
+    // --- Alt+Tab: hunt and return ---
+
+    void noteActivated(Window *window)
+    {
+        if (window) {
+            std::erase(m_recent, window);
+            m_recent.insert(m_recent.begin(), window);
+        }
+    }
+
+    // Alt+Tab or Meta+Tab (also with Shift) starts a switch.
+    bool startsSwitch(const KeyboardKeyEvent *event) const
+    {
+        const Qt::KeyboardModifiers modifiers = event->modifiers & ~Qt::ShiftModifier;
+        return event->state == KeyboardKeyState::Pressed && (event->key == Qt::Key_Tab || event->key == Qt::Key_Backtab)
+            && (modifiers == Qt::AltModifier || modifiers == Qt::MetaModifier) && !workspace()->moveResizeWindow()
+            && !m_pending;
+    }
+
+    // Every key while a switch is on: Tab / Shift+Tab (Backtab) step through
+    // the windows, Esc cancels, releasing the modifier chooses. Other keys do
+    // nothing (no window has the keyboard meanwhile, see startSwitch).
+    // Returns whether to swallow the key: under Alt, Tab and Esc are ours.
+    // Under Meta they are passed on, as for Meta+arrows (see onKey): KDE's
+    // own switcher actions on them are disabled.
+    bool switchKey(KeyboardKeyEvent *event)
+    {
+        if (!m_switch) {
+            startSwitch(event->modifiers & Qt::AltModifier ? Qt::AltModifier : Qt::MetaModifier);
+        }
+        if (!(event->modifiers & m_switch->modifier)) {
+            finishSwitch(true);
+            return false; // the modifier's release goes on
+        }
+        const bool tab = event->key == Qt::Key_Tab || event->key == Qt::Key_Backtab;
+        const bool escape = event->key == Qt::Key_Escape;
+        const bool swallow = (tab || escape) && m_switch->modifier == Qt::AltModifier;
+        if (swallow && event->state == KeyboardKeyState::Pressed) {
+            input()->keyboard()->addFilteredKey(event->nativeScanCode); // its release isn't sent either
+        }
+        if (event->state != KeyboardKeyState::Released) {
+            if (tab) {
+                step(event->key == Qt::Key_Backtab || (event->modifiers & Qt::ShiftModifier) ? -1 : 1);
+            } else if (escape) {
+                finishSwitch(false);
+            }
+        }
+        return swallow;
+    }
+
+    void startSwitch(Qt::KeyboardModifier modifier)
+    {
+        Switch s;
+        s.modifier = modifier;
+        for (Window *window : m_recent) {
+            if (switchable(window)) {
+                s.windows.push_back(window);
+            }
+        }
+        // The first Tab goes to the second window, the one used before the
+        // active one; if no switchable window is active, to the first.
+        s.index = !s.windows.empty() && s.windows.front() == workspace()->activeWindow() ? 0 : -1;
+        m_switch = std::move(s);
+        // Like KDE's own switcher: no window has the keyboard meanwhile, so
+        // the app doesn't get the keys, nor a lone Alt press and release
+        // (Firefox would show its menu bar).
+        waylandServer()->seat()->setFocusedKeyboardSurface(nullptr);
+        m_hold.start();
+        qInfo("glance: switch started (%d windows)", int(m_switch->windows.size()));
+    }
+
+    void step(int direction)
+    {
+        Switch &s = *m_switch;
+        const int n = int(s.windows.size());
+        for (int tries = 0; tries < n; ++tries) {
+            s.index = s.index < 0 ? (direction > 0 ? 0 : n - 1) : (s.index + direction + n) % n;
+            if (s.windows[s.index]) {
+                break; // skips windows closed meanwhile
+            }
+        }
+        updateRing(); // the ring (and bounce) go to the selection
+        effects->addRepaintFull();
+    }
+
+    // The selected window: the switch's, or the chosen one while the map
+    // closes.
+    Window *mapSelected() const
+    {
+        if (m_switch) {
+            return m_switch->index >= 0 ? m_switch->windows[m_switch->index].data() : nullptr;
+        }
+        return m_map ? m_map->chosen.data() : nullptr;
+    }
+
+    // End the switch: activate the selected window (`accept`), or leave
+    // things as they were.
+    void finishSwitch(bool accept)
+    {
+        QPointer<Window> chosen = accept ? mapSelected() : nullptr;
+        const bool mapped = m_map && !m_map->closing;
+        m_switch.reset();
+        m_chosen = chosen; // keeps the ring until it is active
+        m_hold.stop();
+        if (m_map) {
+            closeMap(chosen);
+        }
+        if (chosen) {
+            qInfo("glance: window chosen: %s", qPrintable(chosen->caption()));
+        } else {
+            qInfo("glance: switch cancelled");
+        }
+        // Once the key event that ended the switch has gone through (with no
+        // keyboard focus, so the app doesn't see the modifier's release),
+        // give the keyboard back. The chosen window has the ring already;
+        // after the map it bounces again as it gets focus. Cancelled, the
+        // ring goes back to the active window.
+        QTimer::singleShot(0, this, [this, chosen, mapped]() {
+            m_chosen = nullptr;
+            if (chosen && !chosen->isDeleted() && chosen != workspace()->activeWindow()) {
+                workspace()->activateWindow(chosen);
+            }
+            updateRing();
+            if (chosen && mapped && chosen == m_ringWindow) {
+                startBounce(chosen);
+            }
+            input()->keyboard()->update();
+        });
+    }
+
+    // --- Alt+Tab: the map ---
+
+    bool inMap(Window *window) const
+    {
+        return window->isDesktop() || m_map->windows.contains(window);
+    }
+
+    void openMap()
+    {
+        const RectF screen = workspace()->activeOutput()->geometryF();
+        m_map = Map{};
+        m_map->center = QPointF(screen.x() + screen.width() / 2, screen.y() + screen.height() / 2);
+        for (const QPointer<Window> &window : m_switch->windows) {
+            if (window) {
+                m_map->windows.insert(window);
+            }
+        }
+        m_map->opened = std::chrono::steady_clock::now();
+        m_map->spread = spreadPiles(QRectF(screen.x(), screen.y(), screen.width(), screen.height()));
+        effects->addRepaintFull();
+        qInfo("glance: map shown (%d windows, %d spread)", int(m_map->windows.size()), int(m_map->spread.size()));
+    }
+
+    // Start zooming the map back to full size from wherever it is now.
+    void closeMap(Window *chosen)
+    {
+        m_map->openAtClose = mapProgress();
+        m_map->closing = true;
+        m_map->closed = std::chrono::steady_clock::now();
+        m_map->chosen = chosen;
+        effects->addRepaintFull();
+    }
+
+    // How far open the map is (0 to 1, eased): opening or closing takes
+    // mapTime.
+    qreal mapProgress() const
+    {
+        const auto ease = [](qreal t) {
+            return 1.0 - std::pow(1.0 - std::clamp(t, 0.0, 1.0), 3);
+        };
+        const auto now = std::chrono::steady_clock::now();
+        if (m_map->closing) {
+            return m_map->openAtClose * (1.0 - ease(std::chrono::duration<qreal>(now - m_map->closed) / mapTime));
+        }
+        return ease(std::chrono::duration<qreal>(now - m_map->opened) / mapTime);
+    }
+
+    // Where the map draws something drawn at `rect`: scaled by mapScale
+    // toward the screen's centre.
+    QRectF toMap(const QRectF &rect) const
+    {
+        const QPointF c = m_map->center;
+        return QRectF(c.x() + (rect.x() - c.x()) * mapScale, c.y() + (rect.y() - c.y()) * mapScale,
+                      rect.width() * mapScale, rect.height() * mapScale);
+    }
+
+    // Where a window drawn at `from` is drawn in this frame of the map: on
+    // the straight way to its place there (shrinking and spreading at once).
+    QRectF mapped(Window *window, const QRectF &from) const
+    {
+        auto it = m_map->spread.find(window);
+        return lerpRect(from, it != m_map->spread.end() ? it->second : toMap(from), m_mapOpen);
+    }
+
+    // Piles in the map: windows overlapping meaningfully (more than
+    // pileOverlap of the smaller one; parked windows stay out, their
+    // columns and slight stash overlaps don't count). The front window of
+    // a pile stays; the others go, alternately, into a row above and a row
+    // below the pile, within its width and the space up to the screen's
+    // edge, shrunk until the row fits. So every window can be counted and
+    // pointed at. Returns where they go (global, at map scale).
+    std::map<Window *, QRectF> spreadPiles(const QRectF &screen) const
+    {
+        // Free windows in the map, front first, where the map draws them.
+        std::vector<std::pair<Window *, QRectF>> items;
+        const auto &stacking = workspace()->stackingOrder();
+        for (auto it = stacking.rbegin(); it != stacking.rend(); ++it) {
+            if (m_map->windows.contains(*it) && !isParked(*it)) {
+                items.emplace_back(*it, toMap(currentlyDrawn(*it)));
+            }
+        }
+        const auto area = [](const QRectF &r) {
+            return r.width() * r.height();
+        };
+        // Join overlapping windows into piles (union-find).
+        const int n = int(items.size());
+        std::vector<int> root(n);
+        std::iota(root.begin(), root.end(), 0);
+        const auto find = [&root](int i) {
+            while (root[i] != i) {
+                i = root[i] = root[root[i]];
+            }
+            return i;
+        };
+        for (int i = 0; i < n; ++i) {
+            for (int j = i + 1; j < n; ++j) {
+                const QRectF &a = items[i].second;
+                const QRectF &b = items[j].second;
+                const QRectF overlap = a & b;
+                if (!overlap.isEmpty() && area(overlap) > pileOverlap * std::min(area(a), area(b))) {
+                    root[find(j)] = find(i);
+                }
+            }
+        }
+        std::map<int, std::vector<int>> piles; // members front first
+        for (int i = 0; i < n; ++i) {
+            piles[find(i)].push_back(i);
+        }
+
+        std::map<Window *, QRectF> spread;
+        // Lay out a row of windows between `left` and `right`, in the band
+        // from `top` to `bottom`: centered, against the pile.
+        const auto row = [&](const std::vector<int> &members, qreal left, qreal right, qreal top, qreal bottom,
+                             bool above) {
+            if (members.empty()) {
+                return;
+            }
+            qreal width = 0;
+            qreal height = 0;
+            for (int m : members) {
+                width += items[m].second.width();
+                height = std::max(height, items[m].second.height());
+            }
+            const qreal gaps = spreadGap * (members.size() - 1);
+            const qreal k = std::clamp(std::min((bottom - top) / height, (right - left - gaps) / width), spreadMinScale, 1.0);
+            qreal x = (left + right) / 2 - (width * k + gaps) / 2;
+            for (int m : members) {
+                const QSizeF size = items[m].second.size() * k;
+                spread[items[m].first] = QRectF(QPointF(x, above ? bottom - size.height() : top), size);
+                x += size.width() + spreadGap;
+            }
+        };
+        for (const auto &[pile, members] : piles) {
+            if (members.size() < 2) {
+                continue;
+            }
+            QRectF bounds = items[members.front()].second;
+            for (int m : members) {
+                bounds |= items[m].second;
+            }
+            std::vector<int> above;
+            std::vector<int> below;
+            for (size_t i = 1; i < members.size(); ++i) {
+                (i % 2 ? above : below).push_back(members[i]);
+            }
+            row(above, bounds.left(), bounds.right(), screen.top() + spreadGap, bounds.top() - spreadGap, true);
+            row(below, bounds.left(), bounds.right(), bounds.bottom() + spreadGap, screen.bottom() - spreadGap, false);
+        }
+        return spread;
+    }
+
+    // --- Alt+Tab: the label ---
+
+    // The selected window's icon, large, and its title below, on a rounded
+    // translucent card, in the centre of the screen; fades with the map.
+    // Redrawn when the selection (or its title) changes.
+    void paintLabel(const RenderTarget &renderTarget, const RenderViewport &viewport, LogicalOutput *screen)
+    {
+        Window *window = mapSelected();
+        if (!window) {
+            return;
+        }
+        const qreal scale = viewport.scale();
+        if (!m_label || m_labelWindow != window || m_labelCaption != window->caption() || m_labelScale != scale) {
+            const QImage image = labelImage(window, scale);
+            m_label = GLTexture::upload(image);
+            if (!m_label) {
+                return;
+            }
+            m_label->setFilter(GL_LINEAR);
+            m_labelSize = QSizeF(image.size()) / scale;
+            m_labelWindow = window;
+            m_labelCaption = window->caption();
+            m_labelScale = scale;
+        }
+        const RectF area = screen->geometryF();
+        const QPointF topLeft(area.x() + (area.width() - m_labelSize.width()) / 2,
+                              area.y() + (area.height() - m_labelSize.height()) / 2);
+        QMatrix4x4 mvp = viewport.projectionMatrix();
+        mvp.translate(std::round(topLeft.x() * scale), std::round(topLeft.y() * scale));
+        const qreal opacity = m_mapOpen;
+
+        GLShader *shader = ShaderManager::instance()->pushShader(ShaderTrait::MapTexture | ShaderTrait::Modulate
+                                                                 | ShaderTrait::TransformColorspace);
+        shader->setUniform(GLShader::Mat4Uniform::ModelViewProjectionMatrix, mvp);
+        shader->setUniform(GLShader::Vec4Uniform::ModulationConstant, QVector4D(opacity, opacity, opacity, opacity));
+        shader->setColorspaceUniforms(ColorDescription::sRGB, renderTarget.colorDescription(), RenderingIntent::Perceptual);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // premultiplied
+        m_label->render(QSizeF(m_label->size()));
+        glDisable(GL_BLEND);
+        ShaderManager::instance()->popShader();
+    }
+
+    static QImage labelImage(Window *window, qreal devicePixelRatio)
+    {
+        QFont font = QGuiApplication::font();
+        font.setPixelSize(labelTextSize);
+        const QFontMetricsF metrics(font);
+        const QString title = metrics.elidedText(window->caption(), Qt::ElideRight, labelMaxWidth);
+        const qreal width = std::max({labelIconSize, metrics.horizontalAdvance(title), labelMinWidth - 2 * labelPadding});
+        const QSizeF size(width + 2 * labelPadding, 2 * labelPadding + labelIconSize + labelGap + metrics.height());
+
+        QImage image((size * devicePixelRatio).toSize(), QImage::Format_ARGB32_Premultiplied);
+        image.setDevicePixelRatio(devicePixelRatio);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(20, 20, 20, 200));
+        painter.drawRoundedRect(QRectF(QPointF(0, 0), size), labelRadius, labelRadius);
+        QIcon icon = window->icon();
+        if (icon.isNull()) {
+            icon = QIcon::fromTheme(QStringLiteral("application-x-executable"));
+        }
+        icon.paint(&painter, QRectF((size.width() - labelIconSize) / 2, labelPadding, labelIconSize, labelIconSize).toRect());
+        painter.setFont(font);
+        painter.setPen(Qt::white);
+        painter.drawText(QRectF(0, labelPadding + labelIconSize + labelGap, size.width(), metrics.height()),
+                         Qt::AlignCenter, title);
+        return image;
+    }
+
     // Set how a window is drawn (see applyParked, dragStep), keeping its
     // focus ring the same width on screen.
     void setDrawTransform(Window *window, const QTransform &transform)
@@ -2145,13 +2708,25 @@ private:
         }
     }
 
-    // Outline the active window: a line in the accent color just outside its
-    // frame, ringWidth wide on screen whatever the window's scale. It is a
-    // child of the window's scene item (whose coordinates start at the
-    // frame's top-left corner), so it moves, scales and stacks with it.
+    // The highlighted window, which gets the focus ring: the active one, or
+    // during Alt+Tab the selected one (then the chosen one until it is
+    // active).
+    Window *highlighted() const
+    {
+        if (m_switch) {
+            return mapSelected();
+        }
+        return m_chosen ? m_chosen.data() : workspace()->activeWindow();
+    }
+
+    // Outline the highlighted window: a line in the accent color just outside
+    // its frame, ringWidth wide on screen whatever the window's scale (also
+    // in the Alt+Tab map). It is a child of the window's scene item (whose
+    // coordinates start at the frame's top-left corner), so it moves, scales
+    // and stacks with it.
     void updateRing()
     {
-        Window *window = workspace()->activeWindow();
+        Window *window = highlighted();
         const bool wanted = window && !window->isDeleted() && (window->isNormalWindow() || window->isDialog())
             && !window->isFullScreen() && window->windowItem();
         if (!wanted || window != m_ringWindow) {
@@ -2162,7 +2737,13 @@ private:
         }
         const RectF frame = window->frameGeometry();
         const RectF inner(0, 0, frame.width(), frame.height());
-        const qreal scale = window->windowItem()->transform().m11();
+        qreal scale = window->windowItem()->transform().m11();
+        if (m_map && inMap(window)) {
+            const QRectF drawn = currentlyDrawn(window);
+            if (drawn.width() > 0) {
+                scale *= mapped(window, drawn).width() / drawn.width();
+            }
+        }
         const QColor color = QGuiApplication::palette().color(QPalette::Active, QPalette::Highlight);
         const BorderOutline outline(ringWidth / (scale > 0 ? scale : 1.0), color, window->borderRadius());
         if (m_ring) {

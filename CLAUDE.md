@@ -59,8 +59,26 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
     position unchanged; real resize). Again: 50% size in the left stash.
     Again: left parking (15%). Meta+Right mirrors and walks back
     (parking L → stash L → left half → right half → stash R → parking R).
-  - Meta+Up: fill the full screen height (keep width and x). Meta+Down:
-    undo Meta+Up for now (meaning still open).
+  - Meta+Up / Meta+Down (decided 2026-10-01, "people who don't want two
+    halves"; the idea: use windows at full height in main, then shrink
+    them to the sides): two fixed views, always full height, no toggles.
+    Meta+Up = the half view: a half of main at full height (stays in its
+    half; from all of main the free half if exactly one is free, else left,
+    "when in doubt go left", `freeHalf`; a free window the nearer half).
+    Meta+Down = the full view: all of main (`Place::Full`, same 80% IoU
+    test as halves) at full height. Neither acts on parked windows.
+    Meta+Left/Right from all of main go straight to the stash on that side
+    and back into all of main (`m_wasFull`); half windows walk the ladder
+    as before. Wide windows in a stash are capped at `stashMaxWidth` (60%)
+    of the zone (they may overlap neighbours; accepted for now). Placed
+    stash windows are centered in the stash zone (2026-10-02, user's idea;
+    before, the outer edge sat where a drag gives that scale, which left
+    ~40% of the zone empty outside and misaligned the column); parking
+    icons sit against the screen edge. Earlier
+    the same day: Meta+Up as a height toggle (full <-> half height) was a
+    misreading of "half of the main center area" (= half width). KDE's
+    Meta+PgUp (maximize) was considered and dropped by the user (hard to
+    press, fills the stashes too).
   - Keyboard moves animate (180 ms, ease-out); the app resizes during the
     glide. A flash from the app re-laying out remains (noted by the user
     as spoiling the effect a bit); fix if wanted: snapshot + cross-fade
@@ -79,8 +97,10 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   parked windows); keys passed on, as for Meta+arrows.
 - **Focus ring** (agreed 2026-09-30, made stronger 2026-10-01): the
   active window has a 4 px accent-colored outline, same width on screen at
-  any scale. A window selected with Meta+Alt+arrows bounces like a pressed
-  button (user's design): frames 100%, 99%, 98%, 99%, 100%, 60 ms apart
+  any scale. Whenever a window gets the ring (any focus change: click,
+  Meta+Alt+arrows, Alt+Tab, new window; user, 2026-10-02: "any window that
+  gets highlighted for any reason") it bounces like a pressed button
+  (user's design): frames 100%, 99%, 98%, 99%, 100%, 60 ms apart
   (`bounceFrames`, `bounceStep`; tried before: 3 frames to 96% at
   150/100 ms, "chunky"; 5 frames to 96%, "too violent"; the user wants
   a tiny wiggle), stepped; every step, no
@@ -332,17 +352,25 @@ Future: images, other kinds of clipboard content.
 
 Unloading resizes parked windows back to their original size.
 
-## Status (2026-09-29)
-Running in the user's real Plasma session (via use-in-session.sh). Konsole
-and Firefox (Wayland, client-side title bar with tabs) shrink, park, take
-input, and drag back out; tiny parked windows drag from anywhere and pass
-clicks through. Unlike the Wayfire version, a window dragged out of the
-edge stays sharp-ish while growing (KWin samples the app's real buffer). Earlier, tested in the nested KWin, all working: shrink while dragging
-(edge-driven rule), parking, clicks/selection/scrolling in parked windows,
-dragging out by the title bar, real resize with reflow (Firefox, Konsole),
-restore to original size. Open observations: some jank (possibly the
-re-anchoring on every pointer motion, which moves the frame and repaints;
-or VM load); one unexplained freeze in main that didn't recur.
+## Status (2026-10-02)
+Running in the user's real Plasma session (via use-in-session.sh; after a
+rebuild the user logs out and back in). Built and working, as described
+above: shrinking while dragging and parking, input to parked windows,
+icon-like tiny windows, stashes/parking as centred columns, Meta+arrows
+(ladder; Meta+Up half view, Meta+Down full view), Meta+Alt+arrows
+selection, focus ring (4 px) with a bounce on every focus change, hover
+previews (grow in place 2x), clips (text dropped on the desktop or
+Meta+C -> ~/Clips file + KWrite window; edge drop -> parking), declutter
+(Meta+double-click, undo), Meta+drag acceleration + pause to snap.
+
+Last changes (2026-10-02, tested by the user, committed): the half/full
+views (Meta+Up/Down as fixed views), full-width windows to and from the
+stash, stash windows centred in the zone, the bounce on any focus change,
+and Meta+drag snapping mode ("works well enough"; tuning may follow).
+
+History of earlier observations: some jank (possibly the re-anchoring on
+every pointer motion, or VM load); one unexplained freeze in main that
+didn't recur.
 
 ## Open issue: plasmashell hangs at logout (2026-10-01)
 abrt-applet reports a "crash" after some logins: at logout plasmashell
@@ -359,6 +387,22 @@ app scope (they used to live in KWin's service cgroup). Check with
 logouts from sessions without any clips.
 
 ## Next steps
+0. Agreed with the user but not built yet (pick from these):
+   - Mouse drops into a stash/parking column should keep the exact spot:
+     only windows the dropped one overlaps move aside, no re-centring
+     (the "respect mouse drags" rule; today `arrangeArea` re-centres the
+     column and moves the dropped window).
+   - Crowding: what happens when a column holds more than fits (parking
+     should take 10-15, a stash 2-3); declutter now just shrinks a stash
+     to fit; the user mentioned tiling-like vertical resizing.
+   - Declutter follow-ups: double-clicking two windows to share main; QoL
+     tweaks the user noticed but hasn't listed; undo only covers the last
+     declutter (offered: undo a whole chain).
+   - Tuning by feel, as the user uses things: Meta+drag gain/build/slow,
+     pause time, snap regions (middle band 20%, parking band 15%); bounce
+     frames; preview grow (2x; 2.5x if unreadable).
+   - Clips: see item 4 (own clip app, rich text/images).
+   - Watch the logout hang (see the open issue above).
 1. Mouse accelerators: Meta+drag acceleration + pause to snap (designed
    with the user 2026-10-01 after two rounds: distance-based snapping
    spoiled Meta+drag as "grab anywhere and move a bit"; velocity throws
@@ -371,9 +415,18 @@ logouts from sessions without any clips.
    moving slower than `leadSlow` (300 px/s) restarts at 1:1, so
    corrections are precise (user's Fitts's-law point). Screen edges stop
    the window and overshoot isn't stored. Holding still `snapDwell`
-   (500 ms) snaps to where the window is (`snapTarget`: half of main by
-   its center, the stash in an edge zone, parking if about parking-size);
-   release keeps it, moving `snapCancel` cancels. Without Meta: gain 1, no
+   (500 ms) snaps to the region the window's center is in
+   (`snapTargetAt`, 2026-10-02): parking band (`parkingBand`, outer 15% of
+   an edge zone) -> parking, rest of the zone -> stash (centered), main ->
+   left/right half at full height, or all of main at full height in the
+   middle band (`snapFullBand`, 20% of the screen width) (option A, chosen
+   by the user: "position-oriented", the pause shows what will happen).
+   Before, a half snap kept the original height and looked square. After
+   the first snap the drag stays in snapping mode (user: "calmer"):
+   moving into another region snaps there with a short glide, no sizes in
+   between; the region follows the pointer's movement since the snap
+   (`m_snapAnchor` + delta) so nothing jumps. Release keeps the target;
+   releasing Meta leaves snapping mode (follow the pointer again). Without Meta: gain 1, no
    snapping. Vertical throws/fill were dropped (Meta+Up/Down remain). All
    numbers are first guesses to tune by feel. User verdict (2026-10-01):
    "feels like I'm in control"; the pointer not lining up with the window
@@ -399,6 +452,11 @@ logouts from sessions without any clips.
    (Qt): text shown large without menus, the window body is a drag source
    (title bar still moves it), one file per clip as now, images later,
    could reformat when parked; Glance would launch it instead of KWrite.
+   Rich text and images (discussed 2026-10-01): ask the source for
+   text/html (Firefox offers it), RTF, image/png; store .html/.png/.txt;
+   offer the same formats when dragged back out; Qt shows simple HTML.
+   Main work: cleaning web HTML down to bold/italic/links/lists/headings;
+   images inside web HTML are often remote links.
    Cheap stopgap offered: an action on a clip window (e.g. clicking a
    parked clip) copies its file with `wl-copy`. CopyQ was considered
    (items drag out, but it's one list window, not a window per clip).

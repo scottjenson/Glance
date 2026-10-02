@@ -41,8 +41,8 @@ Key mechanics:
 - **Meta + C clips the selected text:** highlight text in any window and
   press Meta+C, and it becomes a clip in parking on that window's side.
 - **The active window has an outline** in your accent color, so you can
-  tell which one is selected even when it is small. Selected from the
-  keyboard (Meta + Alt + arrows), it gives a little bounce, like a button.
+  tell which one is selected even when it is small. A window that becomes
+  active gives a little bounce, like a button.
 
 ## Accelerators
 
@@ -50,7 +50,10 @@ The Meta key (Super / Windows / Command) is the window system's key:
 
 - **Meta + Left / Right** steps the active window between the six places:
   parking, stash, and the halves of main, on either side.
-- **Meta + Up** makes it fill the screen height; **Meta + Down** undoes that.
+- **Meta + Up** puts it in a half of main, top to bottom (a free half, if
+  it is coming from all of main).
+- **Meta + Down** makes it fill main, top to bottom. A window filling main
+  moves straight to the stash and back with Meta + Left / Right.
 - **Meta + Alt + arrows** selects the nearest window in that direction (the
   same keys as in plain KDE), including small windows at the sides.
 - **Meta + double-click** a window to focus on it: it fills the nearer half
@@ -60,7 +63,9 @@ The Meta key (Super / Windows / Command) is the window system's key:
   accelerates: keep moving quickly to one side and the window gets ahead of
   the pointer, so it crosses a wide screen with a short movement. Slow
   down or turn back and it follows exactly again. Hold still for a moment
-  and it snaps into the half of main, stash or parking it is in.
+  and it snaps to the place it is over: a half of main or (in the middle)
+  all of main, top to bottom, a stash, or parking. Keep dragging and it
+  snaps from place to place; let go of Meta to drag freely again.
 
 ## Status
 

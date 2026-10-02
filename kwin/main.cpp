@@ -44,9 +44,11 @@
 // Keyboard (replaces KDE's quick tiling on Meta+arrows): Meta+Left/Right
 // step the active window between left parking, left stash, left half of
 // main, right half of main, right stash and right parking; a free window in
-// main first snaps to the half on that side.
-// Windows move horizontally and keep their vertical position. Meta+Up makes
-// a window fill the screen height; Meta+Down undoes that. Keyboard moves
+// main first snaps to the half on that side. A window in all of main (see
+// Meta+Down) goes straight to the stash on that side, and comes back as
+// wide (see stepSideways). Windows move horizontally and keep their
+// vertical position. Meta+Up: the half view, a half of main at full height;
+// Meta+Down: the full view, all of main at full height. Keyboard moves
 // animate (the drawing glides to the new place while the app resizes).
 //
 // Meta+drag: moves the window like a title-bar drag (following the
@@ -55,19 +57,22 @@
 // keep moving fast in one direction (gain up to leadMaxGain); reversing
 // or slowing down goes back to 1:1, so corrections are precise. The
 // screen edges stop it, and overshoot isn't stored. Pause to snap: holding
-// still for snapDwell snaps the window to where it is (a half of main, a
-// stash, or parking at the very edge); releasing keeps that, moving on
-// cancels it (see leadStep).
+// still for snapDwell snaps the window to the region it is in (see
+// snapTargetAt: a half of main or, in a middle band, all of main, both at
+// full height; a stash; parking at the very edge). From then on the drag
+// is in snapping mode: moving into another region snaps there (no sizes in
+// between); releasing the mouse keeps it, releasing Meta lets it follow the
+// pointer again (see leadStep).
 //
 // Selecting (Meta+Alt+arrows, KDE's own keys for this): activates the
 // nearest window in that direction, judged by where windows are drawn (KDE's
 // version uses the real frames, which are wrong for parked windows).
 //
 // Focus ring: the active window gets an outline in the accent color, as
-// wide on screen at any scale, so it stands out also when tiny. A window
-// selected with Meta+Alt+arrows also dips like a pressed button: it steps
-// through bounceFrames (100% down to 98% and back), bounceStep apart (see
-// startBounce).
+// wide on screen at any scale, so it stands out also when tiny. Whenever the
+// ring goes to a window (click, Meta+Alt+arrows, Alt+Tab, a new window...),
+// the window dips like a pressed button: it steps through bounceFrames (100%
+// down to 98% and back), bounceStep apart (see startBounce).
 //
 // Previews: hovering an icon-sized parked window makes it grow in place to
 // previewGrow times its size (at most 1:1 with the app's resized layout,
@@ -91,7 +96,7 @@
 // ~/Clips and opened in KWrite where it was dropped, as if its window had
 // been dragged there (held at its center), so it can be moved, parked and
 // selected like any window (see dropToClip). Dropped in the parking band
-// (the outer clipParkingBand of an edge zone, also onto parking icons), it
+// (the outer parkingBand of an edge zone, also onto parking icons), it
 // becomes a parking icon in that column instead. Meta+C (a KDE global
 // shortcut, changeable in System Settings) clips the text selected in the
 // active window the same way, into parking on the side nearer that window
@@ -148,6 +153,7 @@
 #include <cmath>
 #include <map>
 #include <optional>
+#include <set>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -179,8 +185,9 @@ public:
         m_snapDwell.setInterval(snapDwell);
         connect(&m_snapDwell, &QTimer::timeout, this, [this]() {
             if (m_dragged && !m_snapped && (input()->keyboardModifiers() & Qt::MetaModifier)) {
-                m_snapped = snapTarget(m_dragged);
-                m_snapAt = input()->pointer()->pos();
+                m_snapAnchor = m_dragDisplayed.center();
+                m_snapPointer = input()->pointer()->pos() + QPointF(m_leadX, 0);
+                m_snapped = snapTargetAt(m_dragged, m_snapAnchor);
                 m_leadRun = 0;
                 dragStep(m_dragged);
             }
@@ -348,10 +355,10 @@ public:
                 stepSideways(window, Side::Right);
                 break;
             case Qt::Key_Up:
-                fillHeight(window);
+                halfView(window);
                 break;
             default:
-                undoFillHeight(window);
+                fullView(window);
                 break;
             }
         }
@@ -448,8 +455,9 @@ private:
 
     enum class Side { Left, Right };
     // Where a window is, for Meta+Left/Right. Each side has a parking area, a
-    // stash and a half of main; Free is anywhere else.
-    enum class Place { ParkingLeft, StashLeft, HalfLeft, HalfRight, StashRight, ParkingRight, Free };
+    // stash and a half of main; Full is all of main (see Meta+Down); Free is
+    // anywhere else.
+    enum class Place { ParkingLeft, StashLeft, HalfLeft, HalfRight, StashRight, ParkingRight, Full, Free };
 
     // --- Tuning knobs ---
     // Width of the left and right edge zones, where shrinking happens, as a
@@ -494,18 +502,15 @@ private:
     QSizeF m_dragOriginal;
     qreal m_dragScale = 1.0;
 
-    // A Meta+drag gesture's target: a place, or filling / unfilling height.
+    // A Meta+drag snap's target place.
     struct Gesture
     {
         int key; // tells targets apart
         QRectF drawn; // where the window is shown meanwhile
         std::optional<Place> place = std::nullopt;
-        bool fill = false;
-        bool unfill = false;
     };
     // Where the dragged window was when the drag started, where it is drawn
     // now, the current gesture target, and the glide between them.
-    Place m_dragStartPlace = Place::Free;
     QPointF m_lastPress;
     QPointF m_dragPress;
     QRectF m_dragStartFrame;
@@ -525,7 +530,10 @@ private:
     QPointF m_leadLast;
     std::vector<std::pair<std::chrono::steady_clock::time_point, QPointF>> m_leadSamples;
     std::optional<Gesture> m_snapped;
-    QPointF m_snapAt;
+    // Snapping mode: the window's center and the pointer (plus lead) at the
+    // first snap; the region follows the pointer's movement from there.
+    QPointF m_snapAnchor;
+    QPointF m_snapPointer;
     int m_dragModeKey = -1;
     bool m_dragAnimating = false;
     QRectF m_dragAnimFrom;
@@ -536,8 +544,8 @@ private:
     QPointer<Window> m_target;
     bool m_forwarding = false;
 
-    // Frame y and height of windows before Meta+Up, for Meta+Down.
-    std::map<Window *, std::pair<qreal, qreal>> m_beforeFillHeight;
+    // Windows that went to a stash from all of main, to come back as wide.
+    std::set<Window *> m_wasFull;
 
     // A left-button press on a parked window, held back until we know
     // whether it is a click or a drag.
@@ -606,7 +614,7 @@ private:
     // The focus ring (see updateRing) and the window it outlines.
     OutlinedBorderItem *m_ring = nullptr;
     QPointer<Window> m_ringWindow;
-    // The window bouncing after Meta+Alt+arrows, its current scale, and
+    // The window bouncing as it gets the ring, its current scale, and
     // which bounce it is (later timers of an earlier one do nothing).
     QPointer<Window> m_bounce;
     qreal m_bounceScale = 1.0;
@@ -643,7 +651,7 @@ private:
             }
             const auto closeRanks = leaving(window);
             m_parked.erase(window);
-            m_beforeFillHeight.erase(window);
+            m_wasFull.erase(window);
             closeRanks();
         });
     }
@@ -756,21 +764,24 @@ private:
 
     // Where clips are saved, relative to the home folder.
     static constexpr const char *clipsFolder = "Clips";
-    // Text dropped this close to a screen edge (fraction of the edge zone's
-    // width) becomes a parking icon (see placeClip).
-    static constexpr qreal clipParkingBand = 0.15;
+    // The parking band: this close to a screen edge (fraction of the edge
+    // zone's width), dropped text becomes a parking icon (see placeClip),
+    // and a snapping drag snaps to parking (see snapTargetAt).
+    static constexpr qreal parkingBand = 0.15;
     // How long to wait for a dragging app to hand over its text.
     static constexpr std::chrono::milliseconds clipTimeout{2000};
 
     // Width of the focus ring on screen (logical pixels).
     static constexpr qreal ringWidth = 4.0;
-    // Bounce of a window selected with Meta+Alt+arrows: its scale frame by
+    // Bounce of a window getting the focus ring: its scale frame by
     // frame (the first is shown at once), and the time between frames.
     static constexpr qreal bounceFrames[] = {1.0, 0.99, 0.98, 0.99, 1.0};
     static constexpr std::chrono::milliseconds bounceStep{60};
 
-    // Scale of a window in a stash when put there with the keyboard.
+    // Scale of a window in a stash when put there with the keyboard, and the
+    // most of the zone's width it may take there.
     static constexpr qreal stashScale = 0.5;
+    static constexpr qreal stashMaxWidth = 0.6;
     // Length of keyboard moves and making-room animations.
     static constexpr std::chrono::milliseconds animationTime{180};
     // Vertical gap between windows that made room for each other.
@@ -779,15 +790,15 @@ private:
     // moving leadBuild (fraction of the screen width) in one direction; a
     // reversal is this much movement the other way (less is jitter); below
     // leadSlow (logical px/s over the last leadSampleTime) it's 1:1 again.
-    // Pause to snap: holding still this long snaps; moving this far from
-    // there cancels it.
+    // Pause to snap: holding still this long snaps; the middle band of the
+    // screen (fraction of its width) where it snaps to all of main.
     static constexpr qreal leadMaxGain = 4.0;
     static constexpr qreal leadBuild = 0.05;
     static constexpr qreal reversalJitter = 5.0;
     static constexpr qreal leadSlow = 300.0;
     static constexpr std::chrono::milliseconds leadSampleTime{80};
     static constexpr std::chrono::milliseconds snapDwell{500};
-    static constexpr qreal snapCancel = 6.0;
+    static constexpr qreal snapFullBand = 0.2;
 
     // The places Meta+Left/Right and gestures step along.
     static constexpr Place placeOrder[] = {Place::ParkingLeft, Place::StashLeft, Place::HalfLeft,
@@ -814,7 +825,7 @@ private:
         return placeOfFrame(window, QRectF(frame.x(), frame.y(), frame.width(), frame.height()));
     }
 
-    // For a window not parked: in a half of main (see halfMatch), or
+    // For a window not parked: all of main or a half of it (see halfMatch), or
     // free.
     Place placeOfFrame(Window *window, const QRectF &frame) const
     {
@@ -825,6 +836,11 @@ private:
             const qreal uni = std::max(frame.right(), x + zoneWidth) - std::min(frame.left(), x);
             return std::max(0.0, inter) / uni;
         };
+        const qreal mainShare = std::max(0.0, std::min(frame.right(), screen.x() + 3 * zoneWidth) - std::max(frame.left(), screen.x() + zoneWidth))
+            / (std::max(frame.right(), screen.x() + 3 * zoneWidth) - std::min(frame.left(), screen.x() + zoneWidth));
+        if (mainShare >= halfMatch) {
+            return Place::Full;
+        }
         if (share(screen.x() + zoneWidth) >= halfMatch) {
             return Place::HalfLeft;
         }
@@ -835,20 +851,33 @@ private:
     }
 
     // One step towards `side` along: parking L, stash L, half L, half R,
-    // stash R, parking R. A free window goes to the half on that side.
+    // stash R, parking R. A free window goes to the half on that side. A
+    // window in all of main goes straight to the stash on that side, and
+    // from there back into all of main (m_wasFull).
     void stepSideways(Window *window, Side side)
     {
+        const bool left = side == Side::Left;
         const Place from = placeOf(window);
         Place to;
         if (from == Place::Free) {
-            to = side == Side::Left ? Place::HalfLeft : Place::HalfRight;
+            to = left ? Place::HalfLeft : Place::HalfRight;
+        } else if (from == Place::Full) {
+            to = left ? Place::StashLeft : Place::StashRight;
+            m_wasFull.insert(window);
         } else {
             const int i = placeIndex(from);
-            const int j = std::clamp(i + (side == Side::Left ? -1 : 1), 0, 5);
+            const int j = std::clamp(i + (left ? -1 : 1), 0, 5);
             if (i == j) {
                 return;
             }
             to = placeOrder[j];
+            const bool backIntoMain = (from == Place::StashLeft && to == Place::HalfLeft)
+                || (from == Place::StashRight && to == Place::HalfRight);
+            if (backIntoMain && m_wasFull.erase(window)) {
+                to = Place::Full;
+            } else if (from == Place::HalfLeft || from == Place::HalfRight) {
+                m_wasFull.erase(window);
+            }
         }
         moveTo(window, to);
     }
@@ -856,15 +885,7 @@ private:
     // `scale`: for a stash, the scale to show it at.
     void moveTo(Window *window, Place place, qreal scale = stashScale)
     {
-        // KDE's own maximized or tiled state would fight our geometry.
-        if (window->maximizeMode() != MaximizeRestore) {
-            window->maximize(MaximizeRestore);
-        }
-        if (window->quickTileMode() != QuickTileMode(QuickTileFlag::None)) {
-            window->setQuickTileModeAtCurrentPosition(QuickTileFlag::None);
-        }
-        m_beforeFillHeight.erase(window);
-
+        releaseKdeState(window);
         // Where it is drawn now: the animation starts there.
         const QRectF from = currentlyDrawn(window);
         const auto closeRanks = leaving(window);
@@ -897,16 +918,31 @@ private:
             const qreal x = screen.x() + (place == Place::HalfLeft ? zoneWidth : 2 * zoneWidth);
             return QRectF(QPointF(x, topFor(height)), QSizeF(zoneWidth, height));
         }
+        case Place::Full: {
+            const qreal height = std::min(size.height(), area.height());
+            return QRectF(QPointF(screen.x() + zoneWidth, topFor(height)), QSizeF(2 * zoneWidth, height));
+        }
         case Place::StashLeft:
         case Place::StashRight:
         case Place::ParkingLeft:
         case Place::ParkingRight: {
-            const qreal scale = place == Place::StashLeft || place == Place::StashRight ? stash : minScale;
+            // In a stash at most stashMaxWidth of the zone wide (wide windows,
+            // e.g. from all of main, shrink more), but still above parking size.
+            const qreal scale = place == Place::StashLeft || place == Place::StashRight
+                ? std::max(minScale + 0.03, std::min(stash, zoneWidth * stashMaxWidth / size.width()))
+                : minScale;
             const QSizeF drawn = size * scale;
-            // Where the drag rule gives this scale: the outer edge this far in.
-            const qreal depth = (scale - minScale) / (1.0 - minScale) * zoneWidth;
+            // A stash column is centered in its zone (whatever the windows'
+            // widths, it lines up, and both sides keep some room); parking
+            // is against the screen edge.
             const bool left = place == Place::StashLeft || place == Place::ParkingLeft;
-            const qreal x = left ? screen.x() + depth : screen.x() + screen.width() - depth - drawn.width();
+            qreal x;
+            if (place == Place::StashLeft || place == Place::StashRight) {
+                const qreal center = left ? screen.x() + zoneWidth / 2 : screen.x() + screen.width() - zoneWidth / 2;
+                x = center - drawn.width() / 2;
+            } else {
+                x = left ? screen.x() : screen.x() + screen.width() - drawn.width();
+            }
             return QRectF(QPointF(x, topFor(drawn.height())), drawn);
         }
         case Place::Free:
@@ -923,6 +959,7 @@ private:
         switch (place) {
         case Place::HalfLeft:
         case Place::HalfRight:
+        case Place::Full:
             resizeAnimated(window, RectF(rect.x(), rect.y(), rect.width(), rect.height()), from);
             break;
         case Place::StashLeft:
@@ -950,31 +987,67 @@ private:
         animate(window, from);
     }
 
-    // Meta+Up: fill the screen height, keeping width and x.
-    void fillHeight(Window *window)
+    // Meta+Up, the half view: a half of main at full height. A window in a
+    // half stays in it; one in all of main goes to a free half (see
+    // freeHalf); any other to the half nearer to it. Not for parked windows.
+    void halfView(Window *window)
     {
         if (isParkedNotRestoring(window)) {
             return;
         }
-        const RectF area = workspace()->clientArea(MaximizeArea, window);
-        const RectF current = window->moveResizeGeometry();
-        if (!m_beforeFillHeight.contains(window)) {
-            m_beforeFillHeight[window] = {current.y(), current.height()};
+        const Place place = placeOf(window);
+        Place half = place;
+        if (place == Place::Full) {
+            half = freeHalf(window);
+        } else if (place != Place::HalfLeft && place != Place::HalfRight) {
+            const RectF screen = window->output()->geometryF();
+            half = currentlyDrawn(window).center().x() < screen.x() + screen.width() / 2 ? Place::HalfLeft : Place::HalfRight;
         }
-        resizeAnimated(window, RectF(current.x(), area.y(), current.width(), area.height()), currentlyDrawn(window));
+        fillHalf(window, half);
     }
 
-    // Meta+Down: back to the height before Meta+Up.
-    void undoFillHeight(Window *window)
+    // Meta+Down, the full view: all of main at full height. Not for parked
+    // windows.
+    void fullView(Window *window)
     {
-        auto it = m_beforeFillHeight.find(window);
-        if (it == m_beforeFillHeight.end() || isParkedNotRestoring(window)) {
+        if (isParkedNotRestoring(window)) {
             return;
         }
-        const RectF current = window->moveResizeGeometry();
-        const RectF target(current.x(), it->second.first, current.width(), it->second.second);
-        m_beforeFillHeight.erase(it);
-        resizeAnimated(window, target, currentlyDrawn(window));
+        releaseKdeState(window);
+        const RectF screen = window->output()->geometryF();
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
+        const qreal zoneWidth = screen.width() * zoneFraction;
+        resizeAnimated(window, RectF(screen.x() + zoneWidth, area.y(), 2 * zoneWidth, area.height()), currentlyDrawn(window));
+    }
+
+    // The half of main for `window`: the free one if the other is taken by
+    // another window, else (both free or both taken) the left one.
+    Place freeHalf(Window *window) const
+    {
+        bool taken[2] = {false, false};
+        for (Window *other : workspace()->stackingOrder()) {
+            if (other == window || !manageable(other) || other->output() != window->output() || isParkedNotRestoring(other)) {
+                continue;
+            }
+            const Place place = placeOf(other);
+            if (place == Place::HalfLeft) {
+                taken[0] = true;
+            } else if (place == Place::HalfRight) {
+                taken[1] = true;
+            }
+        }
+        return taken[0] && !taken[1] ? Place::HalfRight : Place::HalfLeft;
+    }
+
+    // KDE's own maximized or tiled state would fight our geometry.
+    static void releaseKdeState(Window *window)
+    {
+        if (window->maximizeMode() != MaximizeRestore) {
+            window->maximize(MaximizeRestore);
+        }
+        if (window->quickTileMode() != QuickTileMode(QuickTileFlag::None)) {
+            window->setQuickTileModeAtCurrentPosition(QuickTileFlag::None);
+        }
     }
 
     // --- Dragging ---
@@ -1026,7 +1099,6 @@ private:
             m_dragPress = m_lastPress;
             const QPointF moved = cursor - m_dragPress;
             m_dragStartFrame = QRectF(frame.x() - moved.x(), frame.y() - moved.y(), frame.width(), frame.height());
-            m_dragStartPlace = parked ? placeOf(window) : placeOfFrame(window, m_dragStartFrame);
             m_dragStartCenterY = parked ? it->second.shown.center().y() : m_dragStartFrame.center().y();
             m_dragDisplayed = currentlyDrawn(window);
             m_dragGesture.reset();
@@ -1107,14 +1179,12 @@ private:
                       frame.width() * scale, frame.height() * scale);
     }
 
-    // Acceleration and pause to snap, on every drag step: updates the
-    // window's lead (m_leadX) and returns the snap target, if snapped.
-    // Each horizontal pointer movement moves the window that much times the
-    // gain, which grows from 1 to leadMaxGain over the run (movement in one
-    // direction); a reversal (reversalJitter the other way) or moving slower
-    // than leadSlow starts a new run at 1. The lead keeps the window between
-    // the screen edges, so overshoot isn't stored. Without Meta the gain is
-    // 1 (the lead stays) and nothing snaps.
+    // Acceleration and snapping, on every drag step: updates the window's
+    // lead (see updateLead) and returns the snap target, if snapping. The
+    // first snap comes from m_snapDwell (a pause); then, in snapping mode,
+    // the target follows the region the window would be in (the pointer's
+    // movement since the snap, added to the window's center then). Without
+    // Meta the gain is 1 (the lead stays) and there is no snapping.
     std::optional<Gesture> leadStep(Window *window, const QPointF &cursor)
     {
         const auto now = std::chrono::steady_clock::now();
@@ -1127,40 +1197,52 @@ private:
                 return now - sample.first > leadSampleTime;
             });
         }
-        if (m_snapped) {
-            if (std::hypot(cursor.x() - m_snapAt.x(), cursor.y() - m_snapAt.y()) < snapCancel) {
-                return m_snapped;
-            }
-            m_snapped.reset(); // moving on: follow again
-        }
         if (!(input()->keyboardModifiers() & Qt::MetaModifier)) {
             m_snapDwell.stop();
             m_leadRun = 0;
+            m_snapped.reset();
             return std::nullopt;
         }
-        if (!moved) {
-            return std::nullopt;
+        if (moved) {
+            updateLead(window, cursor, dx, now);
+            if (!m_snapped) {
+                m_snapDwell.start();
+            }
         }
-        m_snapDwell.start();
+        if (m_snapped) {
+            const QPointF point = m_snapAnchor + (cursor + QPointF(m_leadX, 0) - m_snapPointer);
+            if (auto target = snapTargetAt(window, point); target->key != m_snapped->key) {
+                m_snapped = target;
+            }
+        }
+        return m_snapped;
+    }
 
+    // Acceleration: each horizontal pointer movement moves the window that
+    // much times the gain, which grows from 1 to leadMaxGain over the run
+    // (movement in one direction); a reversal (reversalJitter the other way)
+    // or moving slower than leadSlow starts a new run at 1. The lead keeps
+    // the window between the screen edges, so overshoot isn't stored.
+    void updateLead(Window *window, const QPointF &cursor, qreal dx, std::chrono::steady_clock::time_point now)
+    {
         // Slow: 1:1 (precise).
         const auto &[t0, p0] = m_leadSamples.front();
         const qreal dt = std::chrono::duration<qreal>(now - t0).count();
         if (dt <= 0 || std::abs(cursor.x() - p0.x()) / dt < leadSlow) {
             m_leadRun = 0;
             m_leadAgainst = 0;
-            return std::nullopt;
+            return;
         }
         if (dx == 0) {
-            return std::nullopt;
+            return;
         }
+        const RectF screen = window->moveResizeOutput()->geometryF();
         const int dir = dx < 0 ? -1 : 1;
         qreal gain = 1.0;
         if (m_leadDir == 0 || dir == m_leadDir) {
             m_leadDir = dir;
             m_leadRun += std::abs(dx);
             m_leadAgainst = 0;
-            const RectF screen = window->moveResizeOutput()->geometryF();
             gain = 1.0 + (leadMaxGain - 1.0) * std::min(1.0, m_leadRun / (screen.width() * leadBuild));
         } else {
             m_leadAgainst += std::abs(dx);
@@ -1171,58 +1253,73 @@ private:
             }
         }
         m_leadX += (gain - 1.0) * dx;
-        const RectF screen = window->moveResizeOutput()->geometryF();
         const qreal x = std::clamp(cursor.x() + m_leadX, screen.x(), screen.x() + screen.width());
         m_leadX = x - cursor.x();
-        return std::nullopt;
     }
 
-    // Pause to snap: the place where the dragged window is drawn. In an edge
-    // zone the stash on that side, or parking if it is about as small as
-    // parking icons; else the half of main its center is in.
-    std::optional<Gesture> snapTarget(Window *window) const
+    // The snap target for a window centered at `point`, by region: in the
+    // parking band parking, elsewhere in an edge zone the stash, in main a
+    // half, or all of main in the middle band (snapFullBand); halves and all
+    // of main at full height.
+    std::optional<Gesture> snapTargetAt(Window *window, const QPointF &point) const
     {
-        const QRectF drawn = m_dragDisplayed;
-        const QPointF center = drawn.center();
         const RectF screen = window->moveResizeOutput()->geometryF();
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
         const qreal zoneWidth = screen.width() * zoneFraction;
-        const bool tiny = drawn.width() / m_dragOriginal.width() < minScale + 0.05;
+        const qreal x = point.x() - screen.x();
+        const qreal width = screen.width();
         Place place;
-        if (center.x() < screen.x() + zoneWidth) {
-            place = tiny ? Place::ParkingLeft : Place::StashLeft;
-        } else if (center.x() > screen.x() + screen.width() - zoneWidth) {
-            place = tiny ? Place::ParkingRight : Place::StashRight;
+        if (x < zoneWidth * parkingBand) {
+            place = Place::ParkingLeft;
+        } else if (x < zoneWidth) {
+            place = Place::StashLeft;
+        } else if (x > width - zoneWidth * parkingBand) {
+            place = Place::ParkingRight;
+        } else if (x > width - zoneWidth) {
+            place = Place::StashRight;
+        } else if (x < width / 2 - width * snapFullBand / 2) {
+            place = Place::HalfLeft;
+        } else if (x > width / 2 + width * snapFullBand / 2) {
+            place = Place::HalfRight;
         } else {
-            place = center.x() < screen.x() + screen.width() / 2 ? Place::HalfLeft : Place::HalfRight;
+            place = Place::Full;
         }
-        return Gesture{.key = int(place), .drawn = placeRect(window, place, m_dragOriginal, center.y()), .place = place};
+        QRectF drawn;
+        switch (place) {
+        case Place::HalfLeft:
+        case Place::HalfRight:
+            drawn = QRectF(screen.x() + (place == Place::HalfLeft ? zoneWidth : 2 * zoneWidth), area.y(), zoneWidth, area.height());
+            break;
+        case Place::Full:
+            drawn = QRectF(screen.x() + zoneWidth, area.y(), 2 * zoneWidth, area.height());
+            break;
+        default:
+            drawn = placeRect(window, place, m_dragOriginal, point.y());
+            break;
+        }
+        return Gesture{.key = int(place), .drawn = drawn, .place = place};
     }
 
     // Released with a gesture target: go there, gliding from where it is
     // shown.
     void commitGesture(Window *window, const Gesture &gesture, const QRectF &from)
     {
-        const QRectF &start = m_dragStartFrame;
-        if (gesture.place && gesture.fill) {
-            // A half of main at full height.
-            m_beforeFillHeight[window] = {start.y(), start.height()};
+        if (!gesture.place) {
+            return;
+        }
+        switch (*gesture.place) {
+        case Place::HalfLeft:
+        case Place::HalfRight:
+        case Place::Full: {
+            // At full height: exactly the target rectangle.
             const QRectF &r = gesture.drawn;
+            releaseKdeState(window);
             resizeAnimated(window, RectF(r.x(), r.y(), r.width(), r.height()), from);
-        } else if (gesture.place) {
+            break;
+        }
+        default:
             commitPlace(window, *gesture.place, m_dragOriginal, gesture.drawn.center().y(), from);
-        } else if (gesture.fill) {
-            const RectF area = workspace()->clientArea(MaximizeArea, window);
-            if (!m_beforeFillHeight.contains(window)) {
-                m_beforeFillHeight[window] = {start.y(), start.height()};
-            }
-            resizeAnimated(window, RectF(start.x(), area.y(), start.width(), area.height()), from);
-        } else if (gesture.unfill) {
-            auto it = m_beforeFillHeight.find(window);
-            if (it != m_beforeFillHeight.end()) {
-                const RectF target(start.x(), it->second.first, start.width(), it->second.second);
-                m_beforeFillHeight.erase(it);
-                resizeAnimated(window, target, from);
-            }
+            break;
         }
     }
 
@@ -1576,13 +1673,7 @@ private:
     // `window` into `half` of main at the full usable height, gliding.
     void fillHalf(Window *window, Place half)
     {
-        if (window->maximizeMode() != MaximizeRestore) {
-            window->maximize(MaximizeRestore);
-        }
-        if (window->quickTileMode() != QuickTileMode(QuickTileFlag::None)) {
-            window->setQuickTileModeAtCurrentPosition(QuickTileFlag::None);
-        }
-        m_beforeFillHeight.erase(window);
+        releaseKdeState(window);
         const QRectF from = currentlyDrawn(window);
         const auto closeRanks = leaving(window);
         const RectF screen = window->output()->geometryF();
@@ -1926,7 +2017,7 @@ private:
     }
 
     // ParkingLeft/Right if `pos` is in that side's parking band (see
-    // clipParkingBand).
+    // parkingBand).
     std::optional<Place> parkingSide(const QPointF &pos) const
     {
         LogicalOutput *output = workspace()->outputAt(pos);
@@ -1934,7 +2025,7 @@ private:
             return std::nullopt;
         }
         const RectF screen = output->geometryF();
-        const qreal band = screen.width() * zoneFraction * clipParkingBand;
+        const qreal band = screen.width() * zoneFraction * parkingBand;
         if (pos.x() - screen.x() < band) {
             return Place::ParkingLeft;
         }
@@ -2041,7 +2132,6 @@ private:
         }
         if (best) {
             workspace()->activateWindow(best);
-            startBounce(best);
         }
     }
 
@@ -2083,6 +2173,7 @@ private:
         m_ring = new OutlinedBorderItem(inner, outline, window->windowItem());
         m_ring->setZ(1000); // above the window's surfaces and title bar
         m_ringWindow = window;
+        startBounce(window);
     }
 
     // Items don't delete their children, and a child must go before its

@@ -99,6 +99,42 @@ fully visible; the label identifies it.
   data; panels and wallpaper to be decided while building. KWin's Zoom
   effect renders the whole screen scaled, if we need that instead.
 
+## Build plan for phase 1 (agreed 2026-10-02)
+Build all four parts at once (the user's choice: each test costs a logout),
+as one new section of `kwin/main.cpp`, like the other features:
+1. **Keys and quick switch:** disable the eight "Walk Through Windows"
+   actions (as Quick Tile / Switch Window are disabled, see the loop over
+   action names near the top of the effect's setup); handle Alt+Tab and
+   Meta+Tab in `onKey`: Tab / Shift+Tab step through the recency order,
+   Esc cancels, releasing the modifier activates the selection (ring +
+   bounce follow from `windowActivated`).
+   - Swallow Tab under Alt (else the app gets Alt+Tab). Under Meta,
+     swallowing makes KDE think Meta was tapped alone and open the
+     launcher (see [docs/keyboard.md](../docs/keyboard.md)): pass it on
+     and rely on the disabled actions, or test what happens.
+   - Check: apps that react to a lone Alt press/release (Firefox shows its
+     menu bar) shouldn't react to our Alt+Tab. On the Mac, macOS may take
+     Command+Tab before the VM sees it.
+2. **Map:** a hold timer (~200 ms); every window drawn at 50% in the
+   centre, animated, dimmed except the selection. Do it in `paintWindow`
+   with the paint data's scale/translation on top of the existing drawing
+   (as the bounce does), so parked windows' own transforms are untouched;
+   `prePaintWindow` must `setTransformed()`, `isActive()` true while the
+   map is up. Wallpaper (the desktop window) shrinks with the map; panels:
+   probably hidden while the map is up (show the user a screenshot).
+   Pointer input is ignored while the map is up.
+3. **Label:** app icon (`window->icon()`) + title (`window->caption()`)
+   painted with QPainter onto an image, uploaded as a texture and drawn in
+   the centre of the screen in `paintScreen`; redone on each Tab.
+4. **Spread:** piles and rows as above, as a second animation stage.
+
+Add `glance:` log lines at the key moments (switch started, map shown,
+window chosen, cancelled) so the journal shows what happened in the user's
+test. Run the headless load check before handing over. Then the user tests
+it all in one session: tap toggle, hunting, map, label, a pile of 4-5
+windows in main. Commit once it works; afterwards move this design to
+`docs/alt-tab.md` and update CLAUDE.md.
+
 ## Phase 2 (agreed to wait until phase 1 shows whether it works)
 - Mouse in the map: click a window to choose it.
 - App grouping hint: the selected window's sibling windows lightly

@@ -80,8 +80,9 @@ rebuild the user logs out and back in). Built and working: everything in
 the docs table. Last changes (2026-10-02, tested by the user, committed):
 the half/full views (Meta+Up/Down as fixed views), full-width windows to
 and from the stash, stash windows centred in the zone, the bounce on any
-focus change, and Meta+drag snapping mode. Next: Alt+Tab
-([plans/alt-tab.md](plans/alt-tab.md)), designed with the user, not built.
+focus change, and Meta+drag snapping mode. Next: build Alt+Tab phase 1
+(design and build plan in [plans/alt-tab.md](plans/alt-tab.md); all four
+parts at once, agreed with the user, not started).
 
 ## How the effect works (kwin/main.cpp, the basics)
 - It is a KWin **effect**, not a plain `KWin::Plugin`, so `prePaintWindow`

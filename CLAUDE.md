@@ -1,5 +1,10 @@
 # Glance: a window-management effect for KDE Plasma (KWin)
 
+This file holds what every session needs. Details live in `docs/` (built
+features: design + how it works) and `plans/` (not built yet); read the one
+for the feature you're working on. Keep this file short: put feature detail
+in those files and only a line here.
+
 ## Goal
 A window-management experiment for wide (ultrawide) monitors: as the user
 drags a window toward the left or right edge of the screen, the window
@@ -9,7 +14,8 @@ Mac, then as a Wayfire plugin (now in `wayfire/`, reference only).
 
 **Goal: ship something people can try on KDE Plasma.** The product is the
 KWin effect in `kwin/`. Target: desktops with ultrawide monitors, not
-laptops (don't suggest testing on a laptop).
+laptops (don't suggest testing on a laptop). The project is a demo for
+exploring fairly radical ideas, not a conservative KDE add-on.
 
 **Name:** Glance (chosen 2026-09-30: you glance at the windows on the
 sides). Formerly WideMonitorUX (project/repo) and edge-shrink (the effect).
@@ -17,125 +23,85 @@ Renamed everywhere: code, scripts, docs, the project folder (~/Glance) and
 the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 "Overview" was ruled out: KDE's own Meta+W effect.
 
-## Design rules (agreed with the user)
-- Screen: main (the middle half) is full size; the left and right quarters are
-  edge zones (`zoneFraction = 0.25`, relative to the screen width).
-- A window is full size as long as it lies entirely within main.
-  Once its left or right (drawn) edge enters an edge zone, it shrinks,
-  scaled around the cursor (the grabbed spot stays under it), linearly with
-  that edge's depth into the zone, reaching `minScale` (0.15) exactly when
-  the edge meets the screen edge.
-- Dropped while shrunk: it stays exactly where and as large as drawn
-  ("parked"), stays fully usable, and the app is really resized to a
-  phone-like width so web pages reflow. Dropped in main (scale
-  ≥ 0.99): back to its original size.
-- Scales are always relative to the window's original size.
-- **Respect mouse drags** (user's principle, 2026-09-30): a plain mouse
-  drop (a window, or a clip dropped on the desktop) should land where and
-  as large as the user put it, changed as little as possible. Snapping to
-  places is for the keyboard (Meta+arrows) and Meta+drag throws. Known
-  tension: the stacks rule below re-forms a column when a window is
-  dropped into a stash or parking area, which moves the dropped window;
-  the user knows this isn't a perfect rule. Prefer the least movement
-  when designing crowding.
+## Core design rules (agreed with the user)
 - Regions (user's terms, settled 2026-09-30; use them everywhere: docs,
   comments, identifiers): **main** (center half), **stash** (everything
   between main and parking; its width depends on the monitor) and
-  **parking** (the very edge, icon-sized windows, ~15%). Formerly called
+  **parking** (the very edge, icon-sized windows, ~15%). The left and right
+  quarters are the edge zones (`zoneFraction = 0.25`). Formerly called
   middle, staging and parking lot. "Parked" (verb/state) = dropped while
   shrunk, in a stash or a parking area (`m_parked` holds both).
+- Windows shrink as their edge enters an edge zone, down to `minScale`
+  (0.15) at the screen edge; dropped while shrunk they stay where and as
+  large as drawn, fully usable, and the app really resizes
+  ([docs/dragging-and-parking.md](docs/dragging-and-parking.md)).
+- Stashed and parked windows are meant to be used in place, not faded.
+  Parking is Glance's minimize.
+- **Respect mouse drags** (user's principle, 2026-09-30): a plain mouse
+  drop (a window, or a clip dropped on the desktop) should land where and
+  as large as the user put it, changed as little as possible. Snapping to
+  places is for the keyboard (Meta+arrows) and Meta+drag. Known
+  tension: stash and parking columns re-form when a window is dropped
+  into them, which moves the dropped window; the user knows this isn't a
+  perfect rule. Prefer the least movement when designing crowding.
 - Modifier: Meta (Super; Command on the Mac keyboard) is the window
-  system's key; Ctrl/Shift/Alt belong to apps. The user is fine being
-  aggressive with Meta ("opinionated window manager"), as long as what KDE
-  users rely on keeps working or gets a better replacement. Meta+mouse:
-  Meta+drag stays move; Meta+click, Meta+wheel, Meta+double-click are free
-  for future features. Meta+keyboard shortcuts other than the arrows are
+  system's key; Ctrl/Shift/Alt belong to apps (Alt+Tab is the universal
+  exception). The user is fine being aggressive with Meta ("opinionated
+  window manager"), as long as what KDE users rely on keeps working or gets
+  a better replacement. Meta moves, Meta+Alt selects. Meta+mouse:
+  Meta+drag moves (with acceleration and snapping), Meta+double-click
+  declutters; Meta+click and Meta+wheel are free for future features.
+  Meta+keyboard shortcuts other than the arrows, Meta+C and Meta+Tab are
   left to KDE.
-- **Keyboard, phase 1** (agreed 2026-09-29, may evolve; replaces KDE's
-  quick tiling on Meta+arrows, intercepted by our input filter, active
-  window only):
-  - Meta+Left from a free window in main: snap to the left half of main
-    (x = main's left edge, width = half of main; height and vertical
-    position unchanged; real resize). Again: 50% size in the left stash.
-    Again: left parking (15%). Meta+Right mirrors and walks back
-    (parking L → stash L → left half → right half → stash R → parking R).
-  - Meta+Up / Meta+Down (decided 2026-10-01, "people who don't want two
-    halves"; the idea: use windows at full height in main, then shrink
-    them to the sides): two fixed views, always full height, no toggles.
-    Meta+Up = the half view: a half of main at full height (stays in its
-    half; from all of main the free half if exactly one is free, else left,
-    "when in doubt go left", `freeHalf`; a free window the nearer half).
-    Meta+Down = the full view: all of main (`Place::Full`, same 80% IoU
-    test as halves) at full height. Neither acts on parked windows.
-    Meta+Left/Right from all of main go straight to the stash on that side
-    and back into all of main (`m_wasFull`); half windows walk the ladder
-    as before. Wide windows in a stash are capped at `stashMaxWidth` (60%)
-    of the zone (they may overlap neighbours; accepted for now). Placed
-    stash windows are centered in the stash zone (2026-10-02, user's idea;
-    before, the outer edge sat where a drag gives that scale, which left
-    ~40% of the zone empty outside and misaligned the column); parking
-    icons sit against the screen edge. Earlier
-    the same day: Meta+Up as a height toggle (full <-> half height) was a
-    misreading of "half of the main center area" (= half width). KDE's
-    Meta+PgUp (maximize) was considered and dropped by the user (hard to
-    press, fills the stashes too).
-  - Keyboard moves animate (180 ms, ease-out); the app resizes during the
-    glide. A flash from the app re-laying out remains (noted by the user
-    as spoiling the effect a bit); fix if wanted: snapshot + cross-fade
-    (KWin's CrossFadeEffect, as KDE's maximize animation does).
-  - KDE's Meta-tap launcher: our filter must NOT swallow Meta+arrows (KDE's
-    shortcut system then thinks Meta was tapped alone and opens the
-    launcher). Instead the keys are passed on and KWin's four "Window
-    Quick Tile Left/Right/Top/Bottom" QActions (children of Workspace) are
-    disabled while the effect is loaded. `cancelModiferOnlySequence` is
-    not exported to plugins.
-- **Selecting, Meta+Alt+arrows** (agreed 2026-09-30; "our one nod to
-  compatibility with KDE": Meta moves, Meta+Alt selects): activates the
-  nearest window in that direction by *drawn* position (centers, KWin's
-  `switchWindow` scoring). KDE's own "Switch Window Left/Right/Up/Down"
-  actions are disabled while loaded (they use real frames, wrong for
-  parked windows); keys passed on, as for Meta+arrows.
-- **Focus ring** (agreed 2026-09-30, made stronger 2026-10-01): the
-  active window has a 4 px accent-colored outline, same width on screen at
-  any scale. Whenever a window gets the ring (any focus change: click,
-  Meta+Alt+arrows, Alt+Tab, new window; user, 2026-10-02: "any window that
-  gets highlighted for any reason") it bounces like a pressed button
-  (user's design): frames 100%, 99%, 98%, 99%, 100%, 60 ms apart
-  (`bounceFrames`, `bounceStep`; tried before: 3 frames to 96% at
-  150/100 ms, "chunky"; 5 frames to 96%, "too violent"; the user wants
-  a tiny wiggle), stepped; every step, no
-  movement-vs-release logic. Tried and rejected the same day: a glow
-  blooming on arrival ("overdone") and a ring travelling between windows
-  (unclear whether it helped). Dimming inactive windows was rejected:
-  stashed windows are meant to be used, not faded.
-- **Declutter** (built 2026-10-01; from the user's talk, where it was a
-  shake gesture, now Meta+double-click): on a window, it fills the half of
-  main nearest to it at full height and every other window in main goes
-  to a stash; on a stash/parking window, same (it comes forward); on the
-  empty desktop, main is cleared. The same Meta+double-click again undoes
-  (only the last declutter). Stashes are balanced (count-based, windows
-  keep their left-to-right order) and each stash gets one common scale
-  that fits its column (so it lines up). Later (agreed): double-clicking
-  two windows to share main; real crowding handling; QoL tweaks the user
-  noticed but hasn't listed yet.
-- **Hover previews** (built 2026-09-30; redesigned 2026-10-01): hovering
-  an icon-sized parked window grows it **in place** to 2x (`previewGrow`),
-  anchored at its edge and centered on its spot, over its neighbours,
-  which stay put and about half visible (user's idea). The first fly-out
-  version moved the window beside the column, away from the pointer, so
-  it couldn't be grabbed, and big apps (1:1 layout) got huge. Grown icons
-  keep icon behaviour (drag anywhere, clicks pass through). Scrubbing:
-  first after 300 ms, then switching at once by home spots, both
-  animating simultaneously (user's explicit wish). Leaving: shrinks after
-  300 ms. 2x may be too small to read; 2.5x is the fallback.
-- **Stacks (built 2026-09-29):** each stash and parking area holds its
-  windows as one column, centred vertically, ordered by vertical position
-  (an arriving window that lands on another goes below it). Arrivals
-  (keyboard, drop) and departures (keyboard, dragged out, closed) re-form
-  the column, animated. The user said fixed slots would feel weird; it
-  should be fluid. Still open: crowding (parking should hold 10-15,
-  a stash 2-3); the user mentioned it may become tiling-like (windows also
-  resized vertically to fit).
+
+## Features (built) and plans
+| | |
+|---|---|
+| [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking, input to parked windows, icon-like tiny windows |
+| [docs/stacks.md](docs/stacks.md) | Stash and parking columns |
+| [docs/keyboard.md](docs/keyboard.md) | Meta+arrows ladder, Meta+Up/Down views, Meta+Alt+arrows selection |
+| [docs/meta-drag.md](docs/meta-drag.md) | Meta+drag acceleration and pause to snap |
+| [docs/focus-ring.md](docs/focus-ring.md) | Focus ring and bounce |
+| [docs/declutter.md](docs/declutter.md) | Meta+double-click declutter and undo |
+| [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
+| [docs/clips.md](docs/clips.md) | Text drops and Meta+C become clip windows |
+| [docs/logout-hang.md](docs/logout-hang.md) | Open issue: plasmashell hangs at logout |
+| [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
+| **[plans/alt-tab.md](plans/alt-tab.md)** | **Active:** Alt+Tab hunt and return, the desktop map |
+| [plans/backlog.md](plans/backlog.md) | Agreed-but-unbuilt items, polish, packaging, ideas |
+| [plans/clips-back.md](plans/clips-back.md) | Getting clips back into documents |
+
+When a plan is built, move its design into a `docs/` file and update the
+table and Status.
+
+## Status (2026-10-02)
+Running in the user's real Plasma session (via use-in-session.sh; after a
+rebuild the user logs out and back in). Built and working: everything in
+the docs table. Last changes (2026-10-02, tested by the user, committed):
+the half/full views (Meta+Up/Down as fixed views), full-width windows to
+and from the stash, stash windows centred in the zone, the bounce on any
+focus change, and Meta+drag snapping mode. Next: Alt+Tab
+([plans/alt-tab.md](plans/alt-tab.md)), designed with the user, not built.
+
+## How the effect works (kwin/main.cpp, the basics)
+- It is a KWin **effect**, not a plain `KWin::Plugin`, so `prePaintWindow`
+  can call `data.setTransformed()` for scaled windows. Without that, KWin
+  clips drawing in unscaled coordinates (`clipQuads` in
+  scene/itemrenderer_opengl.cpp uses only the translation), so only the
+  top-left part of a shrunk window is painted, and occlusion treats it as
+  still covering its full-size area. `isActive()` is true only while
+  something is scaled (or bouncing).
+- Drawing: a `QTransform` on the window's `WindowItem` (item coordinates
+  start at the frame's top-left corner), always through `setDrawTransform`.
+  A window has a real frame (what the app and KWin's input know) and a
+  drawn position/size; most of Glance is about keeping the two in step.
+- Input: an `InputEventFilter` at `InputFilterOrder::ButtonRebind` (very
+  early, before KWin's own shortcuts, tab box and DnD). `Effect` has its own
+  `pointerMotion` etc. virtuals, so the filter is a separate member object
+  (`Filter`) that calls back.
+- KDE features we replace are switched off while loaded and restored on
+  unload (quick tiling, some KGlobalAccel actions; see
+  [docs/keyboard.md](docs/keyboard.md)).
 
 ## Environment
 - Fedora 44 KDE (aarch64) in a VMware Fusion VM on an Apple Silicon Mac,
@@ -152,6 +118,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   screen is about 6000x2450 px (it follows the VM window size). KDE scale
   changes: 200% earlier, **150%** since 2026-09-29 evening (4004x1630
   logical). Check with `kscreen-doctor -o` (desktop env, see below).
+- One desktop (no virtual desktops in use).
 
 ## Git / GitHub
 - Repo: https://github.com/scottjenson/Glance (**public**; renamed from
@@ -176,11 +143,9 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   `INSTALL_NAMESPACE`; README's install steps); not installed on this VM,
   which loads it from the build folder instead.
 - `kwin/kwin-private/`: KWin headers that Fedora's kwin-devel doesn't
-  install but that we need (`wayland/abstract_data_source.h`, copied from
-  6.7.5; libkwin exports the class). Keep in step with the installed KWin.
-- `kwin/setup-kwrite.sh [size] [font]`: sets KWrite's editor font
-  (~/.config/kwriterc, "KTextEditor Renderer"/"Text Font"; default Noto
-  Sans Mono 16) for clips; run once on this VM (2026-09-30).
+  install but that we need (see [docs/clips.md](docs/clips.md)). Keep in
+  step with the installed KWin.
+- `kwin/setup-kwrite.sh`: KWrite font for clips (run once on this VM).
 - `kwin/run-nested.sh`: starts a nested KWin (a window in the desktop,
   2982x1090 logical at scale 2, override with WIDTH/HEIGHT) with
   QT_PLUGIN_PATH at the build folder and a Konsole inside. Must be run from
@@ -200,7 +165,8 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
   since plain `firefox` would open in the desktop's instance.
 - `test/breakpoints.html`: color/label change at widths 1200/800/600/500 px,
   shows its inner size.
-- `wayfire/`: the Wayfire 0.10.1 prototype (reference; see below).
+- `wayfire/`: the Wayfire 0.10.1 prototype ([docs/wayfire.md](docs/wayfire.md)).
+- `docs/`, `plans/`: see the table above.
 
 ## Build and run
     cmake -S kwin -B kwin/build        # once
@@ -213,274 +179,6 @@ the agent can run itself:
 `XDG_RUNTIME_DIR=/run/user/1000 QT_PLUGIN_PATH=$PWD/kwin/build/bin
 QT_FORCE_STDERR_LOGGING=1 kwin_wayland --virtual --socket es-check
 --exit-with-session "sleep 3"`.
-
-## How the effect works (kwin/main.cpp)
-- It is a KWin **effect**, not a plain `KWin::Plugin`, so `prePaintWindow`
-  can call `data.setTransformed()` for scaled windows. Without that, KWin
-  clips drawing in unscaled coordinates (`clipQuads` in
-  scene/itemrenderer_opengl.cpp uses only the translation), so only the
-  top-left part of a shrunk window is painted, and occlusion treats it as
-  still covering its full-size area. `isActive()` is true only while
-  something is scaled.
-- Drawing: a `QTransform` on the window's `WindowItem` (item coordinates
-  start at the frame's top-left corner).
-- Input: an `InputEventFilter` at `InputFilterOrder::ButtonRebind` (very
-  early). `Effect` has its own `pointerMotion` etc. virtuals, so the filter
-  is a separate member object (`Filter`) that calls back.
-- Quick tiling (`options->electricBorderTiling`) is turned off while loaded
-  and restored on unload.
-
-**Dragging** (`dragStep`, on `Window::interactiveMoveResizeStepped`): KWin
-moves the real frame (grab offset kept as a fraction of the size); we draw it
-scaled around the cursor. `edgeScale` solves the design rule in closed form:
-the drawn edge is at d = cursorToScreenEdge − cursorToWindowEdge·s, and
-s = minScale + (1 − minScale)·d/zoneWidth. Distances are converted to
-original-size units (`grow` = original width / current width). If even
-minScale doesn't fit, `shiftOntoScreen` slides it back on screen.
-KWin's own move logic (window.cpp `nextInteractiveMoveGeometry`) also snaps
-to edges (`adjustWindowPosition`) and keeps ≥100 px visible.
-
-**Parked windows** (`dragFinished`, on `interactiveMoveResizeFinished`): state per
-window in `m_parked` (`shown` rect in global coordinates, `original` size,
-`restoring`). `applyParked` (also on every `frameGeometryChanged`) fits the
-*current* frame into `shown` by width (scale = shown.width / frame.width),
-so nothing jumps while the app catches up with a resize. Real resize via
-`layoutSize`: exactly 1x or 2x the shown size if that is ≥ `minLayoutWidth`
-(400), ≥ the app's minimum (`clientSizeToFrameSize(minSize())`) and
-≤ original; else the smallest size keeping the shape that meets both
-minimums, capped at the original (Firefox: 500 px wide). 1x/2x are for
-text quality (drawn at 1/2, bilinear averages exact 2x2 blocks). Logs one
-`glance:` line per resize. Dropped in main: `moveResize` to the
-original size (grabbed spot under the cursor), `restoring` until it has it.
-
-**Input to parked windows** (`route`, `reanchor`, `pick`): KWin picks the
-window under the pointer from real (full-size) frames, *before* filters run
-(`PointerInputRedirection::processMotionInternal` calls `update()` first).
-So whenever the pointer is over a parked window, its frame is moved so the
-point under the pointer is the same window point as in the drawing
-(topLeft = pos − (pos − shown.topLeft)/scale), the drawing compensates, and
-`pointer->update()` re-picks. KWin's own translation-only input mapping is
-then exact at the pointer: clicks, hover, scrolling, title bar (drag out),
-popups at the cursor. If KWin still picks another window (another frame
-lies above), we point the seat at the right surface with our own
-transformation (`transformFor`) and forward events ourselves; then
-decorations don't respond. KWin doesn't notice that we re-pointed the seat
-(it only calls `seat->notifyPointerEnter` when *its* focus window changes),
-so before leaving events to KWin again, `syncSeatFocus` points the seat back
-at KWin's focus window. Without it, after the pointer passed over a parked
-window's invisible frame area, clicks on the parked window went to the
-desktop with the window's coordinates (desktop rubber band). Not done during KWin's own moves
-(`workspace()->moveResizeWindow()`). Resetting: KWin only recomputes the
-pointer transformation on enter or geometry change.
-
-**Tiny parked windows act like icons** (`holdPress`, `pendingMotion`,
-`releasePending`; decided with the user 2026-09-29): parked windows drawn
-below `iconBelow` (0.25) of their original size hold back a plain left
-press. Moving more than `dragThreshold` (6 px) starts KWin's own move
-(`performMousePressCommand(Options::MouseMove, pressPos)`; the frame was
-re-anchored at the press, so the grabbed spot stays under the cursor);
-releasing sooner delivers press + release to the app as a click (original
-timestamp, window activated). Rationale: at that size the title bar is
-too small to grab, and the idea is that apps reformat into widgets (e.g. a
-music player becomes play/pause), so clicks and scrolling must still work.
-Not for KDE title bars (`pointer->decoration()`), other buttons, or presses
-with modifiers. Larger parked windows (the user expects people to use
-windows at 50-60%) stay normal windows: nothing is taken from their content.
-
-**Focus ring** (`updateRing`, `startBounce`, `paintWindow`): the ring is
-a KWin `OutlinedBorderItem` (exported, header installed) as a child of
-the active window's `WindowItem`, so it moves/scales/stacks with it; its
-width is divided by the item's scale. Color = the app palette's Highlight
-(KDE accent); radius = `window->borderRadius()`. Items don't delete their
-children and a child must be deleted before its parent, so the ring is
-removed on `Window::closed`. All transform changes go through
-`setDrawTransform`, which keeps the ring width in step. The bounce is
-done in `paintWindow` with the paint data's scale + translation (scale
-works around the window item's origin: `renderItem` applies it after
-`item->position()`; so translate by the item-local center·(1−s)), not with
-the item transform, so it doesn't touch our own drawing; two
-`QTimer::singleShot`s (counter guards stale ones); `isActive()` is true
-while bouncing.
-
-**Declutter** (`metaDoubleClick`, `declutter`, `fillHalf`,
-`fittingScale`, `undoDeclutter`): the first Meta+click goes to KWin (its
-Meta+press move ends without motion); a second Meta+left press within
-Qt's double-click interval and `dragThreshold` is taken, with its release.
-Panels etc. are ignored (`manageable`). Undo snapshot `m_declutter`: every
-manageable window on that output (parked state or frame + maximize mode);
-it counts as "again" only if the target is still in the half it was put
-in (desktop: `Declutter::desktop`). If no window leaves main, stashes
-aren't rescaled. `moveTo`/`placeRect`/`commitPlace` take a stash scale.
-
-**Hover previews** (`updateHover`, `iconAt`, `previewRect`,
-`openPreview`, `closePreview`): `Parked::preview` is drawn instead of
-`shown` (`displayRect`), so drawing, picking and re-anchoring follow it;
-`shown` (the home spot) is untouched. `iconAt` hit-tests home spots
-(± half `arrangeGap`), also under the grown window, and wins over it (so
-scrubbing works through it). Preview = `previewGrow` x the home spot,
-capped at 1:1 with the current frame and the screen height, at the
-screen edge, centered on the spot. Grown windows are raised. Timers
-`m_previewOpen` (`previewDelay`) and `m_previewClose` (`previewGrace`).
-Not while a button is held, a move is on or a DnD drag.
-
-**Clips** (`dropToClip`, `readClip`, `finishClip`, `placeClip`; built
-2026-09-30, the start of "erase the lines between windows, files and the
-clipboard"): a text drag released over the desktop (or nothing) would
-become a Plasma sticky-note widget, which is not a window. Our filter runs
-before KWin's DragAndDrop filter: it requests the text from the drag
-source into a pipe (`AbstractDataSource::requestData`), holds the release
-back, and when the data is in (or after `clipTimeout`) cancels the drag,
-passes the release on, saves the text to `~/Clips/<date time>.txt` and
-starts `kwrite <file>` with KWin's startup environment minus
-QT_PLUGIN_PATH, via `systemd-run --user --scope --slice=app.slice` (its
-own app scope like Plasma-started apps, not part of KWin's service; the
-scope execs KWrite, so the pid stays KWrite's). The window whose pid matches is placed as if dragged there
-held at its center and dropped (edge rule, parked if shrunk). Drags with
-`text/uri-list` (files, links) and drops on windows are left alone,
-except on parking icons in the parking band. Parking band (built
-2026-10-01, the user asked for this snap explicitly): text dropped within
-`clipParkingBand` (0.15 of the edge zone, ~150 px) of a screen edge
-becomes a parking icon in that column (`commitPlace`, `m_clipPlace`).
-Meta+C (`clipSelection`, built 2026-10-01; Meta+Left/Right was rejected
-for this: it already moves windows, and the primary selection outlives the
-highlight): a KGlobalAccel shortcut ("Glance Clip Selection", listed in
-System Settings under KWin, rebindable). Clips the primary selection if
-its source's client is the active window's client, into parking on the
-side nearer that window. Drops and Meta+C share `startClip`/`finishClip`
-(`ClipRead::fromDrag` says whether a drag must be cancelled).
-Future: images, other kinds of clipboard content.
-
-Unloading resizes parked windows back to their original size.
-
-## Status (2026-10-02)
-Running in the user's real Plasma session (via use-in-session.sh; after a
-rebuild the user logs out and back in). Built and working, as described
-above: shrinking while dragging and parking, input to parked windows,
-icon-like tiny windows, stashes/parking as centred columns, Meta+arrows
-(ladder; Meta+Up half view, Meta+Down full view), Meta+Alt+arrows
-selection, focus ring (4 px) with a bounce on every focus change, hover
-previews (grow in place 2x), clips (text dropped on the desktop or
-Meta+C -> ~/Clips file + KWrite window; edge drop -> parking), declutter
-(Meta+double-click, undo), Meta+drag acceleration + pause to snap.
-
-Last changes (2026-10-02, tested by the user, committed): the half/full
-views (Meta+Up/Down as fixed views), full-width windows to and from the
-stash, stash windows centred in the zone, the bounce on any focus change,
-and Meta+drag snapping mode ("works well enough"; tuning may follow).
-
-History of earlier observations: some jank (possibly the re-anchoring on
-every pointer motion, or VM load); one unexplained freeze in main that
-didn't recur.
-
-## Open issue: plasmashell hangs at logout (2026-10-01)
-abrt-applet reports a "crash" after some logins: at logout plasmashell
-doesn't exit, systemd kills it after 40 s (SIGABRT, core dump). Stack:
-`WaylandClipboard::~WaylandClipboard` (kguiaddons, Klipper) waiting in
-`QThread::wait`. KWin doesn't crash. All 21 logouts before 2026-09-30
-14:30 were clean; 4 of 9 hung after clips (drag/primary-selection
-reads, KWrite starts) were introduced; correlation with clip use per
-session isn't exact, and KDE has known clipboard-thread issues
-(kguiaddons MR 55). First step taken: clip KWrites run in their own
-app scope (they used to live in KWin's service cgroup). Check with
-`journalctl --user -o short-iso | grep -E "Stopping plasma-plasmashell|stop-sigterm"`
-(a "timed out" line right after a stop = hang). If it persists: compare
-logouts from sessions without any clips.
-
-## Next steps
-0. Agreed with the user but not built yet (pick from these):
-   - Mouse drops into a stash/parking column should keep the exact spot:
-     only windows the dropped one overlaps move aside, no re-centring
-     (the "respect mouse drags" rule; today `arrangeArea` re-centres the
-     column and moves the dropped window).
-   - Crowding: what happens when a column holds more than fits (parking
-     should take 10-15, a stash 2-3); declutter now just shrinks a stash
-     to fit; the user mentioned tiling-like vertical resizing.
-   - Declutter follow-ups: double-clicking two windows to share main; QoL
-     tweaks the user noticed but hasn't listed; undo only covers the last
-     declutter (offered: undo a whole chain).
-   - Tuning by feel, as the user uses things: Meta+drag gain/build/slow,
-     pause time, snap regions (middle band 20%, parking band 15%); bounce
-     frames; preview grow (2x; 2.5x if unreadable).
-   - Clips: see item 4 (own clip app, rich text/images).
-   - Watch the logout hang (see the open issue above).
-1. Mouse accelerators: Meta+drag acceleration + pause to snap (designed
-   with the user 2026-10-01 after two rounds: distance-based snapping
-   spoiled Meta+drag as "grab anywhere and move a bit"; velocity throws
-   felt chaotic, burned through the ladder, gave no feedback; see
-   `leadStep`). Meta+drag moves like a title-bar drag, but horizontally
-   the window gets ahead of the pointer (`m_leadX`; the pointer can't be
-   moved: VMware's pointer is absolute). Gain grows from 1 to
-   `leadMaxGain` (4) over a run of `leadBuild` (5% of screen width) in
-   one direction; a reversal (>= `reversalJitter`, 5 px, against it) or
-   moving slower than `leadSlow` (300 px/s) restarts at 1:1, so
-   corrections are precise (user's Fitts's-law point). Screen edges stop
-   the window and overshoot isn't stored. Holding still `snapDwell`
-   (500 ms) snaps to the region the window's center is in
-   (`snapTargetAt`, 2026-10-02): parking band (`parkingBand`, outer 15% of
-   an edge zone) -> parking, rest of the zone -> stash (centered), main ->
-   left/right half at full height, or all of main at full height in the
-   middle band (`snapFullBand`, 20% of the screen width) (option A, chosen
-   by the user: "position-oriented", the pause shows what will happen).
-   Before, a half snap kept the original height and looked square. After
-   the first snap the drag stays in snapping mode (user: "calmer"):
-   moving into another region snaps there with a short glide, no sizes in
-   between; the region follows the pointer's movement since the snap
-   (`m_snapAnchor` + delta) so nothing jumps. Release keeps the target;
-   releasing Meta leaves snapping mode (follow the pointer again). Without Meta: gain 1, no
-   snapping. Vertical throws/fill were dropped (Meta+Up/Down remain). All
-   numbers are first guesses to tune by feel. User verdict (2026-10-01):
-   "feels like I'm in control"; the pointer not lining up with the window
-   is "a little weird" but worth the trade-off; parameters may be tuned
-   with more use. "In a half" (keyboard) = the
-   window's horizontal extent and the half's share >= 80% (IoU,
-   `halfMatch`). The drag's start place uses our own recorded press:
-   KWin's `interactiveMoveResizeAnchor()` follows the cursor.
-2. Polish: re-anchor less often (e.g. on press/scroll, or after enough
-   movement); overlapping parked windows; title-bar buttons of parked
-   windows; text quality (the Wayfire halving scaler, below; pixel-exact
-   placement at 1x/2x); fractional KDE scales.
-3. Packaging (not yet: the user wants quality-of-life features first;
-   shipping is the long-term goal): Fedora COPR / Arch AUR, like other
-   third-party KWin effects (Better Blur, KDE Rounded Corners). Internal
-   API, so it must be rebuilt per Plasma release. `README.md` (with
-   install steps) is done; an MIT `LICENSE` file is not (metadata.json
-   already says MIT). The user hasn't decided whether to hide
-   their email in commits (GitHub noreply).
-4. Clips back into documents (user's goal, 2026-10-01: "move information
-   around", reversibly; not now). Today getting a clip's text back means
-   click, select all, copy, paste. Likely answer: our own small clip app
-   (Qt): text shown large without menus, the window body is a drag source
-   (title bar still moves it), one file per clip as now, images later,
-   could reformat when parked; Glance would launch it instead of KWrite.
-   Rich text and images (discussed 2026-10-01): ask the source for
-   text/html (Firefox offers it), RTF, image/png; store .html/.png/.txt;
-   offer the same formats when dragged back out; Qt shows simple HTML.
-   Main work: cleaning web HTML down to bold/italic/links/lists/headings;
-   images inside web HTML are often remote links.
-   Cheap stopgap offered: an action on a clip window (e.g. clicking a
-   parked clip) copies its file with `wl-copy`. CopyQ was considered
-   (items drag out, but it's one list window, not a window per clip).
-5. Ideas (not agreed): trackpad gestures (discussed 2026-09-30, skipped
-   for now; KWin's input filters get swipe/pinch/hold events, KDE uses 3-
-   and 4-finger swipes itself; VMware Fusion only exposes a virtual mouse,
-   so testing would need a USB Magic Trackpad passed through with
-   `usb.generic.allowHID = "TRUE"`); live resizing during the drag; fade icon-sized
-   windows or cap them at an icon size; top/bottom edges; config options;
-   multiple monitors (the on-screen fit blocks dragging to another one).
-6. Long term: ask KWin upstream for a way to set a window's input
-   transform. Fallback platform if KWin ever fails: a GNOME Shell extension.
-
-## Wayfire prototype (wayfire/, reference only; keeps its old edge-shrink names)
-Same behaviour, earlier version (cursor-driven 400 px zone). Build:
-`meson setup wayfire/build && meson compile -C wayfire/build`; run
-`wayfire -c ~/Glance/wayfire/wayfire-test.ini` from Konsole in the VM
-window. Needs `wayfire`, `wayfire-devel`, `glm-devel` (installed). It worked
-nested only with KDE at 100% (it can't tell KDE it is 2x). Worth porting
-from it: `smooth_scaler_t`, which halves the texture into offscreen buffers
-(exact 2x2 averages, like a mipmap) until the last step is between 1/2 and
-1, then draws with bilinear; plain bilinear below 1/2 skips pixels and makes
-text look dirty. Detailed notes on its internals and Wayfire 0.10.1 facts:
-CLAUDE.md as of commit 6f217f6.
 
 ## Notes for the agent
 - The user is new to Linux/Wayland development: explain Linux-specific steps
@@ -502,7 +200,8 @@ CLAUDE.md as of commit 6f217f6.
   keys: Fusion's Key Mappings turned Command+C into Ctrl+C, so Meta+C never
   reached KWin; the user turned that mapping off (2026-10-01) and copies
   with Ctrl+C in the VM. If a Meta+letter shortcut does nothing (no
-  `glance:` log line), check Fusion's Key Mappings.
+  `glance:` log line), check Fusion's Key Mappings. Command+Tab may be
+  taken by macOS itself before the VM sees it; check when building Meta+Tab.
 - Mac→VM clipboard (VMware Tools, `vmtoolsd -n vmusr`) is unreliable and
   adds a trailing NUL byte; keep commands for the user short or put them
   in scripts.

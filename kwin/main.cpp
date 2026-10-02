@@ -113,8 +113,8 @@
 // previous one, so two windows toggle with a tap. Holding Alt shows the map:
 // the whole desktop drawn at mapScale in the middle of the screen, same
 // layout, dimmed except the selected window, overlapping windows spread into
-// rows above and below their pile; a label in the centre names the selected
-// window (icon and title). Tab / Shift+Tab move the selection, releasing Alt
+// rows above and below their pile; a label at the bottom of the selected
+// window names it (icon and title). Tab / Shift+Tab move the selection, releasing Alt
 // focuses it where it is, Esc cancels. Nothing moves: only the drawing
 // changes (see switchKey, openMap, spreadPiles).
 //
@@ -994,15 +994,14 @@ private:
     static constexpr qreal spreadGap = 12.0;
     static constexpr qreal spreadMinScale = 0.05;
     // The label (logical pixels): icon size, title text size, the widest
-    // the title gets (longer ones are cut with "..."), the narrowest the
-    // card gets, padding, gap between icon and title, corner radius.
-    static constexpr qreal labelIconSize = 128.0;
-    static constexpr int labelTextSize = 36;
-    static constexpr qreal labelMaxWidth = 1000.0;
-    static constexpr qreal labelMinWidth = 320.0;
-    static constexpr qreal labelPadding = 32.0;
-    static constexpr qreal labelGap = 16.0;
-    static constexpr qreal labelRadius = 24.0;
+    // the title gets (longer ones are cut with "..."), padding, gap between
+    // icon and title, corner radius.
+    static constexpr qreal labelIconSize = 40.0;
+    static constexpr int labelTextSize = 22;
+    static constexpr qreal labelMaxWidth = 600.0;
+    static constexpr qreal labelPadding = 10.0;
+    static constexpr qreal labelGap = 10.0;
+    static constexpr qreal labelRadius = 12.0;
     static constexpr qreal snapFullBand = 0.2;
 
     // The places Meta+Left/Right and gestures step along.
@@ -2628,8 +2627,10 @@ private:
 
     // --- Alt+Tab: the label ---
 
-    // The selected window's icon, large, and its title below, on a rounded
-    // translucent card, in the centre of the screen; fades with the map.
+    // The selected window's icon and title on one line, on a rounded
+    // translucent card, centred on the window where the map draws it, its
+    // bottom on the window's bottom edge: always in the same spot, inside
+    // the window (wider than the window if need be). Fades with the map.
     // Redrawn when the selection (or its title) changes.
     void paintLabel(const RenderTarget &renderTarget, const RenderViewport &viewport, LogicalOutput *screen)
     {
@@ -2651,8 +2652,10 @@ private:
             m_labelScale = scale;
         }
         const RectF area = screen->geometryF();
-        const QPointF topLeft(area.x() + (area.width() - m_labelSize.width()) / 2,
-                              area.y() + (area.height() - m_labelSize.height()) / 2);
+        const QRectF drawn = inMap(window) ? mapped(window, currentlyDrawn(window)) : currentlyDrawn(window);
+        const QSizeF size = m_labelSize;
+        const qreal x = std::clamp(drawn.center().x() - size.width() / 2, area.left(), area.right() - size.width());
+        const QPointF topLeft(x, drawn.bottom() - size.height());
         QMatrix4x4 mvp = viewport.projectionMatrix();
         mvp.translate(std::round(topLeft.x() * scale), std::round(topLeft.y() * scale));
         const qreal opacity = m_mapOpen;
@@ -2675,8 +2678,9 @@ private:
         font.setPixelSize(labelTextSize);
         const QFontMetricsF metrics(font);
         const QString title = metrics.elidedText(window->caption(), Qt::ElideRight, labelMaxWidth);
-        const qreal width = std::max({labelIconSize, metrics.horizontalAdvance(title), labelMinWidth - 2 * labelPadding});
-        const QSizeF size(width + 2 * labelPadding, 2 * labelPadding + labelIconSize + labelGap + metrics.height());
+        const qreal textWidth = metrics.horizontalAdvance(title);
+        const QSizeF size(2 * labelPadding + labelIconSize + labelGap + textWidth,
+                          2 * labelPadding + std::max(labelIconSize, metrics.height()));
 
         QImage image((size * devicePixelRatio).toSize(), QImage::Format_ARGB32_Premultiplied);
         image.setDevicePixelRatio(devicePixelRatio);
@@ -2690,11 +2694,11 @@ private:
         if (icon.isNull()) {
             icon = QIcon::fromTheme(QStringLiteral("application-x-executable"));
         }
-        icon.paint(&painter, QRectF((size.width() - labelIconSize) / 2, labelPadding, labelIconSize, labelIconSize).toRect());
+        icon.paint(&painter, QRectF(labelPadding, (size.height() - labelIconSize) / 2, labelIconSize, labelIconSize).toRect());
         painter.setFont(font);
         painter.setPen(Qt::white);
-        painter.drawText(QRectF(0, labelPadding + labelIconSize + labelGap, size.width(), metrics.height()),
-                         Qt::AlignCenter, title);
+        painter.drawText(QRectF(labelPadding + labelIconSize + labelGap, 0, textWidth + 1, size.height()),
+                         Qt::AlignLeft | Qt::AlignVCenter, title);
         return image;
     }
 

@@ -46,9 +46,16 @@ window becomes first, the one you came from second.
     the **focus ring and bounce** (user, 2026-10-02: undimming alone
     doesn't show a dark window on a dark background). Tab presses during
     the animation still count.
-  - **Label** in the centre of the screen: the app's icon (128 px) and the
-    window title below it in a big font, on a rounded translucent card.
-    The label says what it is; the highlight in the map says where.
+  - **Label** on the selected window: the app's icon (40 px) and the
+    window title (22 px) on one line, on a rounded translucent card,
+    centred on the window with its bottom on the window's bottom edge
+    (wider than the window if need be, covering a little of it). It is
+    always in the same spot, inside the window, so it can always be drawn.
+    History (2026-10-02): first in the centre of the screen, large (icon
+    128 px above a 36 px title); distracting, the eye had to jump. Then
+    under the window; in a column, Tabbing from the bottom window to the
+    one above moved the label from below one to just under the next,
+    confusing. The user chose bottom-aligned inside the window.
   - Release Alt: the map zooms back; the selected window gets focus in
     place (ring + bounce). Esc: cancel, back as before.
   - Panels, notifications and anything else not in the map fade out. The

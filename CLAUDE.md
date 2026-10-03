@@ -68,7 +68,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
 | [docs/clips.md](docs/clips.md) | Text drops and Meta+C become clip windows (glance-clip sticky notes) that drag back into documents |
 | [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map (phase 1; phase 2 listed there) |
-| [docs/logout-hang.md](docs/logout-hang.md) | Open issue: plasmashell hangs at logout |
+| [docs/logout-hang.md](docs/logout-hang.md) | Plasmashell hangs at logout: a KDE clipboard deadlock (root cause known, harmless, left alone) |
 | [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
 | [plans/backlog.md](plans/backlog.md) | Agreed-but-unbuilt items, polish, packaging, ideas |
 | [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text and images |
@@ -88,7 +88,8 @@ parking icons only (all 2026-10-03). Nothing uncommitted.
 Next: not decided; ask the user. Suggested: stash follow-ups (a
 hand-resized stash window keeps its size when dragged; should small
 stashed windows stop acting like icons? Meta+wheel speed/direction by
-feel), then crowding of parking columns. Other candidates: crowding of parking columns (agreed, needs design talk first); Alt+Tab phase 2
+feel), then crowding of parking columns (agreed, needs design talk
+first). Other candidates: Alt+Tab phase 2
 (click in the map etc., [docs/alt-tab.md](docs/alt-tab.md)); declutter
 follow-ups; clips phase 2, rich text and images
 ([plans/clips-back.md](plans/clips-back.md)); open clip questions (clips

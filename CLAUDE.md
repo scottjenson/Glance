@@ -74,14 +74,20 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 When a plan is built, move its design into a `docs/` file and update the
 table and Status.
 
-## Status (2026-10-02)
+## Status (2026-10-03)
 Running in the user's real Plasma session (via use-in-session.sh; after a
 rebuild the user logs out and back in). Built and working: everything in
 the docs table. Last changes (tested by the user, committed): Alt+Tab
 phase 1 (2026-10-02), minimize = park and the glance-clip app with
-drag-to-paste (2026-10-03). Next: not decided; candidates are Alt+Tab
-phase 2 ([docs/alt-tab.md](docs/alt-tab.md)) and the
-[backlog](plans/backlog.md).
+drag-to-paste (2026-10-03). Nothing uncommitted.
+
+Next: not decided; ask the user. Candidates: dropped windows keep their
+exact spot in a column (small, agreed; [backlog](plans/backlog.md));
+crowding of columns (agreed, needs design talk first); Alt+Tab phase 2
+(click in the map etc., [docs/alt-tab.md](docs/alt-tab.md)); declutter
+follow-ups; clips phase 2, rich text and images
+([plans/clips-back.md](plans/clips-back.md)); open clip questions (clips
+aren't restored after login; Alt+Tab shows clips with the icon only).
 
 ## How the effect works (kwin/main.cpp, the basics)
 - It is a KWin **effect**, not a plain `KWin::Plugin`, so `prePaintWindow`
@@ -191,6 +197,22 @@ QT_PLUGIN_PATH=$PWD/kwin/build/bin dbus-run-session -- kwin_wayland
 --exit-with-session "sh -c 'konsole -qwindowgeometry 3900x1500+50+50 &
 sleep 3.6; spectacle -b -n -f -o <file>.png'"`. Use big windows: small
 ones near the centre hide clipping bugs.
+More tricks for that session (used 2026-10-03; put the steps in a script
+run by `--exit-with-session "sh script.sh"`):
+- KWin scripts over the session's private D-Bus: write a .js file, then
+  `id=$(qdbus-qt6 org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript
+  file.js name)` and `qdbus-qt6 org.kde.KWin /Scripting/Script$id
+  org.kde.kwin.Script.run`. E.g. `w.minimized = true` parks windows
+  (minimize = park), `console.info(...)` prints window info (resourceClass,
+  desktopFileName, frameGeometry) to the log. Works on the real session
+  too (with its DBUS_SESSION_BUS_ADDRESS), read-only scripts only.
+- glance-clip needs `QT_QPA_PLATFORMTHEME=kde` there for its yellow title
+  bar (the real session has it).
+- Input can't be injected (no fake-input tool): drags, hover and keys
+  need the user.
+Crash stacks: `DEBUGINFOD_URLS=https://debuginfod.fedoraproject.org/
+coredumpctl debug <pid> --debugger-arguments="-batch -ex 'thread apply all
+bt 20'"` (symbols download on demand; `coredumpctl list` first).
 
 ## Notes for the agent
 - The user is new to Linux/Wayland development: explain Linux-specific steps

@@ -1,13 +1,12 @@
 # Backlog
 
 ## Agreed with the user, not built yet
-- Mouse drops into a stash/parking column should keep the exact spot:
-  only windows the dropped one overlaps move aside, no re-centring
-  (the "respect mouse drags" rule; today `arrangeArea` re-centres the
-  column and moves the dropped window).
-- Crowding: what happens when a column holds more than fits (parking
-  should take 10-15, a stash 2-3); declutter now just shrinks a stash
-  to fit; the user mentioned tiling-like vertical resizing.
+- Crowding of parking columns (should take 10-15); stashes are settled
+  (free placement, overlap allowed, Meta+wheel to resize; 2026-10-03).
+- Open from the stash talk (2026-10-03): dragging a stashed window that
+  was resized by hand within the stash should probably keep its size
+  (today the edge rule sets it again). Possible later: Meta+wheel over
+  empty parking space sizes all icons at once (dock-size slider).
 - Declutter follow-ups: double-clicking two windows to share main; QoL
   tweaks the user noticed but hasn't listed; undo only covers the last
   declutter (offered: undo a whole chain).

@@ -24,3 +24,24 @@ bug, likely made more frequent by clipboard/selection activity. Costs a
 ~40 s logout and a crash notice; nothing is lost. If it gets frequent:
 turn off Klipper (the clipboard history owns that code), or shorten
 plasmashell's stop timeout (a systemd drop-in, `TimeoutStopSec=5`).
+
+Update 2026-10-03 14:07: another one, same stack, first logout after a
+VM reboot, in a session with Mac→VM clipboard use (no clips). Separate
+from the plasma-keyboard login crash (see CLAUDE.md, fixed by rebooting
+the VM).
+
+## Root cause (found 2026-10-03)
+A deadlock in KDE's kguiaddons 6.30 (src/systemclipboard/
+waylandclipboard.cpp, source unpacked at ~/src/kguiaddons-6.30.0):
+`WaylandClipboard::mimeData()` locks the global `s_clipboardLock` and
+unlocks it only via `QTimer::singleShot(0, ...)`. If Klipper reads the
+clipboard while plasmashell is quitting, the event loop never runs that
+unlock; `~WaylandClipboard` then wakes `ClipboardThread` and waits for
+it, but the thread blocks on the leaked lock (`tryLock`). Matches both
+stacks exactly. Trigger: the clipboard owner exits during logout, so the
+clipboard changes as plasmashell quits. In the 14:07 hang, systemd
+stopped the VMware user agent (`vmtoolsd -n vmusr`, owner of the clipboard
+after a Mac copy) at 14:06:42.93 and plasmashell at 14:06:42.94. Not
+Glance code; made likelier by our Mac→VM copying and by clip apps owning
+the clipboard. Options: `TimeoutStopSec=5` drop-in for
+plasma-plasmashell.service, Klipper off, report to KDE (kguiaddons).

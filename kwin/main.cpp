@@ -76,8 +76,8 @@
 // the window dips like a pressed button: it steps through bounceFrames (100%
 // down to 98% and back), bounceStep apart (see startBounce).
 //
-// Previews: hovering an icon-sized parked window makes it grow in place to
-// previewGrow times its size (at most 1:1 with the app's resized layout,
+// Previews: hovering a parking icon (not a small stashed window) makes it
+// grow in place to previewGrow times its size (at most 1:1 with the app's resized layout,
 // so it stays sharp), anchored at its screen edge and centered on its spot,
 // over its neighbours, which stay put and partly visible. The pointer stays
 // over it, so it can still be dragged, and clicks pass through as for any
@@ -108,11 +108,18 @@
 // clip is gone (Shift: copied); on the desktop the note moves there; refused,
 // it slides back (see clipDragStarted).
 //
-// Stacks: the windows in each stash and parking area form one column,
-// centered vertically, in the order of their vertical position (see
-// arrangeArea). Whenever a window arrives (keyboard or drop) or leaves
-// (keyboard, dragged out, closed), the column re-forms, animated. Crowding
-// (a column taller than the screen) comes later.
+// Stacks: the windows in each parking area form one column, centered
+// vertically, in the order of their vertical position (see arrangeArea).
+// Whenever a window arrives (keyboard or drop) or leaves (keyboard, dragged
+// out, closed), the column re-forms, animated. Stashes have no column:
+// windows stay where they were put and may overlap (a keyboard move keeps
+// the window's height); only declutter lines a stash up. Crowding of
+// parking (a column taller than the screen) comes later.
+//
+// Meta+wheel resizes the window under the pointer in place, anchored at
+// the pointer (see metaWheel): in main a real resize, in a stash a scaled
+// one (the app follows when the scrolling stops), and a parking icon zooms
+// up to its hover-preview size while its column makes room (see zoomIcon).
 //
 // Alt+Tab (and Meta+Tab; replaces KDE's window switcher): hunt and return.
 // Windows in the order they were last used; a quick Alt+Tab goes back to the
@@ -242,7 +249,7 @@ public:
         m_previewOpen.setSingleShot(true);
         m_previewOpen.setInterval(previewDelay);
         connect(&m_previewOpen, &QTimer::timeout, this, [this]() {
-            if (m_previewCandidate && isIcon(m_previewCandidate)) {
+            if (m_previewCandidate && isPreviewable(m_previewCandidate)) {
                 openPreview(m_previewCandidate);
             }
         });
@@ -253,6 +260,9 @@ public:
                 closePreview(window);
             }
         });
+        m_wheelSettle.setSingleShot(true);
+        m_wheelSettle.setInterval(wheelSettle);
+        connect(&m_wheelSettle, &QTimer::timeout, this, &Glance::settleWheel);
         m_hold.setSingleShot(true);
         m_hold.setInterval(holdDelay);
         connect(&m_hold, &QTimer::timeout, this, [this]() {
@@ -589,6 +599,9 @@ public:
         if (m_switch || m_map) {
             return true;
         }
+        if (metaWheel(event)) {
+            return true;
+        }
         if (!route(event->position, event->buttons != Qt::NoButton)) {
             return false;
         }
@@ -660,6 +673,9 @@ private:
         bool restoring = false;
         // Drawn here instead of `shown` while hovered (see updateHover).
         std::optional<QRectF> preview = std::nullopt;
+        // A parking icon zoomed with Meta+wheel (see zoomIcon): `shown` is
+        // this many times its icon size.
+        qreal zoom = 1.0;
         // Animating from `from` to `shown` since `start`.
         bool animating = false;
         QRectF from = {};
@@ -797,6 +813,14 @@ private:
     QTimer m_previewOpen;
     QTimer m_snapDwell;
     QTimer m_previewClose;
+    // An icon just zoomed with Meta+wheel: no hover preview for it until
+    // the pointer leaves it.
+    QPointer<Window> m_noPreview;
+
+    // Meta+wheel on a stashed window (see metaWheel): the window, and the
+    // timer that resizes the app once the scrolling stops.
+    QPointer<Window> m_wheelWindow;
+    QTimer m_wheelSettle;
 
     // The focus ring (see updateRing) and the window it outlines.
     OutlinedBorderItem *m_ring = nullptr;
@@ -923,7 +947,7 @@ private:
             return false;
         }
         const Parked &parked = m_parked.at(window);
-        if (parked.restoring || parked.shown.width() / parked.original.width() >= iconBelow) {
+        if (parked.restoring || baseWidth(parked) / parked.original.width() >= iconBelow) {
             return false;
         }
         // Line the frame up with the pointer, so KWin sees what's under it.
@@ -1034,6 +1058,16 @@ private:
     static constexpr std::chrono::milliseconds previewDelay{300};
     static constexpr std::chrono::milliseconds previewGrace{300};
 
+    // Meta+wheel (see metaWheel): size change per unit of scroll (a mouse
+    // wheel notch is 15 units; touchpads send smaller, more frequent steps),
+    // the smallest size a window in main gets (logical pixels), and how
+    // long after the last scroll a stashed window's app gets its new size.
+    static constexpr qreal wheelStepWheel = 0.1 / 15.0;
+    static constexpr qreal wheelStepFinger = 0.1 / 40.0;
+    static constexpr qreal wheelMinWidth = 300.0;
+    static constexpr qreal wheelMinHeight = 200.0;
+    static constexpr std::chrono::milliseconds wheelSettle{400};
+
     // Where clips are saved, relative to the home folder, and the clip
     // app's app id (kwin/clip/main.cpp), which tells clip windows apart.
     static constexpr const char *clipsFolder = "Clips";
@@ -1114,7 +1148,7 @@ private:
         if (it != m_parked.end() && !it->second.restoring) {
             const Parked &parked = it->second;
             const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-            const bool tiny = parked.shown.width() / parked.original.width() < parkingScale(parked.original) + 0.02;
+            const bool tiny = baseWidth(parked) / parked.original.width() < parkingScale(parked.original) + 0.02;
             if (tiny) {
                 return left ? Place::ParkingLeft : Place::ParkingRight;
             }
@@ -1832,8 +1866,20 @@ private:
         const Parked &parked = m_parked.at(window);
         const RectF screen = window->output()->geometryF();
         const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-        const bool tiny = parked.shown.width() / parked.original.width() < parkingScale(parked.original) + 0.02;
+        const bool tiny = baseWidth(parked) / parked.original.width() < parkingScale(parked.original) + 0.02;
         return (left ? 0 : 2) + (tiny ? 0 : 1);
+    }
+
+    static bool isParkingArea(int area)
+    {
+        return area % 2 == 0;
+    }
+
+    // A parked window's drawn width without its Meta+wheel zoom (what its
+    // place is judged by).
+    static qreal baseWidth(const Parked &parked)
+    {
+        return parked.shown.width() / parked.zoom;
     }
 
     // Re-form the column of windows in one area (see areaOf) on `output`:
@@ -1877,19 +1923,21 @@ private:
         }
     }
 
-    // `window` has just arrived in a stash or parking area.
+    // `window` has just arrived in a stash or parking area. Only parking
+    // columns re-form: a stash keeps windows where they were put (they may
+    // overlap); only declutter lines one up.
     void arrange(Window *window)
     {
-        if (isParkedNotRestoring(window)) {
+        if (isParkedNotRestoring(window) && isParkingArea(areaOf(window))) {
             arrangeArea(areaOf(window), window->output(), window);
         }
     }
 
     // Before a parked window leaves its area: returns a function that, once
-    // it has left, re-forms the area it left.
+    // it has left, re-forms the area it left (parking only, see arrange).
     std::function<void()> leaving(Window *window)
     {
-        if (!isParkedNotRestoring(window)) {
+        if (!isParkedNotRestoring(window) || !isParkingArea(areaOf(window))) {
             return [] {};
         }
         const int area = areaOf(window);
@@ -2010,6 +2058,7 @@ private:
             for (Window *window : stashed[side]) {
                 moveTo(window, stash, scale);
             }
+            arrangeArea(side == 0 ? 1 : 3, output, nullptr);
         }
         if (target) {
             workspace()->activateWindow(target);
@@ -2081,8 +2130,8 @@ private:
     {
         auto it = m_parked.find(window);
         return it != m_parked.end() && !it->second.restoring
-            && (it->second.shown.width() / it->second.original.width() < iconBelow
-                || isClipInParking(window, it->second.shown.width(), it->second.original));
+            && (baseWidth(it->second) / it->second.original.width() < iconBelow
+                || isClipInParking(window, baseWidth(it->second), it->second.original));
     }
 
     // The previewed window, if it still is one.
@@ -2094,18 +2143,25 @@ private:
         return m_preview;
     }
 
-    // The icon whose home spot in its column is at `pos` (the spot counts
+    // The parking icon whose home spot in its column is at `pos` (the spot counts
     // also while that window is out as a preview), half the gap around it
     // included so moving along the column never falls between two.
     Window *iconAt(const QPointF &pos) const
     {
         for (const auto &[window, parked] : m_parked) {
-            if (isIcon(window) && !window->isMinimized() && window->isOnCurrentDesktop()
+            if (isPreviewable(window) && !window->isMinimized() && window->isOnCurrentDesktop()
                 && parked.shown.adjusted(0, -arrangeGap / 2, 0, arrangeGap / 2).contains(pos)) {
                 return window;
             }
         }
         return nullptr;
+    }
+
+    // Previews are for parking icons only: a stashed window can be as small
+    // as an icon (dropped near the edge) but isn't one to preview.
+    bool isPreviewable(Window *window) const
+    {
+        return isIcon(window) && isParkingArea(areaOf(window));
     }
 
     // On every pointer motion: the icon whose home spot is under the pointer
@@ -2122,6 +2178,14 @@ private:
         }
         Window *preview = previewWindow();
         Window *icon = iconAt(pos);
+        if (m_noPreview && icon != m_noPreview) {
+            m_noPreview = nullptr;
+        }
+        if (icon && icon == m_noPreview) {
+            m_previewOpen.stop();
+            m_previewClose.stop();
+            return;
+        }
         if (!icon && preview && drawnRect(preview).contains(pos)) {
             m_previewOpen.stop();
             m_previewClose.stop();
@@ -2157,7 +2221,7 @@ private:
         const RectF area = workspace()->clientArea(MaximizeArea, window);
         const RectF frame = window->frameGeometry();
         const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-        const qreal scale = std::min({previewGrow * parked.shown.width() / frame.width(), 1.0,
+        const qreal scale = std::min({previewGrow * baseWidth(parked) / frame.width(), 1.0,
                                       area.height() / frame.height()});
         const QSizeF size = QSizeF(frame.width(), frame.height()) * scale;
         const qreal x = left ? parked.shown.left() : parked.shown.right() - size.width();
@@ -2187,6 +2251,190 @@ private:
             m_preview = nullptr;
         }
         animate(window, from);
+    }
+
+    // --- Meta+wheel: resizing in place ---
+
+    // Meta+wheel (vertical) over a window grows it (scrolling up) or shrinks
+    // it, anchored at the pointer: the point under it stays put. In main the
+    // app is really resized at once. In a stash it is drawn larger or
+    // smaller (between just above parking size and full size), and the app
+    // gets the new size once the scrolling stops (wheelSettle). A parking
+    // icon zooms instead (see zoomIcon). Returns whether the event was taken.
+    bool metaWheel(PointerAxisEvent *event)
+    {
+        if (event->modifiers != Qt::MetaModifier || event->orientation != Qt::Vertical || event->delta == 0
+            || event->buttons != Qt::NoButton || workspace()->moveResizeWindow() || waylandServer()->seat()->isDrag()) {
+            return false;
+        }
+        Window *window = pick(event->position);
+        if (!window || !manageable(window)) {
+            return false;
+        }
+        const qreal step = event->source == PointerAxisSource::Wheel ? wheelStepWheel : wheelStepFinger;
+        const qreal factor = std::exp(-event->delta * step);
+        auto it = m_parked.find(window);
+        if (it == m_parked.end()) {
+            resizeInMain(window, factor, event->position);
+        } else if (it->second.restoring) {
+            return true; // on its way somewhere: wait
+        } else if (isParkingArea(areaOf(window))) {
+            zoomIcon(window, factor, event->position);
+        } else {
+            resizeInStash(window, factor, event->position);
+        }
+        return true;
+    }
+
+    // Scale a box around `pos` from size `from` to `to`.
+    static QPointF scaledTopLeft(const QPointF &topLeft, const QPointF &pos, const QSizeF &from, const QSizeF &to)
+    {
+        return QPointF(pos.x() - (pos.x() - topLeft.x()) * to.width() / from.width(),
+                       pos.y() - (pos.y() - topLeft.y()) * to.height() / from.height());
+    }
+
+    // Moved as little as needed to lie within `area` (a bigger box keeps
+    // its top left corner in).
+    static QRectF keptIn(const QRectF &box, const RectF &area)
+    {
+        const qreal x = std::clamp(box.x(), area.x(), std::max(area.x(), area.x() + area.width() - box.width()));
+        const qreal y = std::clamp(box.y(), area.y(), std::max(area.y(), area.y() + area.height() - box.height()));
+        return QRectF(QPointF(x, y), box.size());
+    }
+
+    void resizeInMain(Window *window, qreal factor, const QPointF &pos)
+    {
+        const RectF frame = window->moveResizeGeometry();
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
+        const QSizeF appMin = window->clientSizeToFrameSize(window->minSize());
+        const QSizeF from(frame.width(), frame.height());
+        // Both sides by the same factor, each within its own limits.
+        const QSizeF to(std::clamp(from.width() * factor, std::max(wheelMinWidth, appMin.width()), std::max(area.width(), appMin.width())),
+                        std::clamp(from.height() * factor, std::max(wheelMinHeight, appMin.height()), std::max(area.height(), appMin.height())));
+        if (std::abs(to.width() - from.width()) < 0.5 && std::abs(to.height() - from.height()) < 0.5) {
+            return;
+        }
+        releaseKdeState(window);
+        const QRectF target = keptIn(QRectF(scaledTopLeft(QPointF(frame.x(), frame.y()), pos, from, to), to), area);
+        window->moveResize(RectF(target.x(), target.y(), target.width(), target.height()));
+    }
+
+    void resizeInStash(Window *window, qreal factor, const QPointF &pos)
+    {
+        Parked &parked = m_parked.at(window);
+        const qreal scale = parked.shown.width() / parked.original.width();
+        const qreal want = std::clamp(scale * factor, parkingScale(parked.original) + 0.03, parkBelow - 0.01);
+        if (std::abs(want - scale) < 1e-4) {
+            return;
+        }
+        if (m_wheelWindow && m_wheelWindow != window) {
+            settleWheel();
+        }
+        const QSizeF size = parked.shown.size() * (want / scale);
+        const QRectF from = displayRect(parked);
+        parked.shown = keptIn(QRectF(scaledTopLeft(parked.shown.topLeft(), pos, parked.shown.size(), size), size),
+                              window->output()->geometryF());
+        if (parked.preview) { // a small stashed window can be previewed
+            parked.preview.reset();
+            m_preview = nullptr;
+            m_noPreview = window;
+        }
+        animate(window, from);
+        m_wheelWindow = window;
+        m_wheelSettle.start();
+    }
+
+    // The scrolling on a stashed window stopped: resize its app to fit
+    // (see park).
+    void settleWheel()
+    {
+        m_wheelSettle.stop();
+        if (Window *window = m_wheelWindow; window && isParkedNotRestoring(window)) {
+            const Parked parked = m_parked.at(window);
+            park(window, parked.shown, parked.original);
+        }
+        m_wheelWindow = nullptr;
+    }
+
+    // A parking icon zooms between its icon size and its hover-preview size
+    // (it never leaves parking), anchored at the pointer vertically and at
+    // its screen edge; its column makes room: the windows above and below it
+    // move away (or back), staying packed against it. If the column would
+    // go off the screen it shifts back on; if it can't fit, the zoom stops.
+    // A preview open on it becomes the starting size, and it doesn't preview
+    // again until the pointer leaves it.
+    void zoomIcon(Window *window, qreal factor, const QPointF &pos)
+    {
+        Parked &parked = m_parked.at(window);
+        const qreal base = baseWidth(parked);
+        const QSizeF baseSize = parked.shown.size() / parked.zoom;
+        const QRectF current = parked.preview ? *parked.preview : parked.shown;
+        const qreal maxZoom = std::max(1.0, previewRect(window).width() / base);
+        const qreal zoom = std::clamp(current.width() / base * factor, 1.0, maxZoom);
+        if (!parked.preview && std::abs(zoom - parked.zoom) < 1e-4) {
+            return;
+        }
+
+        const RectF screen = window->output()->geometryF();
+        const RectF bounds = workspace()->clientArea(MaximizeArea, window->output());
+        const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
+        const QSizeF size = baseSize * zoom;
+        const qreal anchor = std::clamp((pos.y() - current.y()) / current.height(), 0.0, 1.0);
+        QRectF rect(QPointF(left ? parked.shown.left() : parked.shown.right() - size.width(), pos.y() - anchor * size.height()), size);
+
+        // The column around it, packed against it.
+        const int area = areaOf(window);
+        std::vector<std::pair<Window *, QRectF>> above, below;
+        for (const auto &[other, p] : m_parked) {
+            if (other == window || p.restoring || other->output() != window->output() || areaOf(other) != area) {
+                continue;
+            }
+            (p.shown.center().y() < parked.shown.center().y() ? above : below).emplace_back(other, p.shown);
+        }
+        std::ranges::sort(above, std::greater{}, [](const auto &item) { return item.second.center().y(); });
+        std::ranges::sort(below, std::less{}, [](const auto &item) { return item.second.center().y(); });
+        qreal top = rect.top();
+        for (auto &[other, r] : above) {
+            top -= arrangeGap + r.height();
+            r.moveTop(top);
+        }
+        qreal bottom = rect.bottom();
+        for (auto &[other, r] : below) {
+            r.moveTop(bottom + arrangeGap);
+            bottom = r.bottom();
+        }
+        if (bottom - top > bounds.height()) {
+            return; // no room to grow further
+        }
+        const qreal shift = std::clamp(0.0, bounds.y() - top, bounds.y() + bounds.height() - bottom);
+
+        for (auto &[other, r] : above) {
+            moveInColumn(other, r.translated(0, shift));
+        }
+        for (auto &[other, r] : below) {
+            moveInColumn(other, r.translated(0, shift));
+        }
+        const QRectF from = displayRect(parked);
+        parked.shown = rect.translated(0, shift);
+        parked.zoom = zoom;
+        if (parked.preview) {
+            parked.preview.reset();
+            m_preview = nullptr;
+        }
+        m_previewOpen.stop();
+        m_previewClose.stop();
+        m_noPreview = window;
+        animate(window, from);
+    }
+
+    void moveInColumn(Window *window, const QRectF &to)
+    {
+        Parked &parked = m_parked.at(window);
+        if (std::abs(parked.shown.y() - to.y()) > 0.5) {
+            const QRectF from = displayRect(parked);
+            parked.shown.moveTop(to.y());
+            animate(window, from);
+        }
     }
 
     // --- Clips: text dropped on the desktop ---
@@ -2404,7 +2652,7 @@ private:
     {
         auto it = m_parked.find(window);
         if (it == m_parked.end() || it->second.restoring
-            || !isClipInParking(window, it->second.shown.width(), it->second.original)) {
+            || !isClipInParking(window, baseWidth(it->second), it->second.original)) {
             return;
         }
         const RectF frame = window->frameGeometry();
@@ -2499,8 +2747,7 @@ private:
     // parking band). In the parking band it joins that parking column,
     // against the screen edge (as text dropped there does, see
     // parkingSide); elsewhere it stays where and as large as it is drawn,
-    // like a moved window dropped there (parked if shrunk, its column
-    // re-forming).
+    // like a moved window dropped there (parked if shrunk).
     void placeDroppedClip(const QPointF &pos)
     {
         const ClipDrag drag = *m_clipDrag;

@@ -40,17 +40,18 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 - **Respect mouse drags** (user's principle, 2026-09-30): a plain mouse
   drop (a window, or a clip dropped on the desktop) should land where and
   as large as the user put it, changed as little as possible. Snapping to
-  places is for the keyboard (Meta+arrows) and Meta+drag. Known
-  tension: stash and parking columns re-form when a window is dropped
-  into them, which moves the dropped window; the user knows this isn't a
-  perfect rule. Prefer the least movement when designing crowding.
+  places is for the keyboard (Meta+arrows) and Meta+drag. Stashes have
+  no column (drops stay put, overlap is fine); parking columns still
+  re-form when a window is dropped into them, which moves it. Prefer the
+  least movement when designing crowding.
 - Modifier: Meta (Super; Command on the Mac keyboard) is the window
   system's key; Ctrl/Shift/Alt belong to apps (Alt+Tab is the universal
   exception). The user is fine being aggressive with Meta ("opinionated
   window manager"), as long as what KDE users rely on keeps working or gets
   a better replacement. Meta moves, Meta+Alt selects. Meta+mouse:
   Meta+drag moves (with acceleration and snapping), Meta+double-click
-  declutters; Meta+click and Meta+wheel are free for future features.
+  declutters, Meta+wheel resizes in place; Meta+click is free for future
+  features.
   Meta+keyboard shortcuts other than the arrows, Meta+C and Meta+Tab are
   left to KDE.
 
@@ -58,7 +59,8 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | | |
 |---|---|
 | [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking, input to parked windows, icon-like tiny windows, minimize = park |
-| [docs/stacks.md](docs/stacks.md) | Stash and parking columns |
+| [docs/stacks.md](docs/stacks.md) | Parking columns; stashes are free placement |
+| [docs/meta-wheel.md](docs/meta-wheel.md) | Meta+wheel resizes in place; parking icons zoom |
 | [docs/keyboard.md](docs/keyboard.md) | Meta+arrows ladder, Meta+Up/Down views, Meta+Alt+arrows selection |
 | [docs/meta-drag.md](docs/meta-drag.md) | Meta+drag acceleration and pause to snap |
 | [docs/focus-ring.md](docs/focus-ring.md) | Focus ring and bounce |
@@ -79,11 +81,14 @@ Running in the user's real Plasma session (via use-in-session.sh; after a
 rebuild the user logs out and back in). Built and working: everything in
 the docs table. Last changes (tested by the user, committed): Alt+Tab
 phase 1 (2026-10-02), minimize = park and the glance-clip app with
-drag-to-paste (2026-10-03). Nothing uncommitted.
+drag-to-paste, free stash placement (no stash column), Meta+wheel
+resize/zoom ([docs/meta-wheel.md](docs/meta-wheel.md)) and previews for
+parking icons only (all 2026-10-03). Nothing uncommitted.
 
-Next: not decided; ask the user. Candidates: dropped windows keep their
-exact spot in a column (small, agreed; [backlog](plans/backlog.md));
-crowding of columns (agreed, needs design talk first); Alt+Tab phase 2
+Next: not decided; ask the user. Suggested: stash follow-ups (a
+hand-resized stash window keeps its size when dragged; should small
+stashed windows stop acting like icons? Meta+wheel speed/direction by
+feel), then crowding of parking columns. Other candidates: crowding of parking columns (agreed, needs design talk first); Alt+Tab phase 2
 (click in the map etc., [docs/alt-tab.md](docs/alt-tab.md)); declutter
 follow-ups; clips phase 2, rich text and images
 ([plans/clips-back.md](plans/clips-back.md)); open clip questions (clips
@@ -240,7 +245,11 @@ bt 20'"` (symbols download on demand; `coredumpctl list` first).
   crashes at login inside Mesa's VMware `svga` driver (context creation;
   checked 2026-10-03 with `coredumpctl debug`): a VM GPU issue, not Glance.
   KWin restarts it. Off switch: System Settings → Keyboard → Virtual
-  Keyboard → None.
+  Keyboard → None. It comes from the VM's GPU state wearing down after
+  many logouts without a reboot (~20 over 4-5 days, 2026-10-03); then
+  Xwayland and ksplashqml crash the same way at login, KWin gives up on
+  Xwayland, and the Mac→VM clipboard dies (vmtoolsd's helper is X11).
+  Fix: reboot the VM. The crashes started before glance-clip ever ran.
 - Mac→VM clipboard (VMware Tools, `vmtoolsd -n vmusr`) is unreliable and
   adds a trailing NUL byte; keep commands for the user short or put them
   in scripts.

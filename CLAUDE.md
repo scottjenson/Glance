@@ -57,7 +57,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 ## Features (built) and plans
 | | |
 |---|---|
-| [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking, input to parked windows, icon-like tiny windows |
+| [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking, input to parked windows, icon-like tiny windows, minimize = park |
 | [docs/stacks.md](docs/stacks.md) | Stash and parking columns |
 | [docs/keyboard.md](docs/keyboard.md) | Meta+arrows ladder, Meta+Up/Down views, Meta+Alt+arrows selection |
 | [docs/meta-drag.md](docs/meta-drag.md) | Meta+drag acceleration and pause to snap |
@@ -77,9 +77,8 @@ table and Status.
 ## Status (2026-10-02)
 Running in the user's real Plasma session (via use-in-session.sh; after a
 rebuild the user logs out and back in). Built and working: everything in
-the docs table. Last change (2026-10-02, tested by the user, committed):
-Alt+Tab phase 1 (quick switch, map, label, spreading piles; the focus
-ring follows the selection). Next: not decided; candidates are Alt+Tab
+the docs table. Last changes (tested by the user, committed): Alt+Tab
+phase 1 (2026-10-02) and minimize = park (2026-10-03). Next: not decided; candidates are Alt+Tab
 phase 2 ([docs/alt-tab.md](docs/alt-tab.md)) and the
 [backlog](plans/backlog.md).
 
@@ -212,6 +211,11 @@ ones near the centre hide clipping bugs.
   with Ctrl+C in the VM. If a Meta+letter shortcut does nothing (no
   `glance:` log line), check Fusion's Key Mappings. Command+Tab may be
   taken by macOS itself before the VM sees it; check when building Meta+Tab.
+- plasma-keyboard (KDE's on-screen keyboard, started by KWin) sometimes
+  crashes at login inside Mesa's VMware `svga` driver (context creation;
+  checked 2026-10-03 with `coredumpctl debug`): a VM GPU issue, not Glance.
+  KWin restarts it. Off switch: System Settings → Keyboard → Virtual
+  Keyboard → None.
 - Mac→VM clipboard (VMware Tools, `vmtoolsd -n vmusr`) is unreliable and
   adds a trailing NUL byte; keep commands for the user short or put them
   in scripts.

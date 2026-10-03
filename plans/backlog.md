@@ -11,9 +11,6 @@
 - Declutter follow-ups: double-clicking two windows to share main; QoL
   tweaks the user noticed but hasn't listed; undo only covers the last
   declutter (offered: undo a whole chain).
-- Minimize = park (2026-10-02): parking is Glance's minimize; the title
-  bar's minimize button should park the window instead of hiding it (and
-  windows shouldn't end up minimized otherwise).
 - Tuning by feel, as the user uses things: Meta+drag gain/build/slow,
   pause time, snap regions (middle band 20%, parking band 15%); bounce
   frames; preview grow (2x; 2.5x if unreadable).

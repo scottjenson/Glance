@@ -118,6 +118,11 @@
 // focuses it where it is, Esc cancels. Nothing moves: only the drawing
 // changes (see switchKey, openMap, spreadPiles).
 //
+// Minimize = park: parking is Glance's minimize. A window being minimized
+// (title-bar button, taskbar, shortcut, the app) is shown again at once and
+// goes to the parking area on the side nearer to it (see minimizeToParking);
+// focus moves on, as for a minimize.
+//
 // Known gaps: touch and tablets aren't handled; in the forwarding case the
 // title bar doesn't respond and the cursor shape may be wrong.
 
@@ -801,6 +806,20 @@ private:
                 updateRing();
             }
         });
+        connect(window, &Window::minimizedChanged, this, [this, window]() {
+            if (window->isMinimized()) {
+                minimizeToParking(window);
+            }
+        });
+        if (window->isMinimized()) {
+            // Already minimized when we see it (at load, or a window that
+            // starts minimized): once it is set up.
+            QTimer::singleShot(0, this, [this, window = QPointer<Window>(window)]() {
+                if (window && window->isMinimized()) {
+                    minimizeToParking(window);
+                }
+            });
+        }
         connect(window, &Window::fullScreenChanged, this, [this, window]() {
             if (window == highlighted()) {
                 updateRing();
@@ -1084,6 +1103,34 @@ private:
             }
         }
         moveTo(window, to);
+    }
+
+    // Minimize = park: show a minimized window again and put it in the
+    // parking area on the side nearer to where it is drawn (one already
+    // there stays). Called while the minimize is under way: KWin has moved
+    // focus on (wanted: minimize means out of the way) and minimized its
+    // dialogs, which come back with it. KDE's minimize animation (Squash)
+    // is reversed before it starts, so nothing flashes. Windows Meta+arrows
+    // can't move (full screen, fixed size, not normal) minimize as usual.
+    void minimizeToParking(Window *window)
+    {
+        if (!window->isNormalWindow() || window->isFullScreen() || !window->isMovable() || !window->isResizable()
+            || !window->windowItem() || workspace()->moveResizeWindow() == window) {
+            return;
+        }
+        window->setMinimized(false);
+        if (window->isMinimized()) {
+            return; // a window rule keeps it minimized
+        }
+        const Place place = placeOf(window);
+        if (place == Place::ParkingLeft || place == Place::ParkingRight) {
+            qInfo("glance: minimize: already parked: %s", qPrintable(window->caption()));
+            return;
+        }
+        const RectF screen = window->output()->geometryF();
+        const bool left = currentlyDrawn(window).center().x() < screen.x() + screen.width() / 2;
+        moveTo(window, left ? Place::ParkingLeft : Place::ParkingRight);
+        qInfo("glance: minimize -> parking %s: %s", left ? "left" : "right", qPrintable(window->caption()));
     }
 
     // `scale`: for a stash, the scale to show it at.

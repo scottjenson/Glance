@@ -76,3 +76,17 @@ music player becomes play/pause), so clicks and scrolling must still work.
 Not for KDE title bars (`pointer->decoration()`), other buttons, or presses
 with modifiers. Larger parked windows (the user expects people to use
 windows at 50-60%) stay normal windows: nothing is taken from their content.
+
+## Minimize = park
+Agreed 2026-10-02, built 2026-10-03 (`minimizeToParking`): parking is
+Glance's minimize. A window being minimized (title-bar button, taskbar,
+KDE's shortcut, the app itself) is un-minimized at once, from its
+`minimizedChanged`, and moved (`moveTo`) to the parking area on the side
+its drawn centre is nearer to; one already in parking stays. KWin has
+already moved focus on (wanted: minimize means "out of the way") and
+minimized its dialogs, which come back with it. KDE's Squash animation is
+redirected backwards before it starts, so nothing flashes (confirmed by
+the user). Windows already minimized at load, or appearing minimized, are
+parked once set up. Windows Meta+arrows can't move (full screen, fixed
+size, not normal) and windows a rule keeps minimized minimize as usual.
+Why: nothing should be hidden where Alt+Tab and the map can't show it.

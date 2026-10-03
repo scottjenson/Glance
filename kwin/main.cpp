@@ -8,8 +8,9 @@
 // Dragging: while KWin moves a window interactively (title bar or Meta+drag),
 // the window is drawn shrunk around the cursor once its left or right edge
 // goes into the outer quarter of the screen (main stays full size), reaching
-// minScale at the screen edge. Quick tiling by dragging to the side
-// is turned off while the effect is loaded, since it uses the same edges.
+// minScale at the screen edge (but no narrower than parkingMinWidth). Quick
+// tiling by dragging to the side is turned off while the effect is loaded,
+// since it uses the same edges.
 //
 // Parked: dropped while shrunk, the window stays exactly where and as large
 // as it was drawn (its "shown" rectangle). The app is also really resized,
@@ -33,7 +34,8 @@
 // as if it weren't scaled, and it also treats the window as still covering
 // its full-size area.
 //
-// Tiny parked windows (below iconBelow of their original size) act like
+// Tiny parked windows (below iconBelow of their original size; and clips in
+// parking, which are drawn at 1/2) act like
 // icons: a left-button press on one is held back.
 // Dragging it more than a few pixels moves the window (KWin's own move, so
 // it grows back out of the edge zone); releasing it without dragging passes
@@ -93,14 +95,18 @@
 //
 // Clips: text dragged out of an app and dropped on the desktop becomes a
 // window instead of Plasma's sticky-note widget: it is saved as a file in
-// ~/Clips and opened in KWrite where it was dropped, as if its window had
+// ~/Clips and opened in glance-clip (our clip app, kwin/clip) where it was
+// dropped, as if its window had
 // been dragged there (held at its center), so it can be moved, parked and
 // selected like any window (see dropToClip). Dropped in the parking band
 // (the outer parkingBand of an edge zone, also onto parking icons), it
 // becomes a parking icon in that column instead. Meta+C (a KDE global
 // shortcut, changeable in System Settings) clips the text selected in the
 // active window the same way, into parking on the side nearer that window
-// (see clipSelection).
+// (see clipSelection). Dragging a clip's body drags its text out, drawn as
+// if the note were being moved: an app that takes it gets it pasted and the
+// clip is gone (Shift: copied); on the desktop the note moves there; refused,
+// it slides back (see clipDragStarted).
 //
 // Stacks: the windows in each stash and parking area form one column,
 // centered vertically, in the order of their vertical position (see
@@ -156,6 +162,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QIcon>
@@ -179,6 +186,7 @@
 #include <optional>
 #include <set>
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -203,6 +211,15 @@ public:
         connect(workspace(), &Workspace::windowActivated, this, &Glance::noteActivated);
         connect(workspace(), &Workspace::windowActivated, this, &Glance::updateRing);
         connect(workspace(), &Workspace::windowAdded, this, &Glance::placeClip);
+        auto seat = waylandServer()->seat();
+        connect(seat, &SeatInterface::dragStarted, this, &Glance::clipDragStarted);
+        connect(seat, &SeatInterface::dragDropped, this, [this]() {
+            if (m_clipDrag) {
+                m_clipDrag->dropped = true;
+                m_clipDrag->copy = input()->keyboardModifiers() & Qt::ShiftModifier;
+            }
+        });
+        connect(seat, &SeatInterface::dragEnded, this, &Glance::clipDragEnded);
 
         auto clipAction = new QAction(this);
         clipAction->setObjectName(QStringLiteral("Glance Clip Selection"));
@@ -305,12 +322,15 @@ public:
     // Only take part in painting while something is scaled.
     bool isActive() const override
     {
-        return !m_parked.empty() || m_dragged || m_bounce || m_map;
+        return !m_parked.empty() || m_dragged || m_bounce || m_map || m_clipDrag;
     }
 
     void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
     {
         if (isParked(w->window()) || w->window() == m_dragged || (w->window() == m_bounce && m_bounceScale != 1.0)) {
+            data.setTransformed();
+        }
+        if (m_clipDrag && w->window() == m_clipDrag->window) {
             data.setTransformed();
         }
         if (m_map) {
@@ -341,17 +361,8 @@ public:
         if (m_map) {
             Window *window = w->window();
             if (inMap(window) && window->windowItem() && currentlyDrawn(window).width() > 0) {
-                // Drawn at `item` + translation + scale * (item-local point):
-                // take the window from where it is drawn to where the map
-                // draws it, on top of the above.
                 const QRectF from = currentlyDrawn(window);
-                const QRectF to = mapped(window, from);
-                const qreal k = to.width() / from.width();
-                const QPointF item = window->windowItem()->position();
-                data.setXScale(data.xScale() * k);
-                data.setYScale(data.yScale() * k);
-                data.setXTranslation(to.x() - item.x() + k * (item.x() + data.xTranslation() - from.x()));
-                data.setYTranslation(to.y() - item.y() + k * (item.y() + data.yTranslation() - from.y()));
+                retarget(data, window, from, mapped(window, from));
                 if (window != mapSelected()) {
                     data.multiplyBrightness(1.0 - (1.0 - mapDim) * m_mapOpen);
                 }
@@ -368,7 +379,31 @@ public:
             Effect::paintWindow(renderTarget, viewport, w, mask, Region(viewport.deviceRect()), data);
             return;
         }
+        if (m_clipDrag) {
+            // A clip being dragged is drawn under the pointer (see
+            // clipGhostRect). The whole screen is painted as transformed
+            // meanwhile, so every window needs a finite region (see above).
+            Window *window = w->window();
+            if (window == m_clipDrag->window && window->windowItem() && currentlyDrawn(window).width() > 0) {
+                retarget(data, window, currentlyDrawn(window), m_clipDrag->ghost);
+            }
+            Effect::paintWindow(renderTarget, viewport, w, mask, Region(viewport.deviceRect()), data);
+            return;
+        }
         Effect::paintWindow(renderTarget, viewport, w, mask, deviceRegion, data);
+    }
+
+    // Change paint data so the window drawn at `from` is drawn at `to`
+    // (same shape). It is drawn at `item` + translation + scale * (item-
+    // local point), so this goes on top of whatever the data does already.
+    static void retarget(WindowPaintData &data, Window *window, const QRectF &from, const QRectF &to)
+    {
+        const qreal k = to.width() / from.width();
+        const QPointF item = window->windowItem()->position();
+        data.setXScale(data.xScale() * k);
+        data.setYScale(data.yScale() * k);
+        data.setXTranslation(to.x() - item.x() + k * (item.x() + data.xTranslation() - from.x()));
+        data.setYTranslation(to.y() - item.y() + k * (item.y() + data.yTranslation() - from.y()));
     }
 
     // The Alt+Tab label, over everything.
@@ -399,6 +434,9 @@ public:
         }
         if (m_dragged && m_dragAnimating) {
             dragStep(m_dragged);
+        }
+        if (m_clipDrag) {
+            data.mask |= PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS;
         }
         if (m_map) {
             m_mapOpen = mapProgress();
@@ -486,6 +524,13 @@ public:
     {
         if (m_switch || m_map) {
             return true; // the pointer does nothing while switching
+        }
+        if (m_clipDrag) {
+            if (!m_clipDrag->dropped) {
+                m_clipDrag->ghost = clipGhostRect(event->position);
+                effects->addRepaintFull();
+            }
+            return false; // KWin's drag and drop goes on
         }
         if (m_pending) {
             return pendingMotion(event);
@@ -588,6 +633,9 @@ private:
     static constexpr qreal zoneFraction = 0.25;
     // Window size at the very edge of the screen (1.0 = full size).
     static constexpr qreal minScale = 0.15;
+    // But no narrower than this (logical pixels): narrow windows (clips,
+    // small dialogs) would be specks at minScale (see parkingScale).
+    static constexpr qreal parkingMinWidth = 180.0;
     // Parked windows drawn smaller than this (relative to the original size)
     // act like icons: drag anywhere to move, click passes through. Larger
     // ones stay normal windows, so their content keeps every interaction.
@@ -696,7 +744,23 @@ private:
         std::chrono::microseconds timestamp = {};
     };
     std::unique_ptr<ClipRead> m_clip;
-    // The KWrite started for the last clip, where its window goes, and
+    // A clip being dragged (see clipDragStarted): its window, where it was
+    // grabbed (fraction of its drawn size), its full size, its shape, where
+    // it is drawn now, and whether it was dropped on an app that took it
+    // (with Shift: copied).
+    struct ClipDrag
+    {
+        QPointer<Window> window;
+        QPointF grab;
+        QSizeF original;
+        qreal aspect = 1;
+        QRectF ghost;
+        bool dropped = false;
+        bool copy = false;
+    };
+    std::optional<ClipDrag> m_clipDrag;
+
+    // The clip app started for the last clip, where its window goes, and
     // whether it goes to parking (see placeClip).
     qint64 m_clipPid = 0;
     QPointF m_clipPosition;
@@ -801,6 +865,7 @@ private:
             dragFinished(window);
         });
         connect(window, &Window::frameGeometryChanged, this, [this, window]() {
+            clipHeightChanged(window);
             applyParked(window);
             if (window == m_ringWindow) {
                 updateRing();
@@ -830,6 +895,10 @@ private:
                 removeRing(); // while its parent item still exists
             }
             std::erase(m_recent, window);
+            if (m_clipDrag && m_clipDrag->window == window) {
+                m_clipDrag.reset(); // pasted: the clip is gone
+                effects->addRepaintFull();
+            }
             const auto closeRanks = leaving(window);
             m_parked.erase(window);
             m_wasFull.erase(window);
@@ -848,7 +917,9 @@ private:
             return false;
         }
         Window *window = pick(event->position);
-        if (!window || !isParked(window)) {
+        // Clips get their presses: dragging a clip drags its text, and an
+        // app can only start a drag from a press it received.
+        if (!window || !isParked(window) || isClip(window)) {
             return false;
         }
         const Parked &parked = m_parked.at(window);
@@ -963,8 +1034,13 @@ private:
     static constexpr std::chrono::milliseconds previewDelay{300};
     static constexpr std::chrono::milliseconds previewGrace{300};
 
-    // Where clips are saved, relative to the home folder.
+    // Where clips are saved, relative to the home folder, and the clip
+    // app's app id (kwin/clip/main.cpp), which tells clip windows apart.
     static constexpr const char *clipsFolder = "Clips";
+    static constexpr const char *clipAppId = "org.glance.Clip";
+    // How long a pasted (moved) clip may take to close before it is shown
+    // back in its place.
+    static constexpr std::chrono::milliseconds clipCloseWait{1500};
     // The parking band: this close to a screen edge (fraction of the edge
     // zone's width), dropped text becomes a parking icon (see placeClip),
     // and a snapping drag snaps to parking (see snapTargetAt).
@@ -1038,7 +1114,7 @@ private:
         if (it != m_parked.end() && !it->second.restoring) {
             const Parked &parked = it->second;
             const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-            const bool tiny = parked.shown.width() / parked.original.width() < minScale + 0.02;
+            const bool tiny = parked.shown.width() / parked.original.width() < parkingScale(parked.original) + 0.02;
             if (tiny) {
                 return left ? Place::ParkingLeft : Place::ParkingRight;
             }
@@ -1180,8 +1256,8 @@ private:
             // In a stash at most stashMaxWidth of the zone wide (wide windows,
             // e.g. from all of main, shrink more), but still above parking size.
             const qreal scale = place == Place::StashLeft || place == Place::StashRight
-                ? std::max(minScale + 0.03, std::min(stash, zoneWidth * stashMaxWidth / size.width()))
-                : minScale;
+                ? std::max(parkingScale(size) + 0.03, std::min(stash, zoneWidth * stashMaxWidth / size.width()))
+                : parkingScale(size);
             const QSizeF drawn = size * scale;
             // A stash column is centered in its zone (whatever the windows'
             // widths, it lines up, and both sides keep some room); parking
@@ -1417,7 +1493,7 @@ private:
         qreal total = std::min({1.0,
                                 edgeScale(cursor.x() - screen.x(), (cursor.x() - left) * grow, zoneWidth),
                                 edgeScale(screen.x() + screen.width() - cursor.x(), (right - cursor.x()) * grow, zoneWidth)});
-        total = std::max(total, minScale);
+        total = std::max(total, parkingScale(m_dragOriginal));
         m_dragScale = total;
         // The scale to draw the current frame at.
         const qreal scale = total * grow;
@@ -1631,6 +1707,11 @@ private:
         m_parked[window] = Parked{.shown = shown, .original = original};
         const RectF frame = window->frameGeometry();
         const QSizeF layout = layoutSize(window, shown.size(), original);
+        if (isClipInParking(window, shown.width(), original)) {
+            // Drawn at 1/2: half as tall as its new layout (columns go by
+            // `shown`).
+            m_parked[window].shown.setHeight(layout.height() / 2);
+        }
         if (layout != QSizeF(frame.width(), frame.height())) {
             qInfo("glance: %s: original %.0fx%.0f, app minimum %.0fx%.0f, shown %.0fx%.0f -> resize to %.0fx%.0f",
                   qPrintable(window->caption()), original.width(), original.height(),
@@ -1646,8 +1727,16 @@ private:
     // (not scaled at all) or twice it (drawn at 1/2, which averages exact
     // 2x2 pixel blocks). Otherwise the smallest size that keeps the shape and
     // meets both minLayoutWidth and the app's minimum, capped at `original`.
+    // Clips in parking are laid out at twice the shown width, whatever
+    // minLayoutWidth: drawn at 1/2, like a clip in a stash, the text is
+    // small but readable and reflows into a narrow note, and the hover
+    // preview (at most 1:1) doubles it. The clip app then picks the height
+    // its text needs (see clipHeightChanged).
     static QSizeF layoutSize(Window *window, const QSizeF &shown, const QSizeF &original)
     {
+        if (isClipInParking(window, shown.width(), original)) {
+            return QSizeF(2 * std::round(shown.width()), 2 * std::round(shown.height()));
+        }
         const QSizeF appMin = window->clientSizeToFrameSize(window->minSize());
         auto fits = [&](const QSizeF &size) {
             return size.width() >= minLayoutWidth && size.width() >= appMin.width()
@@ -1666,6 +1755,13 @@ private:
     }
 
     // --- Parked windows ---
+
+    // The scale of a window of full size `original` in parking: minScale,
+    // or more if that would be narrower than parkingMinWidth.
+    static qreal parkingScale(const QSizeF &original)
+    {
+        return std::clamp(parkingMinWidth / original.width(), minScale, 1.0);
+    }
 
     bool isParked(Window *window) const
     {
@@ -1736,7 +1832,7 @@ private:
         const Parked &parked = m_parked.at(window);
         const RectF screen = window->output()->geometryF();
         const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-        const bool tiny = parked.shown.width() / parked.original.width() < minScale + 0.02;
+        const bool tiny = parked.shown.width() / parked.original.width() < parkingScale(parked.original) + 0.02;
         return (left ? 0 : 2) + (tiny ? 0 : 1);
     }
 
@@ -1985,7 +2081,8 @@ private:
     {
         auto it = m_parked.find(window);
         return it != m_parked.end() && !it->second.restoring
-            && it->second.shown.width() / it->second.original.width() < iconBelow;
+            && (it->second.shown.width() / it->second.original.width() < iconBelow
+                || isClipInParking(window, it->second.shown.width(), it->second.original));
     }
 
     // The previewed window, if it still is one.
@@ -2106,13 +2203,25 @@ private:
         if (m_clip || event->button != Qt::LeftButton || !seat->isDragPointer() || !seat->dragSource()) {
             return false;
         }
-        Window *under = pick(event->position);
+        // (A dragged clip is drawn under the pointer, not where it was.)
+        Window *under = pick(event->position, m_clipDrag ? m_clipDrag->window.data() : nullptr);
         if (under && !under->isDesktop() && !(isIcon(under) && parkingSide(event->position))) {
             return false;
         }
         const QString mimeType = clipMimeType(seat->dragSource()->mimeTypes());
         if (mimeType.isEmpty()) {
             return false;
+        }
+        if (m_clipDrag) {
+            // A clip dropped where text would become a new clip: it moves
+            // there instead (see placeDroppedClip). The drag is cancelled,
+            // so Plasma makes no note of it.
+            placeDroppedClip(event->position);
+            seat->cancelDrag();
+            seat->setTimestamp(event->timestamp);
+            seat->notifyPointerButton(event->nativeButton, event->state);
+            seat->notifyPointerFrame();
+            return true;
         }
         return startClip(seat->dragSource(), mimeType,
                          ClipRead{.position = event->position,
@@ -2245,26 +2354,213 @@ private:
         // path that loads this effect from the build folder. Started in its
         // own systemd scope in app.slice, like apps Plasma starts: otherwise
         // it would belong to KWin's service, be stopped in an odd order at
-        // logout and die with KWin. systemd-run --scope execs KWrite in its
-        // own process, so the pid is KWrite's (see placeClip).
+        // logout and die with KWin. systemd-run --scope execs the app in its
+        // own process, so the pid is the app's (see placeClip).
         QProcessEnvironment env = kwinApp()->processStartupEnvironment();
         env.remove(QStringLiteral("QT_PLUGIN_PATH"));
-        const QString unit = QStringLiteral("app-org.kde.kwrite-glance-%1.scope").arg(QDateTime::currentMSecsSinceEpoch());
+        const QString unit = QStringLiteral("app-%1-%2.scope").arg(QLatin1String(clipAppId)).arg(QDateTime::currentMSecsSinceEpoch());
         QProcess process;
         process.setProgram(QStringLiteral("systemd-run"));
         process.setArguments({QStringLiteral("--user"), QStringLiteral("--scope"), QStringLiteral("--slice=app.slice"),
                               QStringLiteral("--unit=") + unit, QStringLiteral("--collect"), QStringLiteral("--quiet"),
-                              QStringLiteral("--"), QStringLiteral("kwrite"), path});
+                              QStringLiteral("--"), clipApp(), path});
         process.setProcessEnvironment(env);
         qint64 pid = 0;
         if (!process.startDetached(&pid)) {
-            qWarning("glance: clip: can't start kwrite");
+            qWarning("glance: clip: can't start %s", qPrintable(clipApp()));
             return;
         }
         m_clipPid = pid;
         m_clipPosition = clip->position;
         m_clipPlace = clip->place;
         qInfo("glance: clip: %lld bytes -> %s", qlonglong(clip->text.size()), qPrintable(path));
+    }
+
+    // The clip app: the one built with this plugin (bin/glance-clip in the
+    // build folder, three levels above the plugin's bin/kwin/effects/plugins),
+    // else the installed one, from PATH.
+    static QString clipApp()
+    {
+        Dl_info info;
+        if (dladdr(reinterpret_cast<void *>(&Glance::clipApp), &info) && info.dli_fname) {
+            const QString besidePlugin = QFileInfo(QFile::decodeName(info.dli_fname)).dir().filePath(QStringLiteral("../../../glance-clip"));
+            if (QFileInfo(besidePlugin).isExecutable()) {
+                return QFileInfo(besidePlugin).canonicalFilePath();
+            }
+        }
+        return QStringLiteral("glance-clip");
+    }
+
+    // A clip window (glance-clip's app id).
+    static bool isClip(Window *window)
+    {
+        return window->desktopFileName() == QLatin1String(clipAppId);
+    }
+
+    // A clip in parking resizes itself to the height its text needs (see
+    // resizeEvent in kwin/clip/main.cpp): take it (drawn at 1/2, see
+    // layoutSize) and re-form its column.
+    void clipHeightChanged(Window *window)
+    {
+        auto it = m_parked.find(window);
+        if (it == m_parked.end() || it->second.restoring
+            || !isClipInParking(window, it->second.shown.width(), it->second.original)) {
+            return;
+        }
+        const RectF frame = window->frameGeometry();
+        const qreal scale = it->second.shown.width() / frame.width();
+        const qreal height = frame.height() * scale;
+        if (std::abs(height - it->second.shown.height()) > 0.5) {
+            it->second.shown.setHeight(height);
+            arrange(window);
+        }
+    }
+
+    // A clip shown `shownWidth` wide in parking (by its scale).
+    static bool isClipInParking(Window *window, qreal shownWidth, const QSizeF &original)
+    {
+        return isClip(window) && shownWidth / original.width() < parkingScale(original) + 0.02;
+    }
+
+    // The clip window a drag comes from, if any.
+    static Window *clipWindowOf(AbstractDataSource *source)
+    {
+        if (!source) {
+            return nullptr;
+        }
+        for (Window *window : workspace()->windows()) {
+            if (isClip(window) && window->surface() && window->surface()->client()->client() == source->client()) {
+                return window;
+            }
+        }
+        return nullptr;
+    }
+
+    // --- Clips: dragging a clip ---
+    //
+    // Dragging a clip's body is a real drag and drop of its text (only then
+    // can an app say it takes text), but it looks like moving the note:
+    // Glance draws the clip under the pointer, by the edge rule like a
+    // moved window, and the app shows no drag picture. Where it lands
+    // decides: an app that takes it gets it pasted, and the clip is gone
+    // (the app closes itself; with Shift it is copied and the clip comes
+    // back); the desktop or nothing, the clip moves there; anything else,
+    // it slides back.
+
+    void clipDragStarted()
+    {
+        Window *window = clipWindowOf(waylandServer()->seat()->dragSource());
+        if (!window || !window->windowItem()) {
+            return;
+        }
+        if (isParked(window)) {
+            m_parked.at(window).preview.reset();
+            if (m_preview == window) {
+                m_preview = nullptr;
+            }
+        }
+        const QRectF drawn = currentlyDrawn(window);
+        auto it = m_parked.find(window);
+        const RectF frame = window->frameGeometry();
+        ClipDrag drag;
+        drag.window = window;
+        drag.grab = QPointF((m_lastPress.x() - drawn.x()) / drawn.width(), (m_lastPress.y() - drawn.y()) / drawn.height());
+        drag.original = it != m_parked.end() ? it->second.original : QSizeF(frame.width(), frame.height());
+        drag.aspect = drawn.height() / drawn.width();
+        drag.ghost = drawn;
+        m_clipDrag = drag;
+        m_clipDrag->ghost = clipGhostRect(input()->pointer()->pos());
+        workspace()->raiseWindow(window);
+        effects->addRepaintFull();
+        qInfo("glance: clip drag started");
+    }
+
+    // Where a dragged clip is drawn with the pointer at `cursor`: held at
+    // the spot it was grabbed, scaled by the edge rule like a moved window
+    // (full size in main, down to parking size at the edges), in the shape
+    // it had when the drag started.
+    QRectF clipGhostRect(const QPointF &cursor) const
+    {
+        const ClipDrag &drag = *m_clipDrag;
+        LogicalOutput *output = workspace()->outputAt(cursor);
+        const RectF screen = output ? output->geometryF() : RectF();
+        const qreal zoneWidth = screen.width() * zoneFraction;
+        const qreal width = drag.original.width();
+        const qreal scale = std::clamp(std::min({edgeScale(cursor.x() - screen.x(), drag.grab.x() * width, zoneWidth),
+                                                 edgeScale(screen.x() + screen.width() - cursor.x(), (1 - drag.grab.x()) * width, zoneWidth)}),
+                                       parkingScale(drag.original), 1.0);
+        const QSizeF size(width * scale, width * scale * drag.aspect);
+        const QPointF topLeft = cursor - QPointF(drag.grab.x() * size.width(), drag.grab.y() * size.height());
+        // Kept on the screen, like a moved window.
+        return QRectF(QPointF(topLeft.x() + shiftOntoScreen(topLeft.x(), size.width(), screen), topLeft.y()), size);
+    }
+
+    // A dragged clip dropped at `pos` on the desktop (or nothing, or the
+    // parking band). In the parking band it joins that parking column,
+    // against the screen edge (as text dropped there does, see
+    // parkingSide); elsewhere it stays where and as large as it is drawn,
+    // like a moved window dropped there (parked if shrunk, its column
+    // re-forming).
+    void placeDroppedClip(const QPointF &pos)
+    {
+        const ClipDrag drag = *m_clipDrag;
+        m_clipDrag.reset();
+        Window *window = drag.window;
+        if (!window || !window->windowItem()) {
+            return;
+        }
+        const QRectF from = drag.ghost;
+        const auto closeRanks = leaving(window);
+        const qreal scale = drag.ghost.width() / drag.original.width();
+        if (const std::optional<Place> parking = parkingSide(pos)) {
+            commitPlace(window, *parking, drag.original, drag.ghost.center().y(), from);
+        } else if (scale < parkBelow) {
+            park(window, QRectF(drag.ghost.topLeft(), drag.original * scale), drag.original);
+            animate(window, from);
+            arrange(window);
+        } else {
+            resizeAnimated(window, RectF(drag.ghost.x(), drag.ghost.y(), drag.original.width(), drag.original.height()), from);
+        }
+        closeRanks();
+        qInfo("glance: clip dropped on the desktop: moved there");
+    }
+
+    // The drag ended. Pasted (moved): the app closes the clip; it stays
+    // drawn where it was dropped until then (see Window::closed in watch),
+    // or slides back if it doesn't. Copied, or not taken: it slides back.
+    void clipDragEnded()
+    {
+        if (!m_clipDrag) {
+            return;
+        }
+        if (m_clipDrag->dropped && !m_clipDrag->copy) {
+            qInfo("glance: clip pasted (moved)");
+            QTimer::singleShot(clipCloseWait, this, [this, window = m_clipDrag->window]() {
+                if (m_clipDrag && m_clipDrag->window == window) {
+                    clipSlideBack();
+                }
+            });
+            return;
+        }
+        qInfo(m_clipDrag->dropped ? "glance: clip pasted (copied): back to its place" : "glance: clip not taken: back to its place");
+        clipSlideBack();
+    }
+
+    void clipSlideBack()
+    {
+        const ClipDrag drag = *m_clipDrag;
+        m_clipDrag.reset();
+        Window *window = drag.window;
+        if (!window || !window->windowItem()) {
+            return;
+        }
+        if (isParked(window)) {
+            animate(window, drag.ghost);
+        } else {
+            // Not parked: glide from where it was dropped to its frame.
+            resizeAnimated(window, window->frameGeometry(), drag.ghost);
+        }
+        effects->addRepaintFull();
     }
 
     // ParkingLeft/Right if `pos` is in that side's parking band (see
@@ -2286,7 +2582,7 @@ private:
         return std::nullopt;
     }
 
-    // The clip's KWrite window appeared: put it where the text was dropped,
+    // The clip's window appeared: put it where the text was dropped,
     // as if it had been dragged there held at its center and dropped: full
     // size in main, shrunk by the edge rule (see edgeScale) and parked if an
     // edge went into an edge zone.
@@ -2308,7 +2604,7 @@ private:
             return;
         }
         const qreal zoneWidth = screen.width() * zoneFraction;
-        const qreal scale = std::max(minScale, std::min({1.0,
+        const qreal scale = std::max(parkingScale(size), std::min({1.0,
                                                          edgeScale(pos.x() - screen.x(), size.width() / 2, zoneWidth),
                                                          edgeScale(screen.x() + screen.width() - pos.x(), size.width() / 2, zoneWidth)}));
         const QSizeF drawn = size * scale;
@@ -2919,12 +3215,12 @@ private:
 
     // The window really visible at `pos`, like InputRedirection::findToplevel
     // but using the drawn rectangle for parked windows.
-    Window *pick(const QPointF &pos) const
+    Window *pick(const QPointF &pos, Window *ignore = nullptr) const
     {
         const auto &stacking = workspace()->stackingOrder();
         for (auto it = stacking.rbegin(); it != stacking.rend(); ++it) {
             Window *window = *it;
-            if (window->isDeleted() || !window->isOnCurrentActivity() || !window->isOnCurrentDesktop()
+            if (window == ignore || window->isDeleted() || !window->isOnCurrentActivity() || !window->isOnCurrentDesktop()
                 || window->isMinimized() || window->isHidden() || window->isHiddenByShowDesktop()
                 || !window->readyForPainting()) {
                 continue;
@@ -2969,8 +3265,11 @@ private:
     // wrong. With `keep`, a button is held: stay with the current target.
     bool route(const QPointF &pos, bool keep)
     {
-        // KWin's own drags (and no parked windows) need nothing from us.
-        if (m_parked.empty() || workspace()->moveResizeWindow()) {
+        // KWin's own moves, drag and drop (and no parked windows) need
+        // nothing from us. During drag and drop, re-anchoring would move the
+        // invisible full-size frame of the window the drag started in (a
+        // clip) under the pointer, where it would catch the drop.
+        if (m_parked.empty() || workspace()->moveResizeWindow() || waylandServer()->seat()->isDragPointer()) {
             m_target = nullptr;
             m_forwarding = false;
             return false;

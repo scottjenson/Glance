@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Glance Clip
+Comment=A clip of text: drag it into a document to paste it
+Exec=glance-clip %f
+Icon=klipper
+NoDisplay=true
+Terminal=false

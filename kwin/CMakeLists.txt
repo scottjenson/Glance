@@ -27,3 +27,13 @@ target_link_libraries(glance PRIVATE KWin::kwin KF6::GlobalAccel)
 target_include_directories(glance SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/kwin-private)
 # Let moc see the Q_OBJECT inside KWin's effect factory macro.
 set_property(TARGET glance APPEND PROPERTY AUTOMOC_MACRO_NAMES "KWIN_EFFECT_FACTORY")
+
+# glance-clip: the clip window app Glance starts (kwin/clip/main.cpp).
+# Built next to the plugin's folder tree (kwin/build/bin/glance-clip), where
+# Glance looks for it first; installed into the normal bin folder.
+add_executable(glance-clip clip/main.cpp)
+target_link_libraries(glance-clip PRIVATE Qt6::Widgets)
+set_target_properties(glance-clip PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+install(TARGETS glance-clip ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
+# Its .desktop file: KWin takes the window icon from it (hidden from menus).
+install(FILES clip/org.glance.Clip.desktop DESTINATION ${KDE_INSTALL_APPDIR})

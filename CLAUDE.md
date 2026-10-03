@@ -64,12 +64,12 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/focus-ring.md](docs/focus-ring.md) | Focus ring and bounce |
 | [docs/declutter.md](docs/declutter.md) | Meta+double-click declutter and undo |
 | [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
-| [docs/clips.md](docs/clips.md) | Text drops and Meta+C become clip windows |
+| [docs/clips.md](docs/clips.md) | Text drops and Meta+C become clip windows (glance-clip sticky notes) that drag back into documents |
 | [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map (phase 1; phase 2 listed there) |
 | [docs/logout-hang.md](docs/logout-hang.md) | Open issue: plasmashell hangs at logout |
 | [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
 | [plans/backlog.md](plans/backlog.md) | Agreed-but-unbuilt items, polish, packaging, ideas |
-| [plans/clips-back.md](plans/clips-back.md) | Getting clips back into documents |
+| [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text and images |
 
 When a plan is built, move its design into a `docs/` file and update the
 table and Status.
@@ -78,7 +78,8 @@ table and Status.
 Running in the user's real Plasma session (via use-in-session.sh; after a
 rebuild the user logs out and back in). Built and working: everything in
 the docs table. Last changes (tested by the user, committed): Alt+Tab
-phase 1 (2026-10-02) and minimize = park (2026-10-03). Next: not decided; candidates are Alt+Tab
+phase 1 (2026-10-02), minimize = park and the glance-clip app with
+drag-to-paste (2026-10-03). Next: not decided; candidates are Alt+Tab
 phase 2 ([docs/alt-tab.md](docs/alt-tab.md)) and the
 [backlog](plans/backlog.md).
 
@@ -131,7 +132,9 @@ phase 2 ([docs/alt-tab.md](docs/alt-tab.md)) and the
   user's (untracked).
 
 ## Files
-- `kwin/main.cpp`: the effect (only source file). `kwin/metadata.json`:
+- `kwin/main.cpp`: the effect. `kwin/clip/main.cpp`: glance-clip, the
+  clip app (a second target in the same CMake project, built to
+  `kwin/build/bin/glance-clip`; [docs/clips.md](docs/clips.md)). `kwin/metadata.json`:
   plugin metadata (id `glance`, from the CMake target name; shown as
   "Glance" in Desktop Effects).
 - `kwin/CMakeLists.txt`: builds `kwin/build/bin/kwin/effects/plugins/glance.so`.
@@ -144,7 +147,7 @@ phase 2 ([docs/alt-tab.md](docs/alt-tab.md)) and the
 - `kwin/kwin-private/`: KWin headers that Fedora's kwin-devel doesn't
   install but that we need (see [docs/clips.md](docs/clips.md)). Keep in
   step with the installed KWin.
-- `kwin/setup-kwrite.sh`: KWrite font for clips (run once on this VM).
+- `kwin/setup-kwrite.sh`: KWrite font for the old KWrite clips (unused).
 - `kwin/run-nested.sh`: starts a nested KWin (a window in the desktop,
   2982x1090 logical at scale 2, override with WIDTH/HEIGHT) with
   QT_PLUGIN_PATH at the build folder and a Konsole inside. Must be run from

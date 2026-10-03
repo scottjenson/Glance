@@ -14,3 +14,13 @@ Check with
 `journalctl --user -o short-iso | grep -E "Stopping plasma-plasmashell|stop-sigterm"`
 (a "timed out" line right after a stop = hang). If it persists: compare
 logouts from sessions without any clips.
+
+Update 2026-10-03: after the own-scope fix, 1 hang in 27 logouts
+(2026-10-01 12:30 to 2026-10-03 09:13), the same stack
+(`WaylandClipboard::~WaylandClipboard` → `QThread::wait`, the
+`ClipboardThread` stuck in `QRecursiveMutex::tryLock`), right after the
+session where clip drag-in/out (glance-clip) was first tested. Still KDE's
+bug, likely made more frequent by clipboard/selection activity. Costs a
+~40 s logout and a crash notice; nothing is lost. If it gets frequent:
+turn off Klipper (the clipboard history owns that code), or shorten
+plasmashell's stop timeout (a systemd drop-in, `TimeoutStopSec=5`).

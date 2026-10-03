@@ -1,20 +1,23 @@
-# Plan: clips back into documents (not now)
+# Plan: clips back into documents (phase 1 built; phase 2 later)
 
-User's goal, 2026-10-01: "move information around", reversibly. Today
-getting a clip's text back means click, select all, copy, paste. Built clips:
+User's goal, 2026-10-01: "move information around", reversibly. A clip
+should be a lightweight clipboard object: select text, drag it out, it
+becomes a little window; drag that window's text back into a document and
+it is pasted. Built clips:
 [docs/clips.md](../docs/clips.md).
 
-Likely answer: our own small clip app (Qt): text shown large without menus,
-the window body is a drag source (title bar still moves it), one file per
-clip as now, images later, could reformat when parked; Glance would launch
-it instead of KWrite.
+## Phase 1: built 2026-10-03
+The clip app and dragging clips back in: see [docs/clips.md](../docs/clips.md).
 
-Rich text and images (discussed 2026-10-01): ask the source for text/html
-(Firefox offers it), RTF, image/png; store .html/.png/.txt; offer the same
-formats when dragged back out; Qt shows simple HTML. Main work: cleaning web
-HTML down to bold/italic/links/lists/headings; images inside web HTML are
-often remote links.
+## Phase 2: rich text and images (discussed 2026-10-01, later)
+Ask the source for text/html (Firefox offers it), RTF, image/png; store
+.html/.png/.txt; offer the same formats when dragged back out; Qt shows
+simple HTML. Main work: cleaning web HTML down to bold/italic/links/
+lists/headings; images inside web HTML are often remote links.
 
-Cheap stopgap offered: an action on a clip window (e.g. clicking a parked
-clip) copies its file with `wl-copy`. CopyQ was considered (items drag out,
-but it's one list window, not a window per clip).
+## Open questions
+- Clips after logout: the files stay in ~/Clips but the windows aren't
+  restored at login.
+- Parked windows' invisible full-size frames can catch drops meant for
+  other parked windows (KWin's drag and drop goes by frames; the general
+  input-transform limit, see the backlog's long term).

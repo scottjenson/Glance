@@ -22,6 +22,11 @@ the drawn edge is at d = cursorToScreenEdge − cursorToWindowEdge·s, and
 s = minScale + (1 − minScale)·d/zoneWidth. Distances are converted to
 original-size units (`grow` = original width / current width). If even
 minScale doesn't fit, `shiftOntoScreen` slides it back on screen.
+A window dragged out of a stash keeps its size at first (2026-10-03, user:
+a Meta+wheel size snapped back on the next drag; the grab spot also changed
+the edge rule's size): `holdScale` holds it until the edge rule reaches
+that size (then follows it, no jump) or the window's center leaves the
+stash (then glides to the edge rule).
 KWin's own move logic (window.cpp `nextInteractiveMoveGeometry`) also snaps
 to edges (`adjustWindowPosition`) and keeps ≥100 px visible.
 

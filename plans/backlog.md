@@ -3,10 +3,8 @@
 ## Agreed with the user, not built yet
 - Crowding of parking columns (should take 10-15); stashes are settled
   (free placement, overlap allowed, Meta+wheel to resize; 2026-10-03).
-- Open from the stash talk (2026-10-03): dragging a stashed window that
-  was resized by hand within the stash should probably keep its size
-  (today the edge rule sets it again). Possible later: Meta+wheel over
-  empty parking space sizes all icons at once (dock-size slider).
+- Possible later (stash talk 2026-10-03): Meta+wheel over empty parking
+  space sizes all icons at once (dock-size slider).
 - Declutter follow-ups: double-clicking two windows to share main; QoL
   tweaks the user noticed but hasn't listed; undo only covers the last
   declutter (offered: undo a whole chain).

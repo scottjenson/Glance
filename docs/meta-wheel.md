@@ -28,6 +28,9 @@ drag; target is `pick` (the window drawn there). Factor
 icon's zoom; `shown` is the zoomed rectangle, and everything that judges
 a window's place by its scale uses `baseWidth` (shown width / zoom).
 
+A stash size set this way survives the next drag: the drag starts at that
+size (see `holdScale` in [dragging-and-parking.md](dragging-and-parking.md)).
+
 ## To check by feel
 Scroll speed and direction (natural scrolling in the VM from the Mac
 trackpad may flip it), the 400 ms settle.

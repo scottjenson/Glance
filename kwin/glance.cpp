@@ -73,6 +73,15 @@ public:
         }
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
         connect(workspace(), &Workspace::windowAdded, &m_clips, &Clips::placeClip);
+        // A logout starts: Plasma's ksmserver moves KWin out of the Normal
+        // session state before any app is asked to close (and its numbers
+        // for the states are off by one from KWin's, so any other state
+        // counts). Parked windows get their full size back first.
+        connect(effects, &EffectsHandler::sessionStateChanged, this, [this]() {
+            if (effects->sessionState() != SessionState::Normal) {
+                m_parking.unparkAll();
+            }
+        });
 
         qInfo("glance: effect loaded");
         if (!m_kde.globalAccel()) {

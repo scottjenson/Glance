@@ -47,11 +47,10 @@ VMware Fusion only exposes a virtual mouse, so testing would need a USB
 Magic Trackpad passed through with `usb.generic.allowHID = "TRUE"`); live
 resizing during the drag; fade icon-sized windows or cap them at an icon
 size; top/bottom edges; config options; multiple monitors (the on-screen fit
-blocks dragging to another one). Apps remember their parked size across a
-logout (found 2026-10-04: Firefox reopens at its 500 px minimum if it was
-parked at logout, and that becomes its "original" size; dragged back to
-main it stays 500 px): maybe give parked windows their full size back at
-logout, or remember originals by app.
+blocks dragging to another one). Remembering parked windows across a
+logout (where and how big, per app), now that they get their full size
+back at logout ([docs/dragging-and-parking.md](../docs/dragging-and-parking.md),
+Logging out).
 
 ## Long term
 Ask KWin upstream for a way to set a window's input transform. Fallback

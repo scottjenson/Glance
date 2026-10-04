@@ -113,8 +113,10 @@ the user, Meta+Tab untested as macOS takes Command+Tab,
 [docs/alt-tab.md](docs/alt-tab.md)); then packaging's first steps: the
 MIT LICENSE file (added 2026-10-04) and the version check (built
 2026-10-04, [docs/version-check.md](docs/version-check.md); checked by
-the user). That order is done; what comes next isn't decided: ask the
-user. Kept for later: rich-text clips, restoring clips after login. The rest of the list was dropped for now
+the user). That order is done. Then (2026-10-04): parked windows get
+their full size back when a logout starts, so Firefox no longer reopens
+at its parked size ([docs/dragging-and-parking.md](docs/dragging-and-parking.md),
+Logging out); waiting for the user's check across a real logout. Kept for later: rich-text clips, restoring clips after login. The rest of the list was dropped for now
 ([plans/backlog.md](plans/backlog.md)).
 
 ## How the effect works (kwin/glance.cpp and its components, the basics)

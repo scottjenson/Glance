@@ -46,6 +46,25 @@ original size (grabbed spot under the cursor), `restoring` until it has it.
 
 Unloading resizes parked windows back to their original size.
 
+**Logging out** (2026-10-04): apps remember their window size when they
+are closed at logout, and Firefox reopened at its 500 px parked size,
+which then became its "original". So at the start of a logout every
+parked window gets its original size back and is no longer parked
+(`ParkedWindows::unparkAll`), before any app is asked to close. The
+moment: Plasma's ksmserver (`performLogout`) moves KWin's session state
+out of Normal first (`EffectsHandler::sessionStateChanged`; KWin's
+`SessionManager` isn't exported to plugins); apps are closed only after
+its session save and plasma-fallback-session-save
+(`plasma-shutdown`: `closeWaylandWindows`). ksmserver's numbers for the
+states are off by one from KWin's (its Saving arrives as Quitting, its
+Normal after a cancelled logout as Saving), so any state but Normal
+counts. A manual "save session" doesn't change the state. A cancelled
+logout leaves the windows unparked. Windows keep the top-left corner
+they were drawn at (parked on the right, they reach past the screen
+edge; Wayland apps don't know their position, so it isn't remembered).
+Headless check: `setState` on KWin's /Session over D-Bus brings a parked
+Konsole from 540x374 back to 1800x1246.
+
 ## Input to parked windows
 `ParkedInput` (kwin/parkedinput.cpp): `route`, `reanchor`, and
 `ParkedWindows::pick`: KWin picks the
@@ -100,8 +119,8 @@ and stashed windows drawn below `iconBelow` (0.25) of their original size,
 hold back a plain left press (`isIcon`). Parking counts whatever the
 scale (fixed 2026-10-04): a narrow window is drawn above 0.25 there
 (parking is at least `parkingMinSize`, 180 px, on the longer side), e.g. Firefox at
-its 500 px minimum width, which it reopens at after a logout while
-parked; it got neither icon behaviour nor hover previews. Moving more than `dragThreshold` (6 px) starts KWin's own move
+its 500 px minimum width (which it reopened at after a logout while
+parked, fixed 2026-10-04, see Logging out); it got neither icon behaviour nor hover previews. Moving more than `dragThreshold` (6 px) starts KWin's own move
 (`performMousePressCommand(Options::MouseMove, pressPos)`; the frame was
 re-anchored at the press, so the grabbed spot stays under the cursor);
 releasing sooner delivers press + release to the app as a click (original

@@ -584,4 +584,20 @@ void ParkedWindows::restoreAll()
     }
 }
 
+void ParkedWindows::unparkAll()
+{
+    if (m_parked.empty()) {
+        return;
+    }
+    qInfo("glance: logging out: %d parked windows back to full size", int(m_parked.size()));
+    for (auto &[window, parked] : m_parked) {
+        if (window->windowItem()) {
+            setDrawTransform(window, QTransform());
+        }
+        window->moveResize(RectF(parked.shown.topLeft(), parked.original));
+    }
+    m_parked.clear();
+    m_resizing.reset();
+}
+
 } // namespace glance

@@ -159,7 +159,10 @@ shows clips with the icon only).
 - `kwin/main.cpp`: the effect (being split up, [plans/refactor.md](plans/refactor.md)).
   `kwin/tuning.h`: all tuning constants and the Place enum (namespace
   `glance`). `kwin/geometry.h/.cpp`: pure geometry (no KWin), built as
-  the `glance-core` library; `kwin/tests/`: its Qt Test unit tests. `kwin/clip/main.cpp`: glance-clip, the
+  the `glance-core` library; `kwin/tests/`: its Qt Test unit tests.
+  `kwin/parked.h/.cpp`: ParkedWindows, the parked-window model (places,
+  animation, making room, draw transforms); features use it through
+  `m_parking`. `kwin/clip/main.cpp`: glance-clip, the
   clip app (a second target in the same CMake project, built to
   `kwin/build/bin/glance-clip`; [docs/clips.md](docs/clips.md)). `kwin/metadata.json`:
   plugin metadata (id `glance`, from the CMake target name; shown as

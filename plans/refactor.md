@@ -13,15 +13,21 @@ then by the user (log out and in, the smoke test below).
    layout size, parking scale, fitting scale, spreading piles, small rect
    helpers) to `kwin/geometry.h/.cpp`, taking plain rects and sizes
    instead of `Window*`. Qt Test tests in `kwin/tests/`, no KWin needed.
-2. **One per-window state record.** `m_parked`, `m_wasFull`, the recent
-   list and the rest merged into one struct per window, erased in one
-   place when a window closes.
-3. **Self-contained features become components**, one commit each:
-   clips (finding 4's fixes land here), Alt+Tab (hunt, map, label),
-   declutter, hover previews, Meta+wheel.
-4. **The coupled core:** dragging and Meta+drag, parking and animation,
-   input routing. `Glance` becomes a coordinator that owns the components
-   and decides, in one visible place, which one gets an input event first.
+2. **ParkedWindows** (`kwin/parked.h/.cpp`): the parked windows, their
+   places, animation, making room, where a window is drawn, the draw
+   transform. Every feature builds on it, so it comes first (decided with
+   the user 2026-10-04: components get a reference to the parts they
+   need, not the whole `Glance`, so dependencies show in constructors).
+   Also absorbs the old "one per-window record" stage: per-window state
+   was only `m_parked` and `m_wasFull`; the latter deliberately outlives
+   a window's parked entry, so it stays a separate set, and moves with
+   the keyboard ladder (its only user).
+3. **Features become components**, one commit each: clips (finding 4's
+   fixes land here), Alt+Tab (hunt, map, label), declutter, hover
+   previews, Meta+wheel.
+4. **Dragging and input routing.** `Glance` becomes a coordinator that
+   owns the components and decides, in one visible place, which one gets
+   an input event first.
 
 Target: a dozen files of 150-500 lines, plus a small `glance.cpp`.
 
@@ -29,6 +35,10 @@ Target: a dozen files of 150-500 lines, plus a small `glance.cpp`.
 - Stage 1 done 2026-10-04: tuning.h, geometry.h/.cpp (glance-core
   library), 30 unit tests; main.cpp 3,857 -> 3,534 lines. Checked by the
   user.
+- Stage 2 built 2026-10-04: ParkedWindows in parked.h/.cpp (main.cpp
+  3,534 -> 3,157 lines); `m_wasFull` stays in Glance for now (only the
+  keyboard ladder uses it; it goes with that code later). Headless check:
+  minimize parks and draws correctly. Checked by the user.
 
 ## Smoke test (the user, after each stage, ~5 minutes)
 1. Drag a window to each edge: it shrinks; drop it in a stash and in

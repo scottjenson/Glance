@@ -51,6 +51,15 @@ It is also a correctness bug with a second monitor. The frame is full layout siz
 
 ### 2. Direct scanout is blocked while anything is parked
 
+**Status (2026-10-04):** built (`Glance::blocksDirectScanout`): blocks
+only during a drag, a bounce, the Alt+Tab map, a clip drag or a parked
+window's animation. KWin's scanout check maps items through their
+transforms, so parked windows at rest are accounted for; it also covers
+overlay planes (e.g. a video in a window), not just full screen. Can't
+be seen in the VM (no scanout on VMware's GPU); the user's check is that
+nothing looks different. Low priority for the user: full screen makes
+little sense on an ultrawide, but it's cheap and right.
+
 **Where:** `isActive()` (main.cpp:349) is true whenever `m_parked` is not empty, which in Glance is nearly always. `Effect::blocksDirectScanout()` defaults to `true` (kwin effect/effect.cpp:535), and KWin skips direct scanout if any active effect blocks it.
 
 **Why it matters:** a fullscreen video or game can normally be sent straight to the display, skipping composition. With Glance loaded and one icon parked, every frame is composited: more GPU work, more power, a little more latency. This is invisible in the VM but real on the target desktops.

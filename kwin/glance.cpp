@@ -93,6 +93,17 @@ public:
         return !m_parking.empty() || m_drag.window() || m_focusRing.bouncing() || m_altTab.mapShown() || m_clips.dragging();
     }
 
+    // Direct scanout (a full-screen window, or a video on an overlay plane,
+    // sent to the display without compositing) only while nothing is drawn
+    // in paint hooks: KWin's scanout check knows item transforms (parked
+    // windows at rest) but not what paintWindow changes (the bounce, the
+    // map, a dragged clip) or what is about to move.
+    bool blocksDirectScanout() const override
+    {
+        return m_drag.window() || m_focusRing.bouncing() || m_altTab.mapShown() || m_clips.dragging()
+            || m_parking.anyAnimating();
+    }
+
     void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
     {
         if (m_parking.isParked(w->window()) || w->window() == m_drag.window()) {

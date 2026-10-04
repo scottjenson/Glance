@@ -165,6 +165,8 @@
 #include <window.h>
 #include <workspace.h>
 
+#include "geometry.h"
+
 #include <KGlobalAccel>
 
 #include <QAction>
@@ -204,6 +206,7 @@
 #include <unistd.h>
 
 using namespace KWin;
+using namespace glance;
 
 class Glance : public Effect
 {
@@ -713,33 +716,6 @@ private:
 
     Filter m_filter;
 
-    enum class Side { Left, Right };
-    // Where a window is, for Meta+Left/Right. Each side has a parking area, a
-    // stash and a half of main; Full is all of main (see Meta+Down); Free is
-    // anywhere else.
-    enum class Place { ParkingLeft, StashLeft, HalfLeft, HalfRight, StashRight, ParkingRight, Full, Free };
-
-    // --- Tuning knobs ---
-    // Width of the left and right edge zones, where shrinking happens, as a
-    // fraction of the screen width: main (the middle half) stays full size.
-    static constexpr qreal zoneFraction = 0.25;
-    // Window size at the very edge of the screen (1.0 = full size).
-    static constexpr qreal minScale = 0.15;
-    // But no narrower than this (logical pixels): narrow windows (clips,
-    // small dialogs) would be specks at minScale (see parkingScale).
-    static constexpr qreal parkingMinWidth = 180.0;
-    // Parked windows drawn smaller than this (relative to the original size)
-    // act like icons: drag anywhere to move, click passes through. Larger
-    // ones stay normal windows, so their content keeps every interaction.
-    static constexpr qreal iconBelow = 0.25;
-    // How far (logical pixels) a press on an icon must move to become a drag.
-    static constexpr qreal dragThreshold = 6.0;
-    // Dropped at this scale or larger, a window goes back to full size.
-    static constexpr qreal parkBelow = 0.99;
-    // On parking, the app is resized no narrower than this (keeping its
-    // shape), so web pages switch to their phone layout.
-    static constexpr qreal minLayoutWidth = 400.0;
-
     // A parked window, or one being resized back to its original size.
     struct Parked
     {
@@ -1150,147 +1126,15 @@ private:
     }
 
 
-    // A window counts as being in a half of main when its horizontal
-    // extent and the half's share at least this much (intersection over
-    // union), so a slightly moved or resized one still does.
-    static constexpr qreal halfMatch = 0.8;
-
-    // Hover previews: how much a hovered icon grows, the wait before the
-    // first one opens, and the grace before one closes after the pointer
-    // left.
-    static constexpr qreal previewGrow = 2.0;
-    static constexpr std::chrono::milliseconds previewDelay{300};
-    static constexpr std::chrono::milliseconds previewGrace{300};
-
-    // Meta+wheel (see metaWheel): size change per unit of scroll (a mouse
-    // wheel notch is 15 units; touchpads send smaller, more frequent steps),
-    // the smallest size a window in main gets (logical pixels), and how
-    // long after the last scroll a stashed window's app gets its new size.
-    static constexpr qreal wheelStepWheel = 0.1 / 15.0;
-    static constexpr qreal wheelStepFinger = 0.1 / 40.0;
-    static constexpr qreal wheelMinWidth = 300.0;
-    static constexpr qreal wheelMinHeight = 200.0;
-    static constexpr std::chrono::milliseconds wheelSettle{400};
-    // A Meta press counts as a tap (opens KDE's launcher) between these (see
-    // metaKey).
-    static constexpr std::chrono::microseconds metaTapMin{10'000};
-    static constexpr std::chrono::microseconds metaTapMax{400'000};
-
-    // Where clips are saved, relative to the home folder, and the clip
-    // app's app id (kwin/clip/main.cpp), which tells clip windows apart.
-    static constexpr const char *clipsFolder = "Clips";
-    static constexpr const char *clipAppId = "org.glance.Clip";
-    // How long a pasted (moved) clip may take to close before it is shown
-    // back in its place.
-    static constexpr std::chrono::milliseconds clipCloseWait{1500};
-    // The parking band: this close to a screen edge (fraction of the edge
-    // zone's width), dropped text becomes a parking icon (see placeClip),
-    // and a snapping drag snaps to parking (see snapTargetAt).
-    static constexpr qreal parkingBand = 0.15;
-    // How long to wait for a dragging app to hand over its text, and its
-    // image (it may encode it first).
-    static constexpr std::chrono::milliseconds clipTimeout{2000};
-    static constexpr std::chrono::milliseconds clipImageTimeout{6000};
-
-    // Width of the focus ring on screen (logical pixels).
-    static constexpr qreal ringWidth = 4.0;
-    // Bounce of a window getting the focus ring: its scale frame by
-    // frame (the first is shown at once), and the time between frames.
-    static constexpr qreal bounceFrames[] = {1.0, 0.99, 0.98, 0.99, 1.0};
-    static constexpr std::chrono::milliseconds bounceStep{60};
-
-    // Scale of a window in a stash when put there with the keyboard, and the
-    // most of the zone's width it may take there.
-    static constexpr qreal stashScale = 0.5;
-    static constexpr qreal stashMaxWidth = 0.6;
-    // Length of keyboard moves and making-room animations.
-    static constexpr std::chrono::milliseconds animationTime{180};
-    // Vertical gap between windows that made room for each other.
-    static constexpr qreal arrangeGap = 8.0;
-    // Meta+drag acceleration (see leadStep): the highest gain, reached after
-    // moving leadBuild (fraction of the screen width) in one direction; a
-    // reversal is this much movement the other way (less is jitter); below
-    // leadSlow (logical px/s over the last leadSampleTime) it's 1:1 again.
-    // Pause to snap: holding still this long snaps; the middle band of the
-    // screen (fraction of its width) where it snaps to all of main.
-    static constexpr qreal leadMaxGain = 4.0;
-    static constexpr qreal leadBuild = 0.05;
-    static constexpr qreal reversalJitter = 5.0;
-    static constexpr qreal leadSlow = 300.0;
-    static constexpr std::chrono::milliseconds leadSampleTime{80};
-    static constexpr std::chrono::milliseconds snapDwell{500};
-    // Alt+Tab (see switchKey): Alt held this long after Tab shows the map;
-    // the map's scale (0.5: the desktop fits in main's width); how long it
-    // takes to open (shrink and spread at once) and to close;
-    // the brightness of windows other than the selection. Windows
-    // overlapping more than pileOverlap (of the smaller one's area) form a
-    // pile; the gap between spread windows, and their smallest scale.
-    static constexpr std::chrono::milliseconds holdDelay{200};
-    static constexpr qreal mapScale = 0.5;
-    static constexpr std::chrono::milliseconds mapTime{200};
-    static constexpr qreal mapDim = 0.45;
-    static constexpr qreal pileOverlap = 0.1;
-    static constexpr qreal spreadGap = 12.0;
-    static constexpr qreal spreadMinScale = 0.05;
-    // The label (logical pixels): icon size, title text size, the widest
-    // the title gets (longer ones are cut with "..."), padding, gap between
-    // icon and title, corner radius.
-    static constexpr qreal labelIconSize = 40.0;
-    static constexpr int labelTextSize = 22;
-    static constexpr qreal labelMaxWidth = 600.0;
-    static constexpr qreal labelPadding = 10.0;
-    static constexpr qreal labelGap = 10.0;
-    static constexpr qreal labelRadius = 12.0;
-    static constexpr qreal snapFullBand = 0.2;
-
-    // The places Meta+Left/Right and gestures step along.
-    static constexpr Place placeOrder[] = {Place::ParkingLeft, Place::StashLeft, Place::HalfLeft,
-                                           Place::HalfRight, Place::StashRight, Place::ParkingRight};
-    static int placeIndex(Place place)
-    {
-        return int(std::find(std::begin(placeOrder), std::end(placeOrder), place) - std::begin(placeOrder));
-    }
 
     Place placeOf(Window *window) const
     {
         const RectF screen = window->output()->geometryF();
         auto it = m_parked.find(window);
         if (it != m_parked.end() && !it->second.restoring) {
-            const Parked &parked = it->second;
-            const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-            const bool tiny = parked.shown.width() / parked.original.width() < parkingScale(parked.original) + 0.02;
-            if (tiny) {
-                return left ? Place::ParkingLeft : Place::ParkingRight;
-            }
-            return left ? Place::StashLeft : Place::StashRight;
+            return parkedPlace(it->second.shown, it->second.original, screen);
         }
-        const RectF frame = window->moveResizeGeometry();
-        return placeOfFrame(window, QRectF(frame.x(), frame.y(), frame.width(), frame.height()));
-    }
-
-    // For a window not parked: all of main or a half of it (see halfMatch), or
-    // free.
-    Place placeOfFrame(Window *window, const QRectF &frame) const
-    {
-        const RectF screen = window->output()->geometryF();
-        const qreal zoneWidth = screen.width() * zoneFraction;
-        auto share = [&](qreal x) {
-            const qreal inter = std::min(frame.right(), x + zoneWidth) - std::max(frame.left(), x);
-            const qreal uni = std::max(frame.right(), x + zoneWidth) - std::min(frame.left(), x);
-            return std::max(0.0, inter) / uni;
-        };
-        const qreal mainShare = std::max(0.0, std::min(frame.right(), screen.x() + 3 * zoneWidth) - std::max(frame.left(), screen.x() + zoneWidth))
-            / (std::max(frame.right(), screen.x() + 3 * zoneWidth) - std::min(frame.left(), screen.x() + zoneWidth));
-        if (mainShare >= halfMatch) {
-            return Place::Full;
-        }
-        if (share(screen.x() + zoneWidth) >= halfMatch) {
-            return Place::HalfLeft;
-        }
-        if (share(screen.x() + 2 * zoneWidth) >= halfMatch) {
-            return Place::HalfRight;
-        }
-        return Place::Free;
+        return placeOfFrame(window->moveResizeGeometry(), screen);
     }
 
     // One step towards `side` along: parking L, stash L, half L, half R,
@@ -1371,55 +1215,11 @@ private:
         closeRanks();
     }
 
-    // Where a window of full size `size`, centered at `centerY`, goes in
-    // `place`: for the halves of main its new frame, for a stash or parking
-    // area where it is drawn (a stash at `stash` scale).
+    // Where `window` goes in `place` (see glance::placeRect), on its monitor.
     QRectF placeRect(Window *window, Place place, const QSizeF &size, qreal centerY, qreal stash = stashScale) const
     {
-        const RectF screen = window->output()->geometryF();
-        const RectF area = workspace()->clientArea(MaximizeArea, window);
-        const qreal zoneWidth = screen.width() * zoneFraction;
-        auto topFor = [&](qreal height) {
-            return std::clamp(centerY - height / 2, area.y(), std::max(area.y(), area.y() + area.height() - height));
-        };
-        switch (place) {
-        case Place::HalfLeft:
-        case Place::HalfRight: {
-            const qreal height = std::min(size.height(), area.height());
-            const qreal x = screen.x() + (place == Place::HalfLeft ? zoneWidth : 2 * zoneWidth);
-            return QRectF(QPointF(x, topFor(height)), QSizeF(zoneWidth, height));
-        }
-        case Place::Full: {
-            const qreal height = std::min(size.height(), area.height());
-            return QRectF(QPointF(screen.x() + zoneWidth, topFor(height)), QSizeF(2 * zoneWidth, height));
-        }
-        case Place::StashLeft:
-        case Place::StashRight:
-        case Place::ParkingLeft:
-        case Place::ParkingRight: {
-            // In a stash at most stashMaxWidth of the zone wide (wide windows,
-            // e.g. from all of main, shrink more), but still above parking size.
-            const qreal scale = place == Place::StashLeft || place == Place::StashRight
-                ? std::max(parkingScale(size) + 0.03, std::min(stash, zoneWidth * stashMaxWidth / size.width()))
-                : parkingScale(size);
-            const QSizeF drawn = size * scale;
-            // A stash column is centered in its zone (whatever the windows'
-            // widths, it lines up, and both sides keep some room); parking
-            // is against the screen edge.
-            const bool left = place == Place::StashLeft || place == Place::ParkingLeft;
-            qreal x;
-            if (place == Place::StashLeft || place == Place::StashRight) {
-                const qreal center = left ? screen.x() + zoneWidth / 2 : screen.x() + screen.width() - zoneWidth / 2;
-                x = center - drawn.width() / 2;
-            } else {
-                x = left ? screen.x() : screen.x() + screen.width() - drawn.width();
-            }
-            return QRectF(QPointF(x, topFor(drawn.height())), drawn);
-        }
-        case Place::Free:
-            break;
-        }
-        return QRectF();
+        return glance::placeRect(place, size, centerY, window->output()->geometryF(),
+                                 workspace()->clientArea(MaximizeArea, window), stash);
     }
 
     // Put a window in `place` (see placeRect), gliding from `from`.
@@ -1523,31 +1323,6 @@ private:
 
     // --- Dragging ---
 
-    // How far a box spanning [x, x + width) must move horizontally to lie
-    // inside `screen`. A box wider than the screen keeps its left edge visible.
-    static qreal shiftOntoScreen(qreal x, qreal width, const RectF &screen)
-    {
-        const qreal minShift = screen.x() - x;
-        const qreal maxShift = (screen.x() + screen.width()) - (x + width);
-        if (minShift > maxShift) {
-            return minShift;
-        }
-        return std::clamp(0.0, minShift, maxShift);
-    }
-
-    // Scale at which a window, scaled around the cursor, has its edge on one
-    // side at the point of the curve: full size until that edge enters the
-    // edge zone, then falling linearly to minScale at the screen edge.
-    // `cursorToScreenEdge` and `cursorToWindowEdge` are measured towards the
-    // same side, the latter at full size. The drawn edge is at distance
-    // d = cursorToScreenEdge - cursorToWindowEdge * s from the screen edge,
-    // and s = minScale + (1 - minScale) * d / zoneWidth; solved for s:
-    static qreal edgeScale(qreal cursorToScreenEdge, qreal cursorToWindowEdge, qreal zoneWidth)
-    {
-        const qreal k = (1.0 - minScale) / zoneWidth;
-        return (minScale + k * cursorToScreenEdge) / (1.0 + k * cursorToWindowEdge);
-    }
-
     // KWin has moved the dragged window so the grabbed spot is under the
     // cursor. Draw it scaled around the cursor by the edge rule, or, while
     // Meta is held and the drag matches a gesture, at the gesture's target;
@@ -1610,7 +1385,7 @@ private:
         QRectF shown = want;
         if (m_dragAnimating) {
             const auto elapsed = std::chrono::steady_clock::now() - m_dragAnimStart;
-            const qreal t = std::clamp(std::chrono::duration<qreal>(elapsed) / animationTime, 0.0, 1.0);
+            const qreal t = std::clamp(std::chrono::duration<qreal>(elapsed) / glance::animationTime, 0.0, 1.0);
             if (t >= 1.0) {
                 m_dragAnimating = false;
             } else {
@@ -1920,31 +1695,10 @@ private:
         if (isClipInParking(window, shown.width(), original)) {
             return QSizeF(2 * std::round(shown.width()), 2 * std::round(shown.height()));
         }
-        const QSizeF appMin = window->clientSizeToFrameSize(window->minSize());
-        auto fits = [&](const QSizeF &size) {
-            return size.width() >= minLayoutWidth && size.width() >= appMin.width()
-                && size.height() >= appMin.height() && size.width() <= original.width();
-        };
-        for (const qreal ratio : {1.0, 2.0}) {
-            const QSizeF size = (shown * ratio).toSize();
-            if (fits(size)) {
-                return size;
-            }
-        }
-        const qreal k = std::max({minLayoutWidth / shown.width(), appMin.width() / shown.width(),
-                                  appMin.height() / shown.height()});
-        const QSizeF size = (shown * k).toSize();
-        return size.width() > original.width() ? original : size;
+        return glance::layoutSize(shown, original, window->clientSizeToFrameSize(window->minSize()));
     }
 
     // --- Parked windows ---
-
-    // The scale of a window of full size `original` in parking: minScale,
-    // or more if that would be narrower than parkingMinWidth.
-    static qreal parkingScale(const QSizeF &original)
-    {
-        return std::clamp(parkingMinWidth / original.width(), minScale, 1.0);
-    }
 
     bool isParked(Window *window) const
     {
@@ -1962,7 +1716,7 @@ private:
     static qreal progress(const Parked &parked)
     {
         const auto elapsed = std::chrono::steady_clock::now() - parked.start;
-        return std::clamp(std::chrono::duration<qreal>(elapsed) / animationTime, 0.0, 1.0);
+        return std::clamp(std::chrono::duration<qreal>(elapsed) / glance::animationTime, 0.0, 1.0);
     }
 
     // Where a managed window's frame is to be drawn right now: `shown`, or
@@ -1975,12 +1729,6 @@ private:
         }
         const qreal t = progress(parked);
         return lerpRect(parked.from, target, 1.0 - std::pow(1.0 - t, 3));
-    }
-
-    static QRectF lerpRect(const QRectF &a, const QRectF &b, qreal e)
-    {
-        return QRectF(a.x() + (b.x() - a.x()) * e, a.y() + (b.y() - a.y()) * e,
-                      a.width() + (b.width() - a.width()) * e, a.height() + (b.height() - a.height()) * e);
     }
 
     // Where a window is drawn now (managed or not).
@@ -2013,10 +1761,16 @@ private:
     int areaOf(Window *window) const
     {
         const Parked &parked = m_parked.at(window);
-        const RectF screen = window->output()->geometryF();
-        const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-        const bool tiny = parked.shown.width() / parked.original.width() < parkingScale(parked.original) + 0.02;
-        return (left ? 0 : 2) + (tiny ? 0 : 1);
+        switch (parkedPlace(parked.shown, parked.original, window->output()->geometryF())) {
+        case Place::ParkingLeft:
+            return 0;
+        case Place::StashLeft:
+            return 1;
+        case Place::ParkingRight:
+            return 2;
+        default:
+            return 3;
+        }
     }
 
     static bool isParkingArea(int area)
@@ -2226,15 +1980,13 @@ private:
     // stash) at which `windows`, at their full sizes, fit in one column.
     qreal fittingScale(LogicalOutput *output, const std::vector<Window *> &windows) const
     {
-        const RectF area = workspace()->clientArea(MaximizeArea, output);
-        qreal heights = 0;
+        std::vector<qreal> heights;
         for (Window *window : windows) {
             auto it = m_parked.find(window);
-            heights += it != m_parked.end() && !it->second.restoring ? it->second.original.height()
-                                                                     : window->moveResizeGeometry().height();
+            heights.push_back(it != m_parked.end() && !it->second.restoring ? it->second.original.height()
+                                                                            : window->moveResizeGeometry().height());
         }
-        const qreal room = area.height() - arrangeGap * (int(windows.size()) - 1);
-        return std::clamp(room / heights, minScale + 0.03, stashScale);
+        return glance::fittingScale(heights, workspace()->clientArea(MaximizeArea, output).height());
     }
 
     // Everything back as it was before the last declutter (windows closed
@@ -2448,22 +2200,6 @@ private:
             resizeInStash(window, factor, event->position);
         }
         return true;
-    }
-
-    // Scale a box around `pos` from size `from` to `to`.
-    static QPointF scaledTopLeft(const QPointF &topLeft, const QPointF &pos, const QSizeF &from, const QSizeF &to)
-    {
-        return QPointF(pos.x() - (pos.x() - topLeft.x()) * to.width() / from.width(),
-                       pos.y() - (pos.y() - topLeft.y()) * to.height() / from.height());
-    }
-
-    // Moved as little as needed to lie within `area` (a bigger box keeps
-    // its top left corner in).
-    static QRectF keptIn(const QRectF &box, const RectF &area)
-    {
-        const qreal x = std::clamp(box.x(), area.x(), std::max(area.x(), area.x() + area.width() - box.width()));
-        const qreal y = std::clamp(box.y(), area.y(), std::max(area.y(), area.y() + area.height() - box.height()));
-        return QRectF(QPointF(x, y), box.size());
     }
 
     void resizeInMain(Window *window, qreal factor, const QPointF &pos)
@@ -3351,13 +3087,10 @@ private:
         return lerpRect(from, it != m_map->spread.end() ? it->second : toMap(from), m_mapOpen);
     }
 
-    // Piles in the map: windows overlapping meaningfully (more than
-    // pileOverlap of the smaller one; parked windows stay out, their
-    // columns and slight stash overlaps don't count). The front window of
-    // a pile stays; the others go, alternately, into a row above and a row
-    // below the pile, within its width and the space up to the screen's
-    // edge, shrunk until the row fits. So every window can be counted and
-    // pointed at. Returns where they go (global, at map scale).
+    // Piles in the map (see glance::spreadPiles), spread so every window
+    // can be counted and pointed at. Parked windows stay out: their columns
+    // and slight stash overlaps don't count. Returns where they go (global,
+    // at map scale).
     std::map<Window *, QRectF> spreadPiles(const QRectF &screen) const
     {
         // Free windows in the map, front first, where the map draws them.
@@ -3368,72 +3101,16 @@ private:
                 items.emplace_back(*it, toMap(currentlyDrawn(*it)));
             }
         }
-        const auto area = [](const QRectF &r) {
-            return r.width() * r.height();
-        };
-        // Join overlapping windows into piles (union-find).
-        const int n = int(items.size());
-        std::vector<int> root(n);
-        std::iota(root.begin(), root.end(), 0);
-        const auto find = [&root](int i) {
-            while (root[i] != i) {
-                i = root[i] = root[root[i]];
-            }
-            return i;
-        };
-        for (int i = 0; i < n; ++i) {
-            for (int j = i + 1; j < n; ++j) {
-                const QRectF &a = items[i].second;
-                const QRectF &b = items[j].second;
-                const QRectF overlap = a & b;
-                if (!overlap.isEmpty() && area(overlap) > pileOverlap * std::min(area(a), area(b))) {
-                    root[find(j)] = find(i);
-                }
-            }
+        std::vector<QRectF> rects;
+        for (const auto &item : items) {
+            rects.push_back(item.second);
         }
-        std::map<int, std::vector<int>> piles; // members front first
-        for (int i = 0; i < n; ++i) {
-            piles[find(i)].push_back(i);
-        }
-
+        const auto places = glance::spreadPiles(rects, screen);
         std::map<Window *, QRectF> spread;
-        // Lay out a row of windows between `left` and `right`, in the band
-        // from `top` to `bottom`: centered, against the pile.
-        const auto row = [&](const std::vector<int> &members, qreal left, qreal right, qreal top, qreal bottom,
-                             bool above) {
-            if (members.empty()) {
-                return;
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (places[i]) {
+                spread[items[i].first] = *places[i];
             }
-            qreal width = 0;
-            qreal height = 0;
-            for (int m : members) {
-                width += items[m].second.width();
-                height = std::max(height, items[m].second.height());
-            }
-            const qreal gaps = spreadGap * (members.size() - 1);
-            const qreal k = std::clamp(std::min((bottom - top) / height, (right - left - gaps) / width), spreadMinScale, 1.0);
-            qreal x = (left + right) / 2 - (width * k + gaps) / 2;
-            for (int m : members) {
-                const QSizeF size = items[m].second.size() * k;
-                spread[items[m].first] = QRectF(QPointF(x, above ? bottom - size.height() : top), size);
-                x += size.width() + spreadGap;
-            }
-        };
-        for (const auto &[pile, members] : piles) {
-            if (members.size() < 2) {
-                continue;
-            }
-            QRectF bounds = items[members.front()].second;
-            for (int m : members) {
-                bounds |= items[m].second;
-            }
-            std::vector<int> above;
-            std::vector<int> below;
-            for (size_t i = 1; i < members.size(); ++i) {
-                (i % 2 ? above : below).push_back(members[i]);
-            }
-            row(above, bounds.left(), bounds.right(), screen.top() + spreadGap, bounds.top() - spreadGap, true);
-            row(below, bounds.left(), bounds.right(), bounds.bottom() + spreadGap, screen.bottom() - spreadGap, false);
         }
         return spread;
     }

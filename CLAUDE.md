@@ -73,6 +73,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [plans/backlog.md](plans/backlog.md) | Agreed-but-unbuilt items, polish, packaging, ideas |
 | [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text |
 | [plans/code-review.md](plans/code-review.md) | Architecture/performance review (2026-10-03): 5 fixes to make, what to keep; read before touching painting, input routing or clips |
+| [plans/refactor.md](plans/refactor.md) | Splitting main.cpp into components (review finding 5), in stages; the smoke test to run after each |
 
 When a plan is built, move its design into a `docs/` file and update the
 table and Status.
@@ -155,7 +156,10 @@ shows clips with the icon only).
   user's (untracked).
 
 ## Files
-- `kwin/main.cpp`: the effect. `kwin/clip/main.cpp`: glance-clip, the
+- `kwin/main.cpp`: the effect (being split up, [plans/refactor.md](plans/refactor.md)).
+  `kwin/tuning.h`: all tuning constants and the Place enum (namespace
+  `glance`). `kwin/geometry.h/.cpp`: pure geometry (no KWin), built as
+  the `glance-core` library; `kwin/tests/`: its Qt Test unit tests. `kwin/clip/main.cpp`: glance-clip, the
   clip app (a second target in the same CMake project, built to
   `kwin/build/bin/glance-clip`; [docs/clips.md](docs/clips.md)). `kwin/metadata.json`:
   plugin metadata (id `glance`, from the CMake target name; shown as
@@ -196,6 +200,7 @@ shows clips with the icon only).
 ## Build and run
     cmake -S kwin -B kwin/build        # once
     cmake --build kwin/build
+    ctest --test-dir kwin/build        # unit tests, no KWin needed
     ~/Glance/kwin/run-nested.sh        # user runs it, from Konsole in the VM window
 
 Success check: log has `glance: effect loaded`. KWin loads effects at

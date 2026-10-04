@@ -68,6 +68,20 @@ little sense on an ultrawide, but it's cheap and right.
 
 ### 3. Animations repaint the whole screen every frame
 
+**Status (2026-10-04):** built, waiting for the user's test. Parked
+animations and drag glides no longer repaint the screen: the transform
+change damages what moved, and `Item::scheduleFrame` (no damage) keeps
+them ticking (`ParkedWindows::scheduleFrames`,
+`WindowDrag::postPaintScreen`). The map asks for frames only while it
+opens or closes, and a Tab only repaints with the map up (the ring item
+repaints itself). The bounce repaints its window's bounds. One clock per
+frame: `advance()` stores each animating window's rectangle
+(`Parked::current`) and `displayRect` returns it, so drawing, `pick` and
+re-anchoring agree. Left as is: a clip drag and the map still redraw the
+whole screen on each of their frames, since KWin's "transformed windows"
+painting mode (needed for them) ignores damage. Headless: parking a big
+window leaves no ghost; the map opens fully.
+
 **Where:** `postPaintScreen()` (main.cpp:480) calls `effects->addRepaintFull()` every frame while any parked window animates, while a drag glides, and for the whole time the Alt+Tab map is up, even after it has finished opening and nothing moves. `animate()`, the bounce timers, `step()` and clip-drag motion do the same.
 
 **Why it matters:** this display is about 6000×2450 device pixels. A full repaint re-composites every window on it, every frame, so a 180 ms parking glide costs as much as redrawing the whole desktop ~11 times. `Item::setTransform()` already schedules a repaint of the item's old and new bounds (kwin scene/item.cpp:253), so `applyParked()` alone damages exactly what moved.

@@ -65,9 +65,11 @@ void WindowDrag::prePaintScreen()
     }
 }
 
-bool WindowDrag::animating() const
+void WindowDrag::postPaintScreen()
 {
-    return m_dragAnimating;
+    if (m_dragged && m_dragAnimating && m_dragged->windowItem()) {
+        m_dragged->windowItem()->scheduleFrame();
+    }
 }
 
 // KWin has moved the dragged window so the grabbed spot is under the

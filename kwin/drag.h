@@ -50,10 +50,11 @@ public:
     void finished(Window *window);
     // Meta pressed or released: switch between gesture and normal drag.
     void modifiersChanged();
-    // Each frame: a glide between the two goes on. animating says whether
-    // one is under way (the screen is repainted for it).
+    // Each frame: a glide between the two goes on (moving the window
+    // repaints what changed); after painting, the next frame is asked for
+    // while it does.
     void prePaintScreen();
-    bool animating() const;
+    void postPaintScreen();
 
 private:
     using Parked = ParkedWindows::Parked;

@@ -73,6 +73,9 @@ public:
     // is up: then every window is painted with a finite region (see
     // Glance::paintWindow).
     void prePaintScreen(KWin::ScreenPrePaintData &data);
+    // While the map opens or closes, every frame is needed; fully open,
+    // only when something changes.
+    void postPaintScreen();
     void prePaintWindow(Window *window, KWin::WindowPrePaintData &data);
     bool paintWindow(Window *window, KWin::WindowPaintData &data);
     void paintScreen(const KWin::RenderTarget &renderTarget, const KWin::RenderViewport &viewport,

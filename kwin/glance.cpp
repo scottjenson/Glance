@@ -161,14 +161,13 @@ public:
         Effect::prePaintScreen(data);
     }
 
+    // Ask for the next frame only where something still moves: changing a
+    // window's transform repaints just what it covered and covers now.
     void postPaintScreen() override
     {
-        if (m_drag.animating() || m_altTab.mapShown()) {
-            effects->addRepaintFull();
-        }
-        if (m_parking.anyAnimating()) {
-            effects->addRepaintFull();
-        }
+        m_parking.scheduleFrames();
+        m_drag.postPaintScreen();
+        m_altTab.postPaintScreen();
         Effect::postPaintScreen();
     }
 

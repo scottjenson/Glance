@@ -268,12 +268,10 @@ qreal ParkedWindows::progress(const Parked &parked)
 
 QRectF ParkedWindows::displayRect(const Parked &parked)
 {
-    const QRectF &target = parked.preview ? *parked.preview : parked.shown;
-    if (!parked.animating) {
-        return target;
+    if (parked.animating) {
+        return parked.current;
     }
-    const qreal t = progress(parked);
-    return lerpRect(parked.from, target, 1.0 - std::pow(1.0 - t, 3));
+    return parked.preview ? *parked.preview : parked.shown;
 }
 
 qreal ParkedWindows::scaleOf(Window *window) const
@@ -332,8 +330,11 @@ void ParkedWindows::animate(Window *window, const QRectF &from)
     it->second.from = from;
     it->second.start = std::chrono::steady_clock::now();
     it->second.animating = true;
+    it->second.current = from;
     applyParked(window);
-    effects->addRepaintFull();
+    if (window->windowItem()) {
+        window->windowItem()->scheduleFrame();
+    }
 }
 
 void ParkedWindows::advance()
@@ -341,14 +342,27 @@ void ParkedWindows::advance()
     std::vector<Window *> animating;
     for (auto &[window, parked] : m_parked) {
         if (parked.animating) {
-            if (progress(parked) >= 1.0) {
+            const qreal t = progress(parked);
+            if (t >= 1.0) {
                 parked.animating = false;
+            } else {
+                const QRectF &target = parked.preview ? *parked.preview : parked.shown;
+                parked.current = lerpRect(parked.from, target, 1.0 - std::pow(1.0 - t, 3));
             }
             animating.push_back(window);
         }
     }
     for (Window *window : animating) {
         applyParked(window);
+    }
+}
+
+void ParkedWindows::scheduleFrames()
+{
+    for (const auto &[window, parked] : m_parked) {
+        if (parked.animating && window->windowItem()) {
+            window->windowItem()->scheduleFrame();
+        }
     }
 }
 

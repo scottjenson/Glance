@@ -85,10 +85,13 @@ public:
         bool restoring = false;
         // Drawn here instead of `shown` while hovered (see HoverPreviews::update).
         std::optional<QRectF> preview = std::nullopt;
-        // Animating from `from` to `shown` since `start`.
+        // Animating from `from` to `shown` since `start`; `current`: where
+        // it is drawn in this frame (see advance), so drawing and input
+        // agree on one place per frame.
         bool animating = false;
         QRectF from = {};
         std::chrono::steady_clock::time_point start = {};
+        QRectF current = {};
     };
 
     // --- Which windows ---
@@ -145,8 +148,8 @@ public:
 
     // --- Drawing ---
 
-    // Where a managed window's frame is to be drawn right now: `shown` (or
-    // its preview), or on the way there (ease-out).
+    // Where a managed window's frame is drawn: `shown` (or its preview), or
+    // while animating where this frame has it (see advance).
     static QRectF displayRect(const Parked &parked);
     // The scale a managed window's current frame is drawn at.
     qreal scaleOf(Window *window) const;
@@ -160,10 +163,14 @@ public:
     void applyParked(Window *window);
     // Start animating a parked window from `from` to its `shown` place.
     void animate(Window *window, const QRectF &from);
-    // Each frame: redraw animating windows at their current place;
-    // finished ones settle.
+    // Each frame, before painting: move animating windows on (ease-out);
+    // finished ones settle. Changing a window's transform repaints just
+    // what it covered and covers now.
     void advance();
     bool anyAnimating() const;
+    // After painting: ask for the next frame where windows are animating
+    // (no damage: advance moves them, which damages what changed).
+    void scheduleFrames();
     // Set how any window is drawn (see applyParked; dragging uses it too).
     void setDrawTransform(Window *window, const QTransform &transform);
     // The window really visible at `pos`, like InputRedirection::findToplevel

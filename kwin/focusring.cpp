@@ -106,10 +106,14 @@ void FocusRing::startBounce(Window *window)
                 return;
             }
             m_bounceScale = bounceFrames[i];
+            // Scaled down around its center, it stays within its own
+            // bounds (the ring and shadow included): repaint just those.
+            if (m_bounce->windowItem()) {
+                m_bounce->windowItem()->scheduleRepaint(m_bounce->windowItem()->boundingRect());
+            }
             if (i == frames - 1) {
                 m_bounce = nullptr;
             }
-            effects->addRepaintFull();
         });
     }
 }

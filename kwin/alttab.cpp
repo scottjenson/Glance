@@ -173,7 +173,9 @@ void AltTab::step(int direction)
         }
     }
     Q_EMIT bounce(mapSelected()); // the ring (and bounce) go to the selection
-    effects->addRepaintFull();
+    if (m_map) {
+        effects->addRepaintFull(); // the selection is undimmed, the label moves
+    }
 }
 
 // The selected window: the switch's, or the chosen one while the map
@@ -345,6 +347,13 @@ void AltTab::prePaintScreen(ScreenPrePaintData &data)
         data.mask |= Effect::PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS;
     }
     Q_EMIT ringChanged(); // its width follows the map's scale
+}
+
+void AltTab::postPaintScreen()
+{
+    if (m_map && (m_map->closing || m_mapOpen < 1.0)) {
+        effects->addRepaintFull();
+    }
 }
 
 void AltTab::prePaintWindow(Window *window, WindowPrePaintData &data)

@@ -86,7 +86,7 @@ stage 4: kwin/glance.cpp is a small coordinator, the rest are components
 2026-10-04: every window in parking is an icon, whatever its scale
 (Firefox at its 500 px minimum got no hover preview). Left in the code
 review: findings 2 (direct scanout) and 3 (full-screen repaints); finding
-1 step 1 is built.
+1 step 1 is done and checked, its hybrid paused until needed.
 
 ### 2026-10-03, end of day
 Running in the user's real Plasma session (via use-in-session.sh; after a

@@ -31,14 +31,15 @@ Five changes, in order of importance. The first three touch every frame or every
 
 ### 1. Re-anchoring moves real frames on every pointer motion
 
-**Status (2026-10-04):** step 1 built, waiting for the user's test:
+**Status (2026-10-04):** step 1 built and checked by the user:
 re-anchoring at most once per refresh for motion and scrolling
 (forwarding in between, a late re-anchor where the pointer stops), at once
 for buttons, and never across to another monitor. Agreed with the user:
 stashed windows must stay fully interactive, so hover behaviour must not
-change. If step 1 works, consider the hybrid (forward motion; move the
-frame only on enter, pause ~100 ms, press, and over the title bar);
-see [docs/dragging-and-parking.md](../docs/dragging-and-parking.md).
+change. The hybrid (forward motion; move the frame only on enter, pause
+~100 ms, press, and over the title bar) is paused: only if step 1 turns
+out not to be enough (user, 2026-10-04); see
+[docs/dragging-and-parking.md](../docs/dragging-and-parking.md).
 
 **Where:** `route()` calls `reanchor()` (main.cpp:3660) for every motion over a parked window (onMotion, main.cpp:609; route, main.cpp:3774), then `pointer->update()` re-picks.
 

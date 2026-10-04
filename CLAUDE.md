@@ -86,8 +86,8 @@ resize/zoom ([docs/meta-wheel.md](docs/meta-wheel.md)) and previews for
 parking icons only (all 2026-10-03). Later on 2026-10-03 (tested): a
 stashed window keeps its size when dragged, Meta+wheel over a parking icon
 sizes its preview, the bounce only on keyboard focus moves, KDE's launcher
-only on a real Meta tap. Built, not yet tested: Meta+drag activates (KDE's
-mouse command switched to "Activate, Raise and Move").
+only on a real Meta tap, Meta+drag activates (KDE's mouse command
+switched to "Activate, Raise and Move"). Nothing uncommitted.
 
 Next: not decided; ask the user. Suggested: stash follow-ups (should small
 stashed windows stop acting like icons? Meta+wheel speed/direction by

@@ -51,6 +51,16 @@ Target: a dozen files of 150-500 lines, plus a small `glance.cpp`.
   state), and finding 4's clip fixes last. main.cpp 3,157 -> 1,580
   lines. Headless check: the Alt+Tab map draws correctly. Checked by the
   user (smoke test, one logout for the whole batch).
+- Stage 4 built 2026-10-04, one commit each: FocusRing (focusring.h/.cpp),
+  KdeIntegration (kde.h/.cpp: KDE settings switched while loaded, the
+  Meta tap), Keyboard (keyboard.h/.cpp; minimize = park became
+  ParkedWindows::minimizeToParking), WindowDrag (drag.h/.cpp; three
+  write-only members dropped), ParkedInput (parkedinput.h/.cpp: routing
+  and icon presses), then main.cpp became glance.cpp, the coordinator
+  (337 lines; its header maps the components, onKey/onMotion/onButton/
+  onAxis are the one place input order is decided). Headless check: map,
+  ring, minimize = park. Waiting for the user's smoke test (all of it:
+  dragging, keyboard and input routing moved).
 
 ## Smoke test (the user, after each stage, ~5 minutes)
 1. Drag a window to each edge: it shrinks; drop it in a stash and in

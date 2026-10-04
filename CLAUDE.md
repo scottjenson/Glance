@@ -73,12 +73,22 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [plans/backlog.md](plans/backlog.md) | Agreed-but-unbuilt items, polish, packaging, ideas |
 | [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text |
 | [plans/code-review.md](plans/code-review.md) | Architecture/performance review (2026-10-03): 5 fixes to make, what to keep; read before touching painting, input routing or clips |
-| [plans/refactor.md](plans/refactor.md) | Splitting main.cpp into components (review finding 5), in stages; the smoke test to run after each |
+| [plans/refactor.md](plans/refactor.md) | Splitting main.cpp into components (review finding 5; done through stage 4); the smoke test to run after changes |
 
 When a plan is built, move its design into a `docs/` file and update the
 table and Status.
 
-## Status (2026-10-03, end of day)
+## Status (2026-10-04)
+The refactor ([plans/refactor.md](plans/refactor.md)) is done through
+stage 4: kwin/glance.cpp is a small coordinator, the rest are components
+(see Files). Stages 1-3 and code review finding 4 (clip limits) were
+checked by the user; stage 4 waits for their smoke test. Also
+2026-10-04: every window in parking is an icon, whatever its scale
+(Firefox at its 500 px minimum got no hover preview). Left in the code
+review: findings 2 (direct scanout) and 3 (full-screen repaints); finding
+1 step 1 is built.
+
+### 2026-10-03, end of day
 Running in the user's real Plasma session (via use-in-session.sh; after a
 rebuild the user logs out and back in). Built, tested by the user and
 committed: everything in the docs table. Latest (all 2026-10-03): a
@@ -98,7 +108,7 @@ candidates: Alt+Tab phase 2 (click in the map etc.,
 clips; open clip questions (clips aren't restored after login; Alt+Tab
 shows clips with the icon only).
 
-## How the effect works (kwin/main.cpp, the basics)
+## How the effect works (kwin/glance.cpp and its components, the basics)
 - It is a KWin **effect**, not a plain `KWin::Plugin`, so `prePaintWindow`
   can call `data.setTransformed()` for scaled windows. Without that, KWin
   clips drawing in unscaled coordinates (`clipQuads` in
@@ -158,17 +168,22 @@ shows clips with the icon only).
   user's (untracked).
 
 ## Files
-- `kwin/main.cpp`: the effect (being split up, [plans/refactor.md](plans/refactor.md)).
+- `kwin/glance.cpp`: the effect, a coordinator: owns the components,
+  hands them window events and painting, and decides in one place which
+  gets an input event first (its header comment maps the components).
   `kwin/tuning.h`: all tuning constants and the Place enum (namespace
   `glance`). `kwin/geometry.h/.cpp`: pure geometry (no KWin), built as
   the `glance-core` library; `kwin/tests/`: its Qt Test unit tests.
   `kwin/parked.h/.cpp`: ParkedWindows, the parked-window model (places,
   animation, making room, draw transforms, and window queries such as
-  `pick`); features use it through `m_parking`. Feature components
-  (each gets references to the parts it needs): `clips.h/.cpp`,
-  `alttab.h/.cpp`, `declutter.h/.cpp`, `previews.h/.cpp` (hover
-  previews), `wheel.h/.cpp` (Meta+wheel). Still in main.cpp: dragging,
-  keyboard, icon presses, focus ring, input routing (refactor stage 4).
+  `pick`, and minimize = park); features use it through `m_parking`.
+  Components (each gets references to the parts it needs):
+  `parkedinput.h/.cpp` (input to parked windows, icon presses),
+  `drag.h/.cpp`, `keyboard.h/.cpp`, `alttab.h/.cpp`,
+  `focusring.h/.cpp`, `previews.h/.cpp` (hover previews),
+  `wheel.h/.cpp` (Meta+wheel), `declutter.h/.cpp`, `clips.h/.cpp`,
+  `kde.h/.cpp` (KDE settings switched while loaded, the Meta tap). Don't
+  name a file input.h: it would shadow KWin's `<input.h>`.
   `kwin/clip/main.cpp`: glance-clip, the
   clip app (a second target in the same CMake project, built to
   `kwin/build/bin/glance-clip`; [docs/clips.md](docs/clips.md)). `kwin/metadata.json`:

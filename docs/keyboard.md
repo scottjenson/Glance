@@ -14,7 +14,7 @@ intercepted by our input filter, active window only.
   them to the sides): two fixed views, always full height, no toggles.
   Meta+Up = the half view: a half of main at full height (stays in its
   half; from all of main the free half if exactly one is free, else left,
-  "when in doubt go left", `freeHalf`; a free window the nearer half).
+  "when in doubt go left", `Keyboard::freeHalf` in kwin/keyboard.cpp; a free window the nearer half).
   Meta+Down = the full view: all of main (`Place::Full`, same 80% IoU
   test as halves) at full height. Neither acts on parked windows.
   Meta+Left/Right from all of main go straight to the stash on that side
@@ -58,7 +58,8 @@ the tap off when it sees a click or scroll during the press, but in its
 GlobalShortcut filter, which runs after ours, so a Meta+wheel or Meta
 click Glance takes left the tap standing; and VMware Fusion sometimes
 sends Command as an instant press+release (see CLAUDE.md). Now only a
-real tap opens the launcher (`metaKey`, `cancelMetaTap`):
+real tap opens the launcher (`KdeIntegration::metaKey`, `cancelMetaTap`,
+kwin/kde.cpp):
 - a click or scroll Glance takes with a modifier held calls it off
   (`Filter::pointerButton`/`pointerAxis`);
 - a press held longer than `metaTapMax` (400 ms) doesn't count (you meant

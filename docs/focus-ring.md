@@ -8,7 +8,7 @@ the Alt+Tab map) the window bounces like a pressed button (user's design): frame
 99%, 100%, 60 ms apart (`bounceFrames`, `bounceStep`; tried before: 3 frames
 to 96% at 150/100 ms, "chunky"; 5 frames to 96%, "too violent"; the user
 wants a tiny wiggle), stepped; every step, no movement-vs-release logic.
-Keyboard only since 2026-10-03 (`bounceRing`): before, any focus change
+Keyboard only since 2026-10-03 (`FocusRing::bounce`): before, any focus change
 bounced (user, 2026-10-02: "any window that gets highlighted for any
 reason"), and clicks, drags and apps taking focus made it busy (a text
 drag bounced windows back and forth). With the mouse the user is looking
@@ -22,7 +22,8 @@ Alt+Tab the selected one ([alt-tab.md](alt-tab.md)); in the map its
 width also allows for the map's scale.
 
 ## How it works
-`updateRing`, `startBounce`, `paintWindow`: the ring is
+The `FocusRing` component (kwin/focusring.h/.cpp): `update`,
+`startBounce`, `paintWindow`: the ring is
 a KWin `OutlinedBorderItem` (exported, header installed) as a child of
 the active window's `WindowItem`, so it moves/scales/stacks with it; its
 width is divided by the item's scale. Color = the app palette's Highlight

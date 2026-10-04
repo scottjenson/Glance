@@ -2,7 +2,8 @@
 
 Designed with the user 2026-10-01 after two rounds: distance-based snapping
 spoiled Meta+drag as "grab anywhere and move a bit"; velocity throws felt
-chaotic, burned through the ladder, gave no feedback; see `leadStep`.
+chaotic, burned through the ladder, gave no feedback; see `leadStep`
+(the `WindowDrag` component, kwin/drag.h/.cpp).
 
 Meta+drag moves like a title-bar drag, but horizontally the window gets
 ahead of the pointer (`m_leadX`; the pointer can't be moved: VMware's
@@ -35,7 +36,8 @@ recorded press: KWin's `interactiveMoveResizeAnchor()` follows the cursor.
 A Meta+drag activates and raises the window (2026-10-03, user: the
 dragged window didn't get the focus ring). KDE's Meta+left-drag is its
 mouse command "Move" (`commandAll1`), which doesn't activate; while
-Glance is loaded it is "Activate, Raise and Move" (`activatingMetaDrag`,
+Glance is loaded it is "Activate, Raise and Move" (`KdeIntegration::activatingMetaDrag`,
 kept on settings reloads, restored on unload), as a title-bar drag does
-with its press. Tried first and didn't work: activating from `dragStep`
+with its press. Tried first and didn't work: activating from the drag's
+first step (`WindowDrag::step`)
 at the start of the move (the ring stayed on the old window).

@@ -15,7 +15,7 @@
   see below.
 
 ## Dragging
-`dragStep`, on `Window::interactiveMoveResizeStepped`: KWin
+`WindowDrag::step` (kwin/drag.cpp), on `Window::interactiveMoveResizeStepped`: KWin
 moves the real frame (grab offset kept as a fraction of the size); we draw it
 scaled around the cursor. `edgeScale` solves the design rule in closed form:
 the drawn edge is at d = cursorToScreenEdge − cursorToWindowEdge·s, and
@@ -31,8 +31,8 @@ KWin's own move logic (window.cpp `nextInteractiveMoveGeometry`) also snaps
 to edges (`adjustWindowPosition`) and keeps ≥100 px visible.
 
 ## Parked windows
-`dragFinished`, on `interactiveMoveResizeFinished`: state per
-window in `m_parked` (`shown` rect in global coordinates, `original` size,
+`WindowDrag::finished`, on `interactiveMoveResizeFinished`: state per
+window in `ParkedWindows::m_parked` (kwin/parked.cpp) (`shown` rect in global coordinates, `original` size,
 `restoring`). `applyParked` (also on every `frameGeometryChanged`) fits the
 *current* frame into `shown` by width (scale = shown.width / frame.width),
 so nothing jumps while the app catches up with a resize. Real resize via
@@ -47,7 +47,8 @@ original size (grabbed spot under the cursor), `restoring` until it has it.
 Unloading resizes parked windows back to their original size.
 
 ## Input to parked windows
-`route`, `reanchor`, `pick`: KWin picks the
+`ParkedInput` (kwin/parkedinput.cpp): `route`, `reanchor`, and
+`ParkedWindows::pick`: KWin picks the
 window under the pointer from real (full-size) frames, *before* filters run
 (`PointerInputRedirection::processMotionInternal` calls `update()` first).
 So whenever the pointer is over a parked window, its frame is moved so the
@@ -80,8 +81,8 @@ next step, if needed: move the frame only on enter, pause and press, and
 over the title bar (the "hybrid", talked through with the user).
 
 ## Tiny parked windows act like icons
-`holdPress`, `pendingMotion`,
-`releasePending`; decided with the user 2026-09-29: windows in parking,
+`ParkedInput::holdPress`, `pendingMotion`,
+`releasePending`, with `ParkedWindows::isIcon`; decided with the user 2026-09-29: windows in parking,
 and stashed windows drawn below `iconBelow` (0.25) of their original size,
 hold back a plain left press (`isIcon`). Parking counts whatever the
 scale (fixed 2026-10-04): a narrow window is drawn above 0.25 there
@@ -99,7 +100,7 @@ with modifiers. Larger parked windows (the user expects people to use
 windows at 50-60%) stay normal windows: nothing is taken from their content.
 
 ## Minimize = park
-Agreed 2026-10-02, built 2026-10-03 (`minimizeToParking`): parking is
+Agreed 2026-10-02, built 2026-10-03 (`ParkedWindows::minimizeToParking`): parking is
 Glance's minimize. A window being minimized (title-bar button, taskbar,
 KDE's shortcut, the app itself) is un-minimized at once, from its
 `minimizedChanged`, and moved (`moveTo`) to the parking area on the side

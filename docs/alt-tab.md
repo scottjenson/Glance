@@ -82,7 +82,7 @@ visible; the label identifies it.
 ## Keys and KWin
 - Alt+Tab and Meta+Tab (also with Shift). KWin's eight "Walk Through
   Windows" actions (incl. "of Current Application", Alt+\`) are disabled
-  while loaded (`disableKdeShortcuts`); they belong to the TabBox object,
+  while loaded (`KdeIntegration::disableKdeShortcuts`); they belong to the TabBox object,
   reached via `workspace()->tabbox()` (its header isn't installed; it
   derives from QObject only, so the pointer is reinterpreted).
 - While switching, no surface has keyboard focus

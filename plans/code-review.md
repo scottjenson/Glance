@@ -85,7 +85,9 @@ refactor ([refactor.md](refactor.md)).
 ### 5. One large class with many modes and no tests
 
 **Status (2026-10-04):** in progress, see [refactor.md](refactor.md)
-(stages 1-3 done; stage 4, input routing, under way).
+(stages 1-4 built; stage 4 waits for the user's test). Unit tests
+for the geometry are in kwin/tests. Per-window state is still in a few
+components (each erases its own on close, called from Glance::watch).
 
 **Where:** all of the effect is one class in one file, with about 15 independent mode states (`m_dragged`, `m_pending`, `m_clip`, `m_clipDrag`, `m_switch`, `m_map`, `m_preview`, `m_previewCandidate`, `m_noPreview`, `m_wheelWindow`, `m_declutter`, `m_bounce`, `m_chosen`, ...). Each input handler checks them in its own hand-written order (`onMotion`, main.cpp:593; `onButton`, main.cpp:619). Per-window state is spread over `m_parked`, `m_wasFull`, `m_recent` and the map, all keyed by raw `Window*` and cleaned up in one `closed` handler (main.cpp:1015).
 

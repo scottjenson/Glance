@@ -56,7 +56,7 @@ only during a drag, a bounce, the Alt+Tab map, a clip drag or a parked
 window's animation. KWin's scanout check maps items through their
 transforms, so parked windows at rest are accounted for; it also covers
 overlay planes (e.g. a video in a window), not just full screen. Can't
-be seen in the VM (no scanout on VMware's GPU); the user's check is that
+be seen in the VM (no scanout on VMware's GPU); checked by the user:
 nothing looks different. Low priority for the user: full screen makes
 little sense on an ultrawide, but it's cheap and right.
 
@@ -68,7 +68,7 @@ little sense on an ultrawide, but it's cheap and right.
 
 ### 3. Animations repaint the whole screen every frame
 
-**Status (2026-10-04):** built, waiting for the user's test. Parked
+**Status (2026-10-04):** built and checked by the user. Parked
 animations and drag glides no longer repaint the screen: the transform
 change damages what moved, and `Item::scheduleFrame` (no damage) keeps
 them ticking (`ParkedWindows::scheduleFrames`,

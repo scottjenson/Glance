@@ -85,9 +85,9 @@ stage 4: kwin/glance.cpp is a small coordinator, the rest are components
 (clip limits). Also
 2026-10-04: every window in parking is an icon, whatever its scale
 (Firefox at its 500 px minimum got no hover preview). Code review: all
-five findings built; 2 (direct scanout only blocked while something
-moves) and 3 (animations repaint only what moves, one animation clock
-per frame) wait for the user's test; finding 1's hybrid is paused until
+five findings built and checked by the user (2: direct scanout only
+blocked while something moves; 3: animations repaint only what moves,
+one animation clock per frame); finding 1's hybrid is paused until
 needed.
 
 ### 2026-10-03, end of day

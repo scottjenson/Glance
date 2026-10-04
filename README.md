@@ -108,10 +108,12 @@ turned on and off in System Settings → Window Management → Desktop Effects.
 Other distributions need the same things under their own package names
 (KWin's development headers, extra-cmake-modules, epoxy).
 
-After each Plasma update, run the last three commands again (a build for the
-old version won't load). To uninstall, delete
-`/usr/lib64/qt6/plugins/kwin/effects/plugins/glance.so` (the path may
-differ on other distributions) and log out and back in.
+After each Plasma update, run the last two commands again: KWin only loads
+an effect built for its exact version. If you forget, a dialog at login
+says so (`glance-check`, installed with Glance). If Plasma moved to a new
+release (6.8 after 6.7), the build may stop and ask for a newer Glance.
+To uninstall, run `sudo xargs rm < kwin/build/install_manifest.txt` and
+log out and back in.
 
 To try it without installing, `kwin/use-in-session.sh on` loads it from the
 build folder at your next login, and `off` undoes that.

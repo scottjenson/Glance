@@ -1,0 +1,71 @@
+#!/bin/bash
+# glance-check: runs at login (autostart). If Glance is installed and turned
+# on but KWin didn't load it, it says so in a dialog that can't be missed.
+# KWin only loads an effect built for its exact version (a plugin's IID
+# carries it) and skips any other without a word, so after a Plasma update
+# Glance would otherwise just silently do nothing.
+# Made by CMake from kwin/check/glance-check.in.
+#
+#   glance-check          check; quiet when all is well
+#   glance-check --test   show the message as if Plasma had been updated
+
+BUILT_FOR="@KWin_VERSION@"
+SOURCE="@GLANCE_REPO_DIR@"
+BUILD_BIN="@CMAKE_BINARY_DIR@/bin"
+
+kwin() {
+    dbus-send --session --print-reply --dest=org.kde.KWin /Effects "$@" 2>/dev/null
+}
+
+if [ "$1" = --test ]; then
+    running="(a newer version)"
+else
+    # Turned off in System Settings → Desktop Effects: nothing to say.
+    if [ "$(kreadconfig6 --file kwinrc --group Plugins --key glanceEnabled --default true 2>/dev/null)" = false ]; then
+        exit 0
+    fi
+    # Wait until KWin answers (it has long loaded its effects by then). It
+    # lists every effect plugin it finds, also ones it refused to load.
+    for _ in $(seq 20); do
+        list=$(kwin org.freedesktop.DBus.Properties.Get string:org.kde.kwin.Effects string:listOfEffects) && break
+        sleep 3
+    done
+    if [ -z "$list" ] || ! grep -q '"glance"' <<<"$list"; then
+        exit 0 # KWin doesn't answer, or Glance isn't installed
+    fi
+    if kwin org.kde.kwin.Effects.isEffectLoaded string:glance | grep -q "boolean true"; then
+        exit 0
+    fi
+    running=$(kwin_wayland --version 2>/dev/null | awk '{print $2}')
+fi
+
+if [ "$running" != "$BUILT_FOR" ]; then
+    reason="Plasma was updated: KWin is now $running, but Glance was built for KWin $BUILT_FOR. KWin only loads effects built for its exact version, so it skipped Glance. Your windows work as normal KDE windows until Glance is rebuilt."
+    steps="To rebuild Glance, run in a terminal:
+
+    cd $SOURCE
+    cmake --build kwin/build"
+    if [ "$(dirname "$(readlink -f "$0")")" != "$BUILD_BIN" ]; then
+        steps="$steps
+    sudo cmake --install kwin/build"
+    fi
+    steps="$steps
+
+then log out and back in."
+else
+    reason="KWin $running didn't load Glance, though it was built for this version."
+    steps="KWin's log may say why:
+
+    journalctl --user -b | grep -i glance"
+fi
+
+title="Glance isn't running"
+message="$reason
+
+$steps"
+echo "glance-check: $title. $reason" >&2
+if command -v kdialog >/dev/null; then
+    kdialog --title "$title" --error "$message"
+else
+    notify-send --urgency=critical --app-name=Glance "$title" "$message"
+fi

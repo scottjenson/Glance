@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Glance check
+Comment=Says so at login when KWin didn't load Glance (e.g. after a Plasma update)
+Exec=@GLANCE_CHECK_EXEC@
+NoDisplay=true
+X-KDE-autostart-phase=2

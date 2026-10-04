@@ -68,6 +68,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
 | [docs/clips.md](docs/clips.md) | Text and image drops and Meta+C become clip windows (glance-clip sticky notes) that drag back into documents |
 | [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map; hover selects, click chooses |
+| [docs/version-check.md](docs/version-check.md) | A dialog at login when KWin didn't load Glance (Plasma update); build stops on another Plasma release |
 | [docs/logout-hang.md](docs/logout-hang.md) | Plasmashell hangs at logout: a KDE clipboard deadlock (root cause known, harmless, left alone) |
 | [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
 | [plans/backlog.md](plans/backlog.md) | The agreed order of work, polish, packaging, ideas |
@@ -110,9 +111,10 @@ Next (agreed 2026-10-04, in this order): Alt+Tab phase 2, the pointer
 in the map (built 2026-10-04: hover selects, click chooses; checked by
 the user, Meta+Tab untested as macOS takes Command+Tab,
 [docs/alt-tab.md](docs/alt-tab.md)); then packaging's first steps: the
-MIT LICENSE file (added 2026-10-04) and the KWin version check (KWin
-already refuses a plugin built for another version, silently; how to
-make that visible is open, see [plans/backlog.md](plans/backlog.md)). Later: rich-text clips, restoring clips
+MIT LICENSE file (added 2026-10-04) and the version check (built
+2026-10-04, [docs/version-check.md](docs/version-check.md); the user
+runs `use-in-session.sh on` again for the login dialog, and tries
+`kwin/build/bin/glance-check --test`). Later: rich-text clips, restoring clips
 after login. The rest of the list was dropped for now
 ([plans/backlog.md](plans/backlog.md)).
 
@@ -210,7 +212,10 @@ after login. The rest of the list was dropped for now
   which loads it from the build folder instead.
 - `kwin/kwin-private/`: KWin headers that Fedora's kwin-devel doesn't
   install but that we need (see [docs/clips.md](docs/clips.md)). Keep in
-  step with the installed KWin.
+  step with the installed KWin (`GLANCE_KWIN_PRIVATE_VERSION`,
+  [docs/version-check.md](docs/version-check.md)).
+- `kwin/check/`: glance-check, the login dialog when KWin didn't load
+  Glance, and its autostart entry ([docs/version-check.md](docs/version-check.md)).
 - `kwin/setup-kwrite.sh`: KWrite font for the old KWrite clips (unused).
 - `kwin/run-nested.sh`: starts a nested KWin (a window in the desktop,
   2982x1090 logical at scale 2, override with WIDTH/HEIGHT) with
@@ -221,7 +226,8 @@ after login. The rest of the list was dropped for now
   session from kwin/build (a systemd drop-in,
   ~/.config/systemd/user/plasma-kwin_wayland.service.d/glance.conf (the old
   edge-shrink.conf is removed by the script),
-  setting QT_PLUGIN_PATH for KWin only); takes effect at the next login.
+  setting QT_PLUGIN_PATH for KWin only; plus glance-check's autostart
+  entry in ~/.config/autostart); takes effect at the next login.
   **Currently on.** The user runs it (auto mode blocks the agent from
   changing what loads at login). After a rebuild: log out and back in.
   In the real session, KWin's log is in the journal:

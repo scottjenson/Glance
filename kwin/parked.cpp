@@ -5,6 +5,7 @@
 
 #include <core/output.h>
 #include <effect/effecthandler.h>
+#include <effect/effectwindow.h>
 #include <scene/windowitem.h>
 #include <window.h>
 #include <workspace.h>
@@ -37,6 +38,24 @@ void releaseKdeState(Window *window)
     if (window->quickTileMode() != QuickTileMode(QuickTileFlag::None)) {
         window->setQuickTileModeAtCurrentPosition(QuickTileFlag::None);
     }
+}
+
+bool manageable(Window *window)
+{
+    return !window->isDeleted() && window->isNormalWindow() && !window->isFullScreen() && window->isMovable()
+        && window->isResizable() && !window->isMinimized() && window->isShown() && !window->skipSwitcher()
+        && window->isOnCurrentDesktop() && window->isOnCurrentActivity() && window->windowItem();
+}
+
+// It is drawn at `item` + translation + scale * (item-local point).
+void retarget(WindowPaintData &data, Window *window, const QRectF &from, const QRectF &to)
+{
+    const qreal k = to.width() / from.width();
+    const QPointF item = window->windowItem()->position();
+    data.setXScale(data.xScale() * k);
+    data.setYScale(data.yScale() * k);
+    data.setXTranslation(to.x() - item.x() + k * (item.x() + data.xTranslation() - from.x()));
+    data.setYTranslation(to.y() - item.y() + k * (item.y() + data.yTranslation() - from.y()));
 }
 
 // --- Which windows ---
@@ -125,6 +144,19 @@ void ParkedWindows::moveTo(Window *window, Place place, qreal scale)
     const QSizeF size = isParked ? parked->original : QSizeF(current.width(), current.height());
     const qreal centerY = isParked ? parked->shown.center().y() : current.y() + current.height() / 2;
     commitPlace(window, place, size, centerY, from, scale);
+    closeRanks();
+}
+
+void ParkedWindows::fillHalf(Window *window, Place half)
+{
+    releaseKdeState(window);
+    const QRectF from = currentlyDrawn(window);
+    const auto closeRanks = leaving(window);
+    const RectF screen = window->output()->geometryF();
+    const RectF area = workspace()->clientArea(MaximizeArea, window);
+    const qreal zoneWidth = screen.width() * zoneFraction;
+    const qreal x = screen.x() + (half == Place::HalfLeft ? zoneWidth : 2 * zoneWidth);
+    resizeAnimated(window, RectF(x, area.y(), zoneWidth, area.height()), from);
     closeRanks();
 }
 
@@ -303,6 +335,47 @@ void ParkedWindows::setDrawTransform(Window *window, const QTransform &transform
 {
     window->windowItem()->setTransform(transform);
     Q_EMIT transformChanged(window);
+}
+
+Window *ParkedWindows::pick(const QPointF &pos, Window *ignore) const
+{
+    const auto &stacking = workspace()->stackingOrder();
+    for (auto it = stacking.rbegin(); it != stacking.rend(); ++it) {
+        Window *window = *it;
+        if (window == ignore || window->isDeleted() || !window->isOnCurrentActivity() || !window->isOnCurrentDesktop()
+            || window->isMinimized() || window->isHidden() || window->isHiddenByShowDesktop()
+            || !window->readyForPainting()) {
+            continue;
+        }
+        if (isParked(window)) {
+            if (drawnRect(window).contains(pos)) {
+                return window;
+            }
+            continue;
+        }
+        if (window->hitTest(pos)) {
+            return window;
+        }
+    }
+    return nullptr;
+}
+
+bool ParkedWindows::isIcon(Window *window) const
+{
+    const Parked *parked = find(window);
+    return parked && !parked->restoring
+        && (parked->shown.width() / parked->original.width() < iconBelow || isParkingArea(areaOf(window)));
+}
+
+bool ParkedWindows::switchable(Window *window) const
+{
+    if (window->isDeleted() || !window->wantsTabFocus() || window->skipSwitcher() || window->isMinimized()
+        || !window->isShown() || window->isHiddenByShowDesktop() || !window->readyForPainting()
+        || !window->isOnCurrentDesktop() || !window->isOnCurrentActivity()) {
+        return false;
+    }
+    const RectF screen = window->output()->geometryF();
+    return currentlyDrawn(window).intersects(QRectF(screen.x(), screen.y(), screen.width(), screen.height()));
 }
 
 // --- Making room ---

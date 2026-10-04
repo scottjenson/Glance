@@ -425,19 +425,6 @@ public:
         Effect::paintWindow(renderTarget, viewport, w, mask, deviceRegion, data);
     }
 
-    // Change paint data so the window drawn at `from` is drawn at `to`
-    // (same shape). It is drawn at `item` + translation + scale * (item-
-    // local point), so this goes on top of whatever the data does already.
-    static void retarget(WindowPaintData &data, Window *window, const QRectF &from, const QRectF &to)
-    {
-        const qreal k = to.width() / from.width();
-        const QPointF item = window->windowItem()->position();
-        data.setXScale(data.xScale() * k);
-        data.setYScale(data.yScale() * k);
-        data.setXTranslation(to.x() - item.x() + k * (item.x() + data.xTranslation() - from.x()));
-        data.setYTranslation(to.y() - item.y() + k * (item.y() + data.yTranslation() - from.y()));
-    }
-
     // The Alt+Tab label, over everything.
     void paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport, int mask, const Region &deviceRegion,
                      LogicalOutput *screen) override
@@ -989,10 +976,10 @@ private:
             || event->modifiers != Qt::NoModifier || workspace()->moveResizeWindow()) {
             return false;
         }
-        Window *window = pick(event->position);
+        Window *window = m_parking.pick(event->position);
         // Clips get their presses: dragging a clip drags its text, and an
         // app can only start a drag from a press it received.
-        if (!window || isClip(window) || !isIcon(window)) {
+        if (!window || isClip(window) || !m_parking.isIcon(window)) {
             return false;
         }
         // Line the frame up with the pointer, so KWin sees what's under it.
@@ -1168,7 +1155,7 @@ private:
             const RectF screen = window->output()->geometryF();
             half = m_parking.currentlyDrawn(window).center().x() < screen.x() + screen.width() / 2 ? Place::HalfLeft : Place::HalfRight;
         }
-        fillHalf(window, half);
+        m_parking.fillHalf(window, half);
     }
 
     // Meta+Down, the full view: all of main at full height. Not for parked
@@ -1565,7 +1552,7 @@ private:
             && std::hypot(event->position.x() - m_metaPress->first.x(), event->position.y() - m_metaPress->first.y()) <= dragThreshold
             && !workspace()->moveResizeWindow()) {
             m_metaPress.reset();
-            Window *under = pick(event->position);
+            Window *under = m_parking.pick(event->position);
             if (under && !under->isDesktop() && !manageable(under)) {
                 return false; // a panel or the like: not ours
             }
@@ -1575,14 +1562,6 @@ private:
         }
         m_metaPress = std::make_pair(event->position, event->timestamp);
         return false;
-    }
-
-    // A window declutter (and the keyboard moves) may put somewhere else.
-    bool manageable(Window *window) const
-    {
-        return !window->isDeleted() && window->isNormalWindow() && !window->isFullScreen() && window->isMovable()
-            && window->isResizable() && !window->isMinimized() && window->isShown() && !window->skipSwitcher()
-            && window->isOnCurrentDesktop() && window->isOnCurrentActivity() && window->windowItem();
     }
 
     // `target` (or, if null, the desktop at `pos`) was Meta+double-clicked:
@@ -1638,7 +1617,7 @@ private:
 
         if (target) {
             saved.half = m_parking.currentlyDrawn(target).center().x() < middle ? Place::HalfLeft : Place::HalfRight;
-            fillHalf(target, saved.half);
+            m_parking.fillHalf(target, saved.half);
         }
         // Each stash at one scale, so its column lines up.
         for (int side = 0; side < 2; ++side) {
@@ -1656,20 +1635,6 @@ private:
             workspace()->activateWindow(target);
         }
         m_declutter = std::move(saved);
-    }
-
-    // `window` into `half` of main at the full usable height, gliding.
-    void fillHalf(Window *window, Place half)
-    {
-        releaseKdeState(window);
-        const QRectF from = m_parking.currentlyDrawn(window);
-        const auto closeRanks = m_parking.leaving(window);
-        const RectF screen = window->output()->geometryF();
-        const RectF area = workspace()->clientArea(MaximizeArea, window);
-        const qreal zoneWidth = screen.width() * zoneFraction;
-        const qreal x = screen.x() + (half == Place::HalfLeft ? zoneWidth : 2 * zoneWidth);
-        m_parking.resizeAnimated(window, RectF(x, area.y(), zoneWidth, area.height()), from);
-        closeRanks();
     }
 
     // Everything back as it was before the last declutter (windows closed
@@ -1702,18 +1667,6 @@ private:
 
     // --- Hover previews ---
 
-    // A parked window that acts like an icon: anything in parking, and a
-    // stashed one shown small enough (see iconBelow). Narrow windows (clips,
-    // Firefox at its 500 px minimum) are drawn above iconBelow in parking
-    // (see parkingScale) but are icons there all the same.
-    bool isIcon(Window *window) const
-    {
-        const Parked *parked = m_parking.find(window);
-        return parked && !parked->restoring
-            && (parked->shown.width() / parked->original.width() < iconBelow
-                || m_parking.isParkingArea(m_parking.areaOf(window)));
-    }
-
     // The previewed window, if it still is one.
     Window *previewWindow()
     {
@@ -1741,7 +1694,7 @@ private:
     // as an icon (dropped near the edge) but isn't one to preview.
     bool isPreviewable(Window *window) const
     {
-        return isIcon(window) && m_parking.isParkingArea(m_parking.areaOf(window));
+        return m_parking.isIcon(window) && m_parking.isParkingArea(m_parking.areaOf(window));
     }
 
     // On every pointer motion: the icon whose home spot is under the pointer
@@ -1869,7 +1822,7 @@ private:
             || event->buttons != Qt::NoButton || workspace()->moveResizeWindow() || waylandServer()->seat()->isDrag()) {
             return false;
         }
-        Window *window = pick(event->position);
+        Window *window = m_parking.pick(event->position);
         if (!window || !manageable(window)) {
             return false;
         }
@@ -2021,8 +1974,8 @@ private:
             return false;
         }
         // (A dragged clip is drawn under the pointer, not where it was.)
-        Window *under = pick(event->position, m_clipDrag ? m_clipDrag->window.data() : nullptr);
-        if (under && !under->isDesktop() && !(isIcon(under) && parkingSide(event->position))) {
+        Window *under = m_parking.pick(event->position, m_clipDrag ? m_clipDrag->window.data() : nullptr);
+        if (under && !under->isDesktop() && !(m_parking.isIcon(under) && parkingSide(event->position))) {
             return false;
         }
         const QStringList types = seat->dragSource()->mimeTypes();
@@ -2514,7 +2467,7 @@ private:
         Window *best = nullptr;
         qreal bestScore = 0;
         for (Window *window : workspace()->stackingOrder()) {
-            if (window == active || !switchable(window)) {
+            if (window == active || !m_parking.switchable(window)) {
                 continue;
             }
             const QPointF to = m_parking.currentlyDrawn(window).center();
@@ -2551,20 +2504,6 @@ private:
             workspace()->activateWindow(best);
             bounceRing(best);
         }
-    }
-
-    // A window one can select (Meta+Alt+arrows, Alt+Tab): one that is shown
-    // on the screen (not e.g. KDE's hidden Xwayland Video Bridge, which then
-    // can't be activated and blocks the way).
-    bool switchable(Window *window) const
-    {
-        if (window->isDeleted() || !window->wantsTabFocus() || window->skipSwitcher() || window->isMinimized()
-            || !window->isShown() || window->isHiddenByShowDesktop() || !window->readyForPainting()
-            || !window->isOnCurrentDesktop() || !window->isOnCurrentActivity()) {
-            return false;
-        }
-        const RectF screen = window->output()->geometryF();
-        return m_parking.currentlyDrawn(window).intersects(QRectF(screen.x(), screen.y(), screen.width(), screen.height()));
     }
 
     // --- Alt+Tab: hunt and return ---
@@ -2622,7 +2561,7 @@ private:
         Switch s;
         s.modifier = modifier;
         for (Window *window : m_recent) {
-            if (switchable(window)) {
+            if (m_parking.switchable(window)) {
                 s.windows.push_back(window);
             }
         }
@@ -3035,33 +2974,6 @@ private:
         return m;
     }
 
-    // The window really visible at `pos`, like InputRedirection::findToplevel
-    // but using the drawn rectangle for parked windows.
-    Window *pick(const QPointF &pos, Window *ignore = nullptr) const
-    {
-        const auto &stacking = workspace()->stackingOrder();
-        for (auto it = stacking.rbegin(); it != stacking.rend(); ++it) {
-            Window *window = *it;
-            if (window == ignore || window->isDeleted() || !window->isOnCurrentActivity() || !window->isOnCurrentDesktop()
-                || window->isMinimized() || window->isHidden() || window->isHiddenByShowDesktop()
-                || !window->readyForPainting()) {
-                continue;
-            }
-
-            if (m_parking.isParked(window)) {
-                if (m_parking.drawnRect(window).contains(pos)) {
-                    return window;
-                }
-                continue;
-            }
-
-            if (window->hitTest(pos)) {
-                return window;
-            }
-        }
-        return nullptr;
-    }
-
     // When we forward events ourselves, we point the seat at another surface
     // than KWin's focus window, and KWin doesn't notice: it only re-points
     // the seat when its own focus changes. Before leaving events to KWin
@@ -3111,7 +3023,7 @@ private:
             return m_forwarding || !exact;
         }
 
-        Window *target = pick(pos);
+        Window *target = m_parking.pick(pos);
         const bool involved = (target && m_parking.isParked(target)) || (pointer->hover() && m_parking.isParked(pointer->hover()));
         if (!involved) {
             // Nothing parked here: KWin knows best.

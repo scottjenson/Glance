@@ -28,6 +28,7 @@ namespace KWin
 {
 class LogicalOutput;
 class Window;
+class WindowPaintData;
 }
 
 namespace glance
@@ -43,6 +44,13 @@ bool isClip(Window *window);
 bool isClipInParking(Window *window, qreal shownWidth, const QSizeF &original);
 // KDE's own maximized or tiled state would fight our geometry.
 void releaseKdeState(Window *window);
+// A window Glance may put somewhere else (declutter, Meta+wheel, the
+// keyboard moves).
+bool manageable(Window *window);
+// Change paint data so the window drawn at `from` is drawn at `to` (same
+// shape), on top of whatever the data does already (the Alt+Tab map, a
+// dragged clip).
+void retarget(KWin::WindowPaintData &data, Window *window, const QRectF &from, const QRectF &to);
 
 class ParkedWindows : public QObject
 {
@@ -92,6 +100,8 @@ public:
     // Move a window to `place`, gliding from where it is drawn. `scale`:
     // for a stash, the scale to show it at.
     void moveTo(Window *window, Place place, qreal scale = stashScale);
+    // `window` into `half` of main at the full usable height, gliding.
+    void fillHalf(Window *window, Place half);
     // Put a window of full size `size` in `place` (see placeRect), gliding
     // from `from`.
     void commitPlace(Window *window, Place place, const QSizeF &size, qreal centerY, const QRectF &from,
@@ -137,6 +147,18 @@ public:
     bool anyAnimating() const;
     // Set how any window is drawn (see applyParked; dragging uses it too).
     void setDrawTransform(Window *window, const QTransform &transform);
+    // The window really visible at `pos`, like InputRedirection::findToplevel
+    // but using the drawn rectangle for parked windows.
+    Window *pick(const QPointF &pos, Window *ignore = nullptr) const;
+    // A parked window that acts like an icon: anything in parking, and a
+    // stashed one shown small enough (see iconBelow). Narrow windows (clips,
+    // Firefox at its 500 px minimum) are drawn above iconBelow in parking
+    // (see parkingScale) but are icons there all the same.
+    bool isIcon(Window *window) const;
+    // A window one can select (Meta+Alt+arrows, Alt+Tab): one that is shown
+    // on the screen (not e.g. KDE's hidden Xwayland Video Bridge, which then
+    // can't be activated and blocks the way).
+    bool switchable(Window *window) const;
 
     // --- Making room ---
 

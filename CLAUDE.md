@@ -81,8 +81,8 @@ table and Status.
 ## Status (2026-10-04)
 The refactor ([plans/refactor.md](plans/refactor.md)) is done through
 stage 4: kwin/glance.cpp is a small coordinator, the rest are components
-(see Files). Stages 1-3 and code review finding 4 (clip limits) were
-checked by the user; stage 4 waits for their smoke test. Also
+(see Files), all checked by the user, as is code review finding 4
+(clip limits). Also
 2026-10-04: every window in parking is an icon, whatever its scale
 (Firefox at its 500 px minimum got no hover preview). Left in the code
 review: findings 2 (direct scanout) and 3 (full-screen repaints); finding
@@ -161,6 +161,10 @@ shows clips with the icon only).
   2026-10-03 it still landed in the keyring: watch after the next logout.
   On 2026-10-04 it went invalid again with no logout in between (a push
   worked, one ~30 min later failed): not only logouts. Script: ~/gh-login.sh.
+  Until then the token had always landed in the keyring; that evening the
+  user logged in entirely inside the VM and `gh auth status` showed it in
+  ~/.config/gh/hosts.yml (the file) for the first time. Watch whether it
+  lasts.
 - Local git identity (repo-only config): Scott Jenson <scott@jenson.org>.
 - The user wants work committed and pushed so nothing is lost. Commit when a
   change is done and working; ask before pushing anything unusual.

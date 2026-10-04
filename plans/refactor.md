@@ -59,8 +59,8 @@ Target: a dozen files of 150-500 lines, plus a small `glance.cpp`.
   and icon presses), then main.cpp became glance.cpp, the coordinator
   (337 lines; its header maps the components, onKey/onMotion/onButton/
   onAxis are the one place input order is decided). Headless check: map,
-  ring, minimize = park. Waiting for the user's smoke test (all of it:
-  dragging, keyboard and input routing moved).
+  ring, minimize = park. Checked by the user (full smoke test). The
+  refactor is done.
 
 ## Smoke test (the user, after each stage, ~5 minutes)
 1. Drag a window to each edge: it shrinks; drop it in a stash and in

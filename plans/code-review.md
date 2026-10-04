@@ -85,7 +85,7 @@ refactor ([refactor.md](refactor.md)).
 ### 5. One large class with many modes and no tests
 
 **Status (2026-10-04):** in progress, see [refactor.md](refactor.md)
-(stages 1-4 built; stage 4 waits for the user's test). Unit tests
+(stages 1-4 done and checked by the user). Unit tests
 for the geometry are in kwin/tests. Per-window state is still in a few
 components (each erases its own on close, called from Glance::watch).
 

@@ -85,13 +85,8 @@
 // switches at once (both animate); leaving closes it after previewGrace
 // (see updateHover).
 //
-// Declutter (Meta+double-click): on a window, it takes the half of main
-// nearest to it at full height, and every other window in main goes to the
-// stashes, split so both end up holding about as many (keeping their left-
-// to-right order); on the desktop, everything in main goes to the sides.
-// Each stash then shows all its windows at one scale, as large as fits the
-// screen height, so its column lines up. The same Meta+double-click again
-// undoes it (see declutter).
+// Declutter (Meta+double-click): the window takes a half of main, the
+// others go to the stashes; again undoes it (see declutter.h).
 //
 // Clips: text or images dropped on the desktop, or clipped with Meta+C,
 // become clip windows that drag back into apps (see clips.h).
@@ -148,6 +143,7 @@
 #include "geometry.h"
 #include "alttab.h"
 #include "clips.h"
+#include "declutter.h"
 #include "parked.h"
 
 #include <KGlobalAccel>
@@ -507,7 +503,7 @@ public:
             // follows the cursor, so it can't tell us).
             m_lastPress = event->position;
         }
-        if (metaDoubleClick(event)) {
+        if (m_declutter.button(event)) {
             return true;
         }
         if (!pressed && m_clips.drop(event)) {
@@ -598,6 +594,7 @@ private:
     QPointF m_lastPress;
     Clips m_clips{m_parking, m_lastPress};
     AltTab m_altTab{m_parking};
+    Declutter m_declutter{m_parking};
 
     // The window being dragged while we draw it scaled, its original size,
     // and its scale relative to that.
@@ -668,30 +665,6 @@ private:
         std::chrono::microseconds timestamp;
     };
     std::optional<PendingPress> m_pending;
-
-    // The last Meta+left press (for double-clicks), and whether the release
-    // of a double-click's second press is to be swallowed too.
-    std::optional<std::pair<QPointF, std::chrono::microseconds>> m_metaPress;
-    bool m_swallowRelease = false;
-
-    // How windows were before the last declutter, for undoing it: the
-    // target (null for the desktop), the half it went to, and each window's
-    // state then.
-    struct Saved
-    {
-        QPointer<Window> window;
-        std::optional<Parked> parked; // parked then, else free:
-        RectF frame;
-        MaximizeMode maximize = MaximizeRestore;
-    };
-    struct Declutter
-    {
-        bool desktop;
-        QPointer<Window> target;
-        Place half = Place::Free;
-        std::vector<Saved> saved;
-    };
-    std::optional<Declutter> m_declutter;
 
     // The previewed window, the one the pointer waits on, and the timers to
     // open and close previews (see updateHover).
@@ -1345,143 +1318,6 @@ private:
                 window->move(frame.topLeft() + QPointF(m_leadX, 0));
             }
             m_parking.setDrawTransform(window, QTransform());
-        }
-    }
-
-    // --- Declutter ---
-
-    // Meta+double-click (left button). The first click is left to KWin (a
-    // Meta+press starts a move, which a release without motion ends); the
-    // second press and its release are taken. Returns whether the event was.
-    bool metaDoubleClick(PointerButtonEvent *event)
-    {
-        if (event->state == PointerButtonState::Released) {
-            if (m_swallowRelease && event->button == Qt::LeftButton) {
-                m_swallowRelease = false;
-                return true;
-            }
-            return false;
-        }
-        if (event->button != Qt::LeftButton || event->modifiers != Qt::MetaModifier
-            || event->buttons != Qt::LeftButton) {
-            m_metaPress.reset();
-            return false;
-        }
-        const std::chrono::milliseconds interval{QGuiApplication::styleHints()->mouseDoubleClickInterval()};
-        if (m_metaPress && event->timestamp - m_metaPress->second <= interval
-            && std::hypot(event->position.x() - m_metaPress->first.x(), event->position.y() - m_metaPress->first.y()) <= dragThreshold
-            && !workspace()->moveResizeWindow()) {
-            m_metaPress.reset();
-            Window *under = m_parking.pick(event->position);
-            if (under && !under->isDesktop() && !manageable(under)) {
-                return false; // a panel or the like: not ours
-            }
-            m_swallowRelease = true;
-            declutter(under && !under->isDesktop() ? under : nullptr, event->position);
-            return true;
-        }
-        m_metaPress = std::make_pair(event->position, event->timestamp);
-        return false;
-    }
-
-    // `target` (or, if null, the desktop at `pos`) was Meta+double-clicked:
-    // undo the last declutter if it was for the same target and the target
-    // is still where it put it; else declutter.
-    void declutter(Window *target, const QPointF &pos)
-    {
-        const bool again = m_declutter
-            && (target ? m_declutter->target == target && m_parking.placeOf(target) == m_declutter->half : m_declutter->desktop);
-        if (again) {
-            undoDeclutter();
-            return;
-        }
-        LogicalOutput *output = target ? target->output() : workspace()->outputAt(pos);
-        if (!output) {
-            return;
-        }
-        const RectF screen = output->geometryF();
-        const qreal middle = screen.x() + screen.width() / 2;
-
-        Declutter saved{.desktop = !target, .target = target, .half = Place::Free, .saved = {}};
-        std::vector<Window *> movers; // from main to a stash
-        std::vector<Window *> stashed[2]; // already in the left / right stash
-        for (Window *window : workspace()->stackingOrder()) {
-            if (!manageable(window) || window->output() != output) {
-                continue;
-            }
-            auto *it = m_parking.find(window);
-            const bool parked = it && !it->restoring;
-            saved.saved.push_back(Saved{.window = window,
-                                        .parked = parked ? std::optional<Parked>(*it) : std::nullopt,
-                                        .frame = window->moveResizeGeometry(),
-                                        .maximize = window->maximizeMode()});
-            if (window == target) {
-                continue;
-            }
-            if (!parked) {
-                movers.push_back(window);
-            } else if (const int area = m_parking.areaOf(window); area == 1 || area == 3) {
-                stashed[area == 1 ? 0 : 1].push_back(window);
-            }
-        }
-
-        // Balance the stashes: the leftmost `toLeft` movers go left, the rest
-        // right, so both end up with about as many windows.
-        std::sort(movers.begin(), movers.end(), [this](Window *a, Window *b) {
-            return m_parking.currentlyDrawn(a).center().x() < m_parking.currentlyDrawn(b).center().x();
-        });
-        const int count = int(movers.size());
-        const int toLeft = std::clamp(int(std::lround((count + int(stashed[1].size()) - int(stashed[0].size())) / 2.0)), 0, count);
-        stashed[0].insert(stashed[0].end(), movers.begin(), movers.begin() + toLeft);
-        stashed[1].insert(stashed[1].end(), movers.begin() + toLeft, movers.end());
-
-        if (target) {
-            saved.half = m_parking.currentlyDrawn(target).center().x() < middle ? Place::HalfLeft : Place::HalfRight;
-            m_parking.fillHalf(target, saved.half);
-        }
-        // Each stash at one scale, so its column lines up.
-        for (int side = 0; side < 2; ++side) {
-            if (movers.empty() || stashed[side].empty()) {
-                continue;
-            }
-            const Place stash = side == 0 ? Place::StashLeft : Place::StashRight;
-            const qreal scale = m_parking.fittingScale(output, stashed[side]);
-            for (Window *window : stashed[side]) {
-                m_parking.moveTo(window, stash, scale);
-            }
-            m_parking.arrangeArea(side == 0 ? 1 : 3, output, nullptr);
-        }
-        if (target) {
-            workspace()->activateWindow(target);
-        }
-        m_declutter = std::move(saved);
-    }
-
-    // Everything back as it was before the last declutter (windows closed
-    // since are skipped).
-    void undoDeclutter()
-    {
-        const Declutter declutter = std::move(*m_declutter);
-        m_declutter.reset();
-        for (const Saved &saved : declutter.saved) {
-            Window *window = saved.window;
-            if (!window || window->isDeleted() || !window->windowItem()) {
-                continue;
-            }
-            const QRectF from = m_parking.currentlyDrawn(window);
-            if (saved.parked) {
-                m_parking.park(window, saved.parked->shown, saved.parked->original);
-                m_parking.animate(window, from);
-            } else if (saved.maximize != MaximizeRestore) {
-                m_parking.erase(window);
-                m_parking.setDrawTransform(window, QTransform());
-                window->maximize(saved.maximize);
-            } else if (m_parking.isParked(window) || window->moveResizeGeometry() != saved.frame) {
-                m_parking.resizeAnimated(window, saved.frame, from);
-            }
-        }
-        if (declutter.target) {
-            workspace()->activateWindow(declutter.target);
         }
     }
 

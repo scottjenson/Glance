@@ -69,12 +69,8 @@
 // nearest window in that direction, judged by where windows are drawn (KDE's
 // version uses the real frames, which are wrong for parked windows).
 //
-// Focus ring: the active window gets an outline in the accent color, as
-// wide on screen at any scale, so it stands out also when tiny. Whenever the
-// ring goes to a window by keyboard (Meta+Alt+arrows, Alt+Tab; not clicks,
-// drags or apps taking the focus), the window dips like a pressed button:
-// it steps through bounceFrames (100% down to 98% and back), bounceStep
-// apart (see bounceRing, startBounce).
+// Focus ring: the active window gets an outline that bounces when the ring
+// moves by keyboard (see focusring.h).
 //
 // Previews: hovering a parking icon grows it in place (see previews.h).
 //
@@ -125,6 +121,7 @@
 #include "alttab.h"
 #include "clips.h"
 #include "declutter.h"
+#include "focusring.h"
 #include "geometry.h"
 #include "parked.h"
 #include "previews.h"
@@ -161,15 +158,6 @@ public:
             watch(window);
         }
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
-        // The focus ring keeps its width on screen whatever the window's scale.
-        connect(&m_parking, &ParkedWindows::transformChanged, this, [this](Window *window) {
-            if (window == m_ringWindow) {
-                updateRing();
-            }
-        });
-        connect(&m_altTab, &AltTab::ringChanged, this, &Glance::updateRing);
-        connect(&m_altTab, &AltTab::bounce, this, &Glance::bounceRing);
-        connect(workspace(), &Workspace::windowActivated, this, &Glance::updateRing);
         connect(workspace(), &Workspace::windowAdded, &m_clips, &Clips::placeClip);
 
         m_snapDwell.setSingleShot(true);
@@ -186,7 +174,6 @@ public:
 
         m_anchorLate.setSingleShot(true);
         connect(&m_anchorLate, &QTimer::timeout, this, &Glance::anchorLate);
-        updateRing();
 
         disableKdeShortcuts();
 
@@ -214,7 +201,6 @@ public:
     ~Glance() override
     {
         input()->uninstallInputEventFilter(&m_filter);
-        removeRing();
         disconnect(options, nullptr, this, nullptr);
         options->setElectricBorderTiling(m_savedTiling);
         options->setCommandAll1(m_savedCommandAll1);
@@ -233,35 +219,26 @@ public:
     // Only take part in painting while something is scaled.
     bool isActive() const override
     {
-        return !m_parking.empty() || m_dragged || m_bounce || m_altTab.mapShown() || m_clips.dragging();
+        return !m_parking.empty() || m_dragged || m_focusRing.bouncing() || m_altTab.mapShown() || m_clips.dragging();
     }
 
     void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
     {
-        if (m_parking.isParked(w->window()) || w->window() == m_dragged || (w->window() == m_bounce && m_bounceScale != 1.0)) {
+        if (m_parking.isParked(w->window()) || w->window() == m_dragged) {
             data.setTransformed();
         }
+        m_focusRing.prePaintWindow(w->window(), data);
         m_clips.prePaintWindow(w->window(), data);
         m_altTab.prePaintWindow(w->window(), data);
         Effect::prePaintWindow(view, w, data);
     }
 
-    // A bouncing window: scaled to its current frame's scale around the center
-    // of where it is drawn. The paint data's scale works around the window
-    // item's origin (it comes before the item's position), so the
-    // translation moves that center back.
-    // With the Alt+Tab map up, then, every window in it is drawn where the
-    // map has it (see mapped), dimmed unless selected; the others (panels,
-    // notifications) fade out.
+    // A bouncing window (see FocusRing::paintWindow); then the Alt+Tab map
+    // or a dragged clip.
     void paintWindow(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask,
                      const Region &deviceRegion, WindowPaintData &data) override
     {
-        if (w->window() == m_bounce && m_bounceScale != 1.0) {
-            const QPointF center = m_parking.currentlyDrawn(m_bounce).center() - m_bounce->windowItem()->position();
-            data.setXScale(data.xScale() * m_bounceScale);
-            data.setYScale(data.yScale() * m_bounceScale);
-            data.translate(center.x() * (1.0 - m_bounceScale), center.y() * (1.0 - m_bounceScale));
-        }
+        m_focusRing.paintWindow(w->window(), data);
         if (m_altTab.paintWindow(w->window(), data)) {
             // The map paints the whole screen as transformed, and KWin then
             // gives each window an unlimited region. With that, its renderer
@@ -542,6 +519,7 @@ private:
     Declutter m_declutter{m_parking};
     HoverPreviews m_previews{m_parking};
     MetaWheel m_wheel{m_parking, m_previews};
+    FocusRing m_focusRing{m_parking, m_altTab};
 
     // The window being dragged while we draw it scaled, its original size,
     // and its scale relative to that.
@@ -619,15 +597,6 @@ private:
     // KWin's kglobalaccel plugin (see cancelMetaTap).
     QPointer<QObject> m_globalAccel;
 
-    // The focus ring (see updateRing) and the window it outlines.
-    OutlinedBorderItem *m_ring = nullptr;
-    QPointer<Window> m_ringWindow;
-    // The window bouncing as it gets the ring, its current scale, and
-    // which bounce it is (later timers of an earlier one do nothing).
-    QPointer<Window> m_bounce;
-    qreal m_bounceScale = 1.0;
-    int m_bounceCount = 0;
-
     // KDE's shortcut actions we disabled, to re-enable on unload.
     std::vector<QPointer<QAction>> m_disabledActions;
 
@@ -659,9 +628,7 @@ private:
         connect(window, &Window::frameGeometryChanged, this, [this, window]() {
             m_clips.frameChanged(window);
             m_parking.applyParked(window);
-            if (window == m_ringWindow) {
-                updateRing();
-            }
+            m_focusRing.frameChanged(window);
         });
         connect(window, &Window::minimizedChanged, this, [this, window]() {
             if (window->isMinimized()) {
@@ -678,14 +645,10 @@ private:
             });
         }
         connect(window, &Window::fullScreenChanged, this, [this, window]() {
-            if (window == m_altTab.highlighted()) {
-                updateRing();
-            }
+            m_focusRing.fullScreenChanged(window);
         });
         connect(window, &Window::closed, this, [this, window]() {
-            if (window == m_ringWindow) {
-                removeRing(); // while its parent item still exists
-            }
+            m_focusRing.closed(window); // while the window's item still exists
             m_clips.closed(window);
             m_parking.closed(window);
             m_wasFull.erase(window);
@@ -1254,7 +1217,7 @@ private:
         }
     }
 
-    // --- Selecting and the focus ring ---
+    // --- Selecting ---
 
     // Meta+Alt+arrow: activate the nearest window in that direction, by
     // where windows are drawn (centers), scored like KWin's own
@@ -1302,81 +1265,7 @@ private:
         }
         if (best) {
             workspace()->activateWindow(best);
-            bounceRing(best);
-        }
-    }
-
-    // Outline the highlighted window: a line in the accent color just outside
-    // its frame, ringWidth wide on screen whatever the window's scale (also
-    // in the Alt+Tab map). It is a child of the window's scene item (whose
-    // coordinates start at the frame's top-left corner), so it moves, scales
-    // and stacks with it.
-    void updateRing()
-    {
-        Window *window = m_altTab.highlighted();
-        const bool wanted = window && !window->isDeleted() && (window->isNormalWindow() || window->isDialog())
-            && !window->isFullScreen() && window->windowItem();
-        if (!wanted || window != m_ringWindow) {
-            removeRing();
-        }
-        if (!wanted) {
-            return;
-        }
-        const RectF frame = window->frameGeometry();
-        const RectF inner(0, 0, frame.width(), frame.height());
-        const qreal scale = window->windowItem()->transform().m11() * m_altTab.mapZoom(window);
-        const QColor color = QGuiApplication::palette().color(QPalette::Active, QPalette::Highlight);
-        const BorderOutline outline(ringWidth / (scale > 0 ? scale : 1.0), color, window->borderRadius());
-        if (m_ring) {
-            m_ring->setInnerRect(inner);
-            m_ring->setOutline(outline);
-            return;
-        }
-        m_ring = new OutlinedBorderItem(inner, outline, window->windowItem());
-        m_ring->setZ(1000); // above the window's surfaces and title bar
-        m_ringWindow = window;
-    }
-
-    // The ring moved by keyboard (Alt+Tab, Meta+Alt+arrows): it bounces
-    // there. Clicks, drags and apps taking the focus don't bounce: the
-    // user's eyes are already on the window (user, 2026-10-03: bouncing
-    // on every focus change, e.g. during text drags, felt busy).
-    void bounceRing(Window *window)
-    {
-        updateRing();
-        if (window && window == m_ringWindow) {
-            startBounce(window);
-        }
-    }
-
-    // Items don't delete their children, and a child must go before its
-    // parent: called at the latest when the window closes.
-    void removeRing()
-    {
-        delete m_ring;
-        m_ring = nullptr;
-        m_ringWindow = nullptr;
-    }
-
-    // Bounce `window` like a pressed button: through bounceFrames, one every
-    // bounceStep (see paintWindow). Stepped, not animated in between.
-    void startBounce(Window *window)
-    {
-        const int count = ++m_bounceCount;
-        m_bounce = window;
-        m_bounceScale = bounceFrames[0];
-        const int frames = int(std::size(bounceFrames));
-        for (int i = 1; i < frames; ++i) {
-            QTimer::singleShot(i * bounceStep, this, [this, count, i, frames]() {
-                if (count != m_bounceCount || !m_bounce) {
-                    return;
-                }
-                m_bounceScale = bounceFrames[i];
-                if (i == frames - 1) {
-                    m_bounce = nullptr;
-                }
-                effects->addRepaintFull();
-            });
+            m_focusRing.bounce(best);
         }
     }
 

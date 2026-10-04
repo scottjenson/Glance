@@ -73,7 +73,7 @@ It is also a correctness bug with a second monitor. The frame is full layout siz
 
 **Status (2026-10-04):** built as proposed (cap `clipMaxBytes` 50 MB,
 `QImageReader` header check, `QtConcurrent::run` for the write/copy),
-waiting for the user's test. Line numbers below are from before the
+checked by the user. Line numbers below are from before the
 refactor ([refactor.md](refactor.md)).
 
 **Where:** `readClip()` (main.cpp:2709) appends whatever the app sends with no cap. `finishClip()` (main.cpp:2727) then decodes the whole image just to check it (`QImage::fromData`, main.cpp:2755), writes the file, or copies a dropped image file of any size (`QFile::copy`, main.cpp:2781), all on KWin's main thread.
@@ -85,7 +85,7 @@ refactor ([refactor.md](refactor.md)).
 ### 5. One large class with many modes and no tests
 
 **Status (2026-10-04):** in progress, see [refactor.md](refactor.md)
-(stages 1-3 built; stage 4, input routing, to come).
+(stages 1-3 done; stage 4, input routing, under way).
 
 **Where:** all of the effect is one class in one file, with about 15 independent mode states (`m_dragged`, `m_pending`, `m_clip`, `m_clipDrag`, `m_switch`, `m_map`, `m_preview`, `m_previewCandidate`, `m_noPreview`, `m_wheelWindow`, `m_declutter`, `m_bounce`, `m_chosen`, ...). Each input handler checks them in its own hand-written order (`onMotion`, main.cpp:593; `onButton`, main.cpp:619). Per-window state is spread over `m_parked`, `m_wasFull`, `m_recent` and the map, all keyed by raw `Window*` and cleaned up in one `closed` handler (main.cpp:1015).
 

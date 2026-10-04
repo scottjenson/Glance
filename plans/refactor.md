@@ -49,8 +49,8 @@ Target: a dozen files of 150-500 lines, plus a small `glance.cpp`.
   HoverPreviews (previews.h/.cpp), MetaWheel (wheel.h/.cpp, uses
   HoverPreviews; a `closing` signal replaces previews clearing wheel
   state), and finding 4's clip fixes last. main.cpp 3,157 -> 1,580
-  lines. Headless check: the Alt+Tab map draws correctly. Waiting for
-  the user's smoke test (steps 4, 6, 7, 8, 9 cover the moved code).
+  lines. Headless check: the Alt+Tab map draws correctly. Checked by the
+  user (smoke test, one logout for the whole batch).
 
 ## Smoke test (the user, after each stage, ~5 minutes)
 1. Drag a window to each edge: it shrinks; drop it in a stash and in

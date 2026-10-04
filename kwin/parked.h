@@ -67,7 +67,7 @@ public:
         QSizeF original;
         // Being resized back to `original`; done once it has that size.
         bool restoring = false;
-        // Drawn here instead of `shown` while hovered (see updateHover).
+        // Drawn here instead of `shown` while hovered (see HoverPreviews::update).
         std::optional<QRectF> preview = std::nullopt;
         // Animating from `from` to `shown` since `start`.
         bool animating = false;
@@ -121,7 +121,7 @@ public:
     // shown size, whatever minLayoutWidth: drawn at 1/2, like a clip in a
     // stash, the text is small but readable and reflows into a narrow
     // note, and the hover preview (at most 1:1) doubles it. The clip app
-    // then picks the height its text needs (see clipHeightChanged).
+    // then picks the height its text needs (see Clips::frameChanged).
     static QSizeF layoutSize(Window *window, const QSizeF &shown, const QSizeF &original);
 
     // --- Drawing ---

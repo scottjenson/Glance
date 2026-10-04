@@ -12,15 +12,16 @@ simultaneously (user's explicit wish). Leaving: shrinks after 300 ms. 2x may
 be too small to read; 2.5x is the fallback.
 
 ## How it works
-`updateHover`, `iconAt`, `previewRect`,
-`openPreview`, `closePreview`: `Parked::preview` is drawn instead of
+The `HoverPreviews` component (`kwin/previews.h/.cpp`): `update`,
+`iconAt`, `previewRect`, `open`, `close`: `Parked::preview` is drawn instead of
 `shown` (`displayRect`), so drawing, picking and re-anchoring follow it;
 `shown` (the home spot) is untouched. `iconAt` hit-tests home spots
 (± half `arrangeGap`), also under the grown window, and wins over it (so
 scrubbing works through it). Preview = `previewGrow` x the home spot,
 capped at 1:1 with the current frame and the screen height, at the
 screen edge, centered on the spot. Grown windows are raised. Timers
-`m_previewOpen` (`previewDelay`) and `m_previewClose` (`previewGrace`).
+`m_open` (`previewDelay`) and `m_close` (`previewGrace`). `current`
+notices a preview reset elsewhere (a clip drag resets it directly).
 Not while a button is held, a move is on or a DnD drag. Only windows in
 parking (`isPreviewable`): since stashes are free placement, a stashed
 window dropped near the edge can be icon-sized too, and it previewed by

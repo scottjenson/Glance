@@ -11,11 +11,11 @@ stash gets one common scale that fits its column (so it lines up).
 Follow-ups: [plans/backlog.md](../plans/backlog.md).
 
 ## How it works
-`metaDoubleClick`, `declutter`, `fillHalf`,
-`fittingScale`, `undoDeclutter`: the first Meta+click goes to KWin (its
+The `Declutter` component (`kwin/declutter.h/.cpp`): `button`, `toggle`,
+`undo`, with `ParkedWindows::fillHalf` and `fittingScale`: the first Meta+click goes to KWin (its
 Meta+press move ends without motion); a second Meta+left press within
 Qt's double-click interval and `dragThreshold` is taken, with its release.
-Panels etc. are ignored (`manageable`). Undo snapshot `m_declutter`: every
+Panels etc. are ignored (`manageable`). Undo snapshot `m_last`: every
 manageable window on that output (parked state or frame + maximize mode);
 it counts as "again" only if the target is still in the half it was put
 in (desktop: `Declutter::desktop`). If no window leaves main, stashes

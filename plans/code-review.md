@@ -71,6 +71,11 @@ It is also a correctness bug with a second monitor. The frame is full layout siz
 
 ### 4. Clip data is handled on the compositor thread, without a size limit
 
+**Status (2026-10-04):** built as proposed (cap `clipMaxBytes` 50 MB,
+`QImageReader` header check, `QtConcurrent::run` for the write/copy),
+waiting for the user's test. Line numbers below are from before the
+refactor ([refactor.md](refactor.md)).
+
 **Where:** `readClip()` (main.cpp:2709) appends whatever the app sends with no cap. `finishClip()` (main.cpp:2727) then decodes the whole image just to check it (`QImage::fromData`, main.cpp:2755), writes the file, or copies a dropped image file of any size (`QFile::copy`, main.cpp:2781), all on KWin's main thread.
 
 **Why it matters:** that thread paints every frame and handles every input event. Decoding a large screenshot PNG takes 100 ms or more, during which the whole desktop freezes. An app that streams a very large payload grows KWin's memory until the system kills it, which ends the session. The reading itself is already non-blocking (pipe plus `QSocketNotifier`), which is right.
@@ -78,6 +83,9 @@ It is also a correctness bug with a second monitor. The frame is full layout siz
 **Fix:** cap the read (for example 50 MB, then give up with a log line). Check images with `QImageReader` on a `QBuffer`, which reads only the header. Move the file write and copy off the main thread: hand the data to glance-clip (it can save its own file), or use `QtConcurrent::run` and start glance-clip when it finishes.
 
 ### 5. One large class with many modes and no tests
+
+**Status (2026-10-04):** in progress, see [refactor.md](refactor.md)
+(stages 1-3 built; stage 4, input routing, to come).
 
 **Where:** all of the effect is one class in one file, with about 15 independent mode states (`m_dragged`, `m_pending`, `m_clip`, `m_clipDrag`, `m_switch`, `m_map`, `m_preview`, `m_previewCandidate`, `m_noPreview`, `m_wheelWindow`, `m_declutter`, `m_bounce`, `m_chosen`, ...). Each input handler checks them in its own hand-written order (`onMotion`, main.cpp:593; `onButton`, main.cpp:619). Per-window state is spread over `m_parked`, `m_wasFull`, `m_recent` and the map, all keyed by raw `Window*` and cleaned up in one `closed` handler (main.cpp:1015).
 

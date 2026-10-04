@@ -6,13 +6,15 @@ documents (below). Image clips: see "Image clips" below (built
 2026-10-03). Rich text is planned:
 [plans/clips-back.md](../plans/clips-back.md).
 
-`dropToClip`, `readClip`, `finishClip`, `placeClip`: a text drag released
+The `Clips` component (`kwin/clips.h/.cpp`): `drop`, `readClip`,
+`finishClip`, `placeClip`: a text drag released
 over the desktop (or nothing) would become a Plasma sticky-note widget,
 which is not a window. Our filter runs before KWin's DragAndDrop filter: it
 requests the text from the drag source into a pipe
 (`AbstractDataSource::requestData`), holds the release back, and when the
 data is in (or after `clipTimeout`) cancels the drag, passes the release on,
-saves the text to `~/Clips/<date time>.txt` and starts `glance-clip <file>` with
+saves the text to `~/Clips/<date time>.txt` (on a worker thread,
+`saveClip`) and then starts `glance-clip <file>` with
 KWin's startup environment minus QT_PLUGIN_PATH, via
 `systemd-run --user --scope --slice=app.slice` (its own app scope like
 Plasma-started apps, not part of KWin's service; the scope execs the app,
@@ -33,6 +35,13 @@ System Settings under KWin, rebindable). Clips the primary selection if
 its source's client is the active window's client, into parking on the
 side nearer that window. Drops and Meta+C share `startClip`/`finishClip`
 (`ClipRead::fromDrag` says whether a drag must be cancelled).
+
+Limits (code review finding 4, 2026-10-04): reading gives up past
+`clipMaxBytes` (50 MB, a log line; the drop then does nothing), images are
+checked by their header only (`QImageReader` on a `QBuffer`, no full
+decode), and the file is written, or a dropped image file copied, off
+KWin's main thread (`QtConcurrent::run`); glance-clip starts when it is
+saved.
 
 `kwin/setup-kwrite.sh [size] [font]` set KWrite's editor font when clips
 were KWrite windows (no longer needed).
@@ -92,11 +101,11 @@ The body is a drag source (no selecting first): a real drag and drop of
 the text, since only that lets an app say it takes text (Wayland hides
 whether a spot is a text field; a fake click + Ctrl+V was ruled out). It
 looks like moving the note: Glance draws the clip under the pointer
-(`clipDragStarted`, `clipGhostRect`: held where grabbed, scaled by the
+(`dragStarted`, `ghostRect`: held where grabbed, scaled by the
 edge rule, kept on screen), the app's drag picture is a transparent pixel,
 and the window takes no input meanwhile (a 1-px `QWindow::setMask`), so
 drops near its old place fall through. Where it lands decides
-(`clipDragEnded`, `placeDroppedClip`):
+(`dragEnded`, `placeDroppedClip`):
 - an app that takes it (`SeatInterface::dragDropped`): pasted, and the app
   closes the clip (move); Shift held at the drop: copied, the note glides
   back. The app offers only CopyAction and decides itself.
@@ -120,5 +129,5 @@ transformed, with finite regions per window (the clipQuads gotcha, see
   made 3-px text). They count as icons, so hover previews grow them 2x,
   to 1:1. The app picks its own height when narrower than it started
   (`resizeEvent`: as tall as its text, up to 480), and Glance takes it
-  (`clipHeightChanged`) and re-forms the column (a fixed 150-px minimum
+  (`frameChanged`) and re-forms the column (a fixed 150-px minimum
   made one-word clips square; user, 2026-10-03).

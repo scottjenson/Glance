@@ -49,7 +49,7 @@ inline constexpr qreal previewGrow = 2.0;
 inline constexpr std::chrono::milliseconds previewDelay{300};
 inline constexpr std::chrono::milliseconds previewGrace{300};
 
-// Meta+wheel (see metaWheel): size change per unit of scroll (a mouse
+// Meta+wheel (see MetaWheel::axis): size change per unit of scroll (a mouse
 // wheel notch is 15 units; touchpads send smaller, more frequent steps),
 // the smallest size a window in main gets (logical pixels), and how
 // long after the last scroll a stashed window's app gets its new size.

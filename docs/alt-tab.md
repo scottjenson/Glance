@@ -99,8 +99,8 @@ visible; the label identifies it.
   `windowActivated`; seeded from the stacking order at load). KWin's
   `FocusChain` isn't exported to plugins.
 
-## How it works (kwin/main.cpp, section "Alt+Tab")
-- `switchKey` / `startSwitch` / `step` / `finishSwitch`; `m_hold` opens the
+## How it works (the `AltTab` component, kwin/alttab.h/.cpp)
+- `key` / `startSwitch` / `step` / `finishSwitch`; `m_hold` opens the
   map (`openMap`); `closeMap` animates back from wherever it is.
 - `paintWindow`: on top of everything else (parked transforms, bounce),
   the paint data's scale and translation take each window from where it
@@ -116,7 +116,9 @@ visible; the label identifies it.
   (`viewport.deviceRect()`) makes it use GL scissor clipping instead.
 - The focus ring goes to the `highlighted()` window (the selection while
   switching, then the chosen one until it's active); its width is divided
-  by the map's scale too, updated every frame while the map is up.
+  by the map's scale too (`mapZoom`), updated every frame while the map
+  is up. The ring itself stays in the effect: AltTab's `ringChanged` and
+  `bounce` signals tell it when to follow or bounce.
 - Label: `labelImage` paints icon + title with QPainter, uploaded as a
   `GLTexture`, drawn in `paintScreen` with the MapTexture|Modulate shader
   (opacity follows the map); redone when the selection or its title

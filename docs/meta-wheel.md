@@ -25,12 +25,13 @@ nothing else moves (except in parking, below).
   good past it would cover the stash.
 
 ## How it works
-`metaWheel` (from `onAxis`): Meta alone, vertical, no buttons, no move or
+The `MetaWheel` component (`kwin/wheel.h/.cpp`): `axis` (from `onAxis`): Meta alone, vertical, no buttons, no move or
 drag; target is `pick` (the window drawn there). Factor
 `exp(-delta * step)`, step `wheelStepWheel` (10% per 15-unit notch) or
 `wheelStepFinger` for touchpads. `resizeInMain`, `resizeInStash`
-(+ `settleWheel`), `resizePreview` (+ `settleWheel` grows the app,
-`shrinkApp` in `closePreview` shrinks it back).
+(+ `settle`), `resizePreview` (+ `settle` grows the app,
+`HoverPreviews::shrinkApp` in `close` shrinks it back, and its `closing`
+signal calls off a pending `settle`).
 
 A stash size set this way survives the next drag: the drag starts at that
 size (see `holdScale` in [dragging-and-parking.md](dragging-and-parking.md)).

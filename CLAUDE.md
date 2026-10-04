@@ -84,9 +84,11 @@ stage 4: kwin/glance.cpp is a small coordinator, the rest are components
 (see Files), all checked by the user, as is code review finding 4
 (clip limits). Also
 2026-10-04: every window in parking is an icon, whatever its scale
-(Firefox at its 500 px minimum got no hover preview). Left in the code
-review: findings 2 (direct scanout) and 3 (full-screen repaints); finding
-1 step 1 is done and checked, its hybrid paused until needed.
+(Firefox at its 500 px minimum got no hover preview). Code review: all
+five findings built; 2 (direct scanout only blocked while something
+moves) and 3 (animations repaint only what moves, one animation clock
+per frame) wait for the user's test; finding 1's hybrid is paused until
+needed.
 
 ### 2026-10-03, end of day
 Running in the user's real Plasma session (via use-in-session.sh; after a

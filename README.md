@@ -115,3 +115,7 @@ differ on other distributions) and log out and back in.
 
 To try it without installing, `kwin/use-in-session.sh on` loads it from the
 build folder at your next login, and `off` undoes that.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

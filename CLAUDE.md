@@ -107,10 +107,12 @@ user; Dolphin file drops and dragging an image clip into apps not yet
 confirmed). README.md is up to date.
 
 Next (agreed 2026-10-04, in this order): Alt+Tab phase 2, the pointer
-in the map (built 2026-10-04: hover selects, click chooses; waiting for
-the user's check, [docs/alt-tab.md](docs/alt-tab.md)); then packaging's
-first steps, an MIT LICENSE file and refusing to load
-on a different KWin version. Later: rich-text clips, restoring clips
+in the map (built 2026-10-04: hover selects, click chooses; checked by
+the user, Meta+Tab untested as macOS takes Command+Tab,
+[docs/alt-tab.md](docs/alt-tab.md)); then packaging's first steps: the
+MIT LICENSE file (added 2026-10-04) and the KWin version check (KWin
+already refuses a plugin built for another version, silently; how to
+make that visible is open, see [plans/backlog.md](plans/backlog.md)). Later: rich-text clips, restoring clips
 after login. The rest of the list was dropped for now
 ([plans/backlog.md](plans/backlog.md)).
 

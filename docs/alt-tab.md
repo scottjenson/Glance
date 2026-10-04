@@ -139,6 +139,8 @@ visible; the label identifies it.
   loading (`=N`: after N s) (see CLAUDE.md for the headless screenshot loop).
 
 ## Phase 2
-- Mouse in the map: built 2026-10-04 (see Interaction, "The pointer").
+- Mouse in the map: built 2026-10-04 (see Interaction, "The pointer");
+  checked by the user. Meta+Tab untested: macOS takes Command+Tab before
+  the VM sees it.
 - Later, maybe: the selected window's sibling windows lightly undimmed
   (app grouping hint).

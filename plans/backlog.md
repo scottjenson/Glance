@@ -2,10 +2,18 @@
 
 ## Order agreed with the user (2026-10-04)
 1. Alt+Tab phase 2: click a window in the map to choose it
-   ([docs/alt-tab.md](../docs/alt-tab.md)).
-2. Packaging, first steps: an MIT `LICENSE` file; refuse to load when the
-   running KWin differs from the one Glance was built against (it uses
-   KWin internals, see [code-review.md](code-review.md), smaller notes).
+   ([docs/alt-tab.md](../docs/alt-tab.md)). Built and checked 2026-10-04.
+2. Packaging, first steps: an MIT `LICENSE` file (added 2026-10-04);
+   refuse to load when the running KWin differs from the one Glance was
+   built against. Found 2026-10-04: KWin does that already. A plugin's
+   IID carries the exact KWin version it was built for
+   (`EffectPluginFactory_iid` = "org.kde.kwin.EffectPluginFactory6.7.5"),
+   and `PluginEffectLoader::factory` skips a plugin whose IID differs,
+   before any of its code runs, logging only at debug level. So no crash
+   on a newer KWin, but Glance silently does nothing. Open: how to make
+   that visible, and a build-time check for `kwin/kwin-private` (copied
+   from 6.7.5; a newer kwin-devel would build against stale private
+   headers).
 
 ## Later (kept, not now)
 - Clips: rich text ([clips-back.md](clips-back.md)); clips aren't
@@ -36,7 +44,7 @@ Not yet: the user wants quality-of-life features first; shipping is the
 long-term goal. Fedora COPR / Arch AUR, like other third-party KWin effects
 (Better Blur, KDE Rounded Corners). Internal API, so it must be rebuilt per
 Plasma release. `README.md` (with install steps) is done; the `LICENSE`
-file and the KWin version check are next (see the order above). The user hasn't
+file and the KWin version check are next (see the order above; LICENSE done). The user hasn't
 decided whether to hide their email in commits (GitHub noreply).
 
 ## Ideas (not agreed)

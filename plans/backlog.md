@@ -12,6 +12,9 @@
   pause time, snap regions (middle band 20%, parking band 15%); bounce
   frames; preview grow (2x; 2.5x if unreadable).
 - Watch the logout hang ([docs/logout-hang.md](../docs/logout-hang.md)).
+- Watch KDE's launcher opening by itself (fixed 2026-10-03 as far as
+  known, [docs/keyboard.md](../docs/keyboard.md); it happened once more,
+  maybe a real Meta tap). If it recurs, log Meta key timings again.
 
 ## Polish
 Re-anchor less often (e.g. on press/scroll, or after enough movement);

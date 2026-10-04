@@ -61,9 +61,9 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking, input to parked windows, icon-like tiny windows, minimize = park |
 | [docs/stacks.md](docs/stacks.md) | Parking columns; stashes are free placement |
 | [docs/meta-wheel.md](docs/meta-wheel.md) | Meta+wheel resizes in place; over parking icons it sizes the preview |
-| [docs/keyboard.md](docs/keyboard.md) | Meta+arrows ladder, Meta+Up/Down views, Meta+Alt+arrows selection |
-| [docs/meta-drag.md](docs/meta-drag.md) | Meta+drag acceleration and pause to snap |
-| [docs/focus-ring.md](docs/focus-ring.md) | Focus ring and bounce |
+| [docs/keyboard.md](docs/keyboard.md) | Meta+arrows ladder, Meta+Up/Down views, Meta+Alt+arrows selection, Meta alone and KDE's launcher |
+| [docs/meta-drag.md](docs/meta-drag.md) | Meta+drag acceleration, pause to snap, activates the window |
+| [docs/focus-ring.md](docs/focus-ring.md) | Focus ring; bounce on keyboard focus moves only |
 | [docs/declutter.md](docs/declutter.md) | Meta+double-click declutter and undo |
 | [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
 | [docs/clips.md](docs/clips.md) | Text drops and Meta+C become clip windows (glance-clip sticky notes) that drag back into documents |
@@ -76,27 +76,25 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 When a plan is built, move its design into a `docs/` file and update the
 table and Status.
 
-## Status (2026-10-03)
+## Status (2026-10-03, end of day)
 Running in the user's real Plasma session (via use-in-session.sh; after a
-rebuild the user logs out and back in). Built and working: everything in
-the docs table. Last changes (tested by the user, committed): Alt+Tab
-phase 1 (2026-10-02), minimize = park and the glance-clip app with
-drag-to-paste, free stash placement (no stash column), Meta+wheel
-resize/zoom ([docs/meta-wheel.md](docs/meta-wheel.md)) and previews for
-parking icons only (all 2026-10-03). Later on 2026-10-03 (tested): a
-stashed window keeps its size when dragged, Meta+wheel over a parking icon
-sizes its preview, the bounce only on keyboard focus moves, KDE's launcher
-only on a real Meta tap, Meta+drag activates (KDE's mouse command
-switched to "Activate, Raise and Move"). Nothing uncommitted.
+rebuild the user logs out and back in). Built, tested by the user and
+committed: everything in the docs table. Latest (all 2026-10-03): a
+stashed window keeps its size when dragged; Meta+wheel over a parking
+icon sizes its hover preview; the bounce only on keyboard focus moves;
+KDE's launcher only on a real Meta tap (the user keeps an eye on it);
+Meta+drag activates and raises. Nothing uncommitted; README.md is up to
+date.
 
-Next: not decided; ask the user. Suggested: stash follow-ups (should small
-stashed windows stop acting like icons? Meta+wheel speed/direction by
-feel), then crowding of parking columns (agreed, needs design talk
-first). Other candidates: Alt+Tab phase 2
-(click in the map etc., [docs/alt-tab.md](docs/alt-tab.md)); declutter
-follow-ups; clips phase 2, rich text and images
-([plans/clips-back.md](plans/clips-back.md)); open clip questions (clips
-aren't restored after login; Alt+Tab shows clips with the icon only).
+Next: not decided; ask the user. Suggested: crowding of parking columns
+(agreed, needs design talk first); image clips (findings in
+[plans/clips-back.md](plans/clips-back.md): Firefox's Copy Image gives
+real PNG data); stash follow-ups (should small stashed windows stop
+acting like icons? Meta+wheel speed/direction by feel). Other
+candidates: Alt+Tab phase 2 (click in the map etc.,
+[docs/alt-tab.md](docs/alt-tab.md)); declutter follow-ups; rich-text
+clips; open clip questions (clips aren't restored after login; Alt+Tab
+shows clips with the icon only).
 
 ## How the effect works (kwin/main.cpp, the basics)
 - It is a KWin **effect**, not a plain `KWin::Plugin`, so `prePaintWindow`
@@ -114,9 +112,10 @@ aren't restored after login; Alt+Tab shows clips with the icon only).
   early, before KWin's own shortcuts, tab box and DnD). `Effect` has its own
   `pointerMotion` etc. virtuals, so the filter is a separate member object
   (`Filter`) that calls back.
-- KDE features we replace are switched off while loaded and restored on
-  unload (quick tiling, some KGlobalAccel actions; see
-  [docs/keyboard.md](docs/keyboard.md)).
+- KDE features we replace or change are switched while loaded and
+  restored on unload (quick tiling off, some KGlobalAccel actions off,
+  [docs/keyboard.md](docs/keyboard.md); Meta+left-drag's mouse command
+  "Move" becomes "Activate, Raise and Move", [docs/meta-drag.md](docs/meta-drag.md)).
 
 ## Environment
 - Fedora 44 KDE (aarch64) in a VMware Fusion VM on an Apple Silicon Mac,

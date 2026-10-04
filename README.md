@@ -31,18 +31,26 @@ Key mechanics:
   still drag it or click into it.
 - **Icon-sized windows can be grabbed anywhere:** a drag moves the window,
   and a click still goes to the app.
-- **The stash and parking areas keep their windows in a centered stack**,
-  which rearranges itself as windows come and go.
+- **Parking keeps its windows in a centered column**, which rearranges
+  itself as windows come and go. In the stash, windows stay exactly where
+  you drop them (overlapping is fine).
+- **Minimizing a window parks it** (title-bar button, taskbar or shortcut):
+  parking is Glance's minimize.
+- **Dragging a stashed window keeps its size** until it reaches main or
+  parking.
 - **Dragging a window back into main** restores its original size.
-- **Text dropped on the desktop becomes a window:** drag text out of an app
-  onto empty desktop, and it is saved as a file in `~/Clips` and opened in
-  KWrite right there, so you can keep it at the side like any window. Drop
-  it at the very edge of the screen and it goes straight to parking.
+- **Text dropped on the desktop becomes a clip:** drag text out of an app
+  onto empty desktop, and it is saved as a file in `~/Clips` and shown
+  right there as a small sticky-note window (glance-clip), which you can
+  keep at the side like any window. Drop it at the very edge of the screen
+  and it goes straight to parking. Drag a clip into a document to paste
+  its text there (the clip is used up; hold Shift to keep it).
 - **Meta + C clips the selected text:** highlight text in any window and
   press Meta+C, and it becomes a clip in parking on that window's side.
 - **The active window has an outline** in your accent color, so you can
-  tell which one is selected even when it is small. A window that becomes
-  active gives a little bounce, like a button.
+  tell which one is selected even when it is small. When the selection
+  moves by keyboard (Alt+Tab, Meta+Alt+arrows), the window gives a little
+  bounce, like a button, so you can spot it.
 
 ## Accelerators
 
@@ -59,8 +67,14 @@ The Meta key (Super / Windows / Command) is the window system's key:
 - **Meta + double-click** a window to focus on it: it fills the nearer half
   of main, top to bottom, and every other window moves to the sides.
   On the empty desktop it clears main. Do it again to undo.
-- **Meta + drag** moves a window from anywhere inside it, and it
-  accelerates: keep moving quickly to one side and the window gets ahead of
+- **Meta + wheel** over a window resizes it in place, around the pointer.
+  Over a parking icon it makes the icon's preview bigger or smaller (the
+  preview still closes when the pointer leaves).
+- **Alt + Tab** (or Meta + Tab) goes back to the window you used last; a
+  quick tap toggles between two windows. Hold Alt to see a map of the
+  whole desktop and pick any window with Tab.
+- **Meta + drag** moves a window from anywhere inside it (and brings it to
+  the front), and it accelerates: keep moving quickly to one side and the window gets ahead of
   the pointer, so it crosses a wide screen with a short movement. Slow
   down or turn back and it follows exactly again. Hold still for a moment
   and it snaps to the place it is over: a half of main or (in the middle)

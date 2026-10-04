@@ -76,7 +76,8 @@ private Q_SLOTS:
     void parkingScaleLimits()
     {
         QCOMPARE(parkingScale(QSizeF(2000, 1000)), minScale); // 0.09 would be too small
-        QVERIFY(near(parkingScale(QSizeF(1000, 800)), parkingMinWidth / 1000)); // kept at parkingMinWidth
+        QVERIFY(near(parkingScale(QSizeF(1000, 800)), parkingMinSize / 1000)); // kept at parkingMinSize
+        QVERIFY(near(parkingScale(QSizeF(211, 451)), parkingMinSize / 451)); // by the longer side
         QCOMPARE(parkingScale(QSizeF(150, 100)), 1.0); // never larger than full size
     }
 
@@ -126,6 +127,46 @@ private Q_SLOTS:
         QFETCH(QRectF, frame);
         QFETCH(Place, place);
         QCOMPARE(glance::placeOfFrame(frame, screen), place);
+    }
+
+    // Meta+Left/Right in main: centered in a half, always in the arrow's
+    // direction, never resizing; past the last stop, nothing (on to the
+    // stash).
+    void nextMainStop()
+    {
+        const qreal leftStop = zone + zone / 2 - 250; // a 500-px window
+        const qreal rightStop = 2 * zone + zone / 2 - 250;
+        const QRectF small(1500, 100, 500, 400);
+        QCOMPARE(glance::nextMainStop(Side::Left, small, screen), Side::Left);
+        QCOMPARE(glance::nextMainStop(Side::Right, small, screen), Side::Right);
+        const QRectF atLeft(leftStop, 100, 500, 400);
+        QCOMPARE(glance::nextMainStop(Side::Left, atLeft, screen), std::nullopt);
+        QCOMPARE(glance::nextMainStop(Side::Right, atLeft, screen), Side::Right);
+        const QRectF atRight(rightStop, 100, 500, 400);
+        QCOMPARE(glance::nextMainStop(Side::Left, atRight, screen), Side::Left);
+        QCOMPARE(glance::nextMainStop(Side::Right, atRight, screen), std::nullopt);
+        // In the left stash zone: Meta+Right brings it into the left half,
+        // Meta+Left goes on into the stash.
+        const QRectF inStash(300, 100, 500, 400);
+        QCOMPARE(glance::nextMainStop(Side::Right, inStash, screen), Side::Left);
+        QCOMPARE(glance::nextMainStop(Side::Left, inStash, screen), std::nullopt);
+        // As wide as main: one stop, straight to a stash.
+        const QRectF full(zone, 100, 2 * zone, 800);
+        QCOMPARE(glance::nextMainStop(Side::Left, full, screen), std::nullopt);
+        QCOMPARE(glance::nextMainStop(Side::Right, full, screen), std::nullopt);
+    }
+
+    void mainStopRect()
+    {
+        const QSizeF size(500, 400);
+        const QRectF left = glance::mainStopRect(Side::Left, size, 800, screen, area);
+        QCOMPARE(left, QRectF(zone + zone / 2 - 250, 600, 500, 400));
+        QCOMPARE(glance::mainStopRect(Side::Right, size, 800, screen, area).center().x(), 2.5 * zone);
+        QCOMPARE(glance::nextMainStop(Side::Left, left, screen), std::nullopt);
+        // Wider than a half: against main's edge, inside main.
+        const QSizeF wide(1500, 800);
+        QCOMPARE(glance::mainStopRect(Side::Left, wide, 800, screen, area).left(), zone);
+        QCOMPARE(glance::mainStopRect(Side::Right, wide, 800, screen, area).right(), 3 * zone);
     }
 
     void parkedPlace()
@@ -191,6 +232,14 @@ private Q_SLOTS:
         QVERIFY(placeRect(Place::StashLeft, QSizeF(3000, 1500), 800, screen, area).width() <= zone * stashMaxWidth + 1e-6);
         // ... a normal one stashScale.
         QCOMPARE(placeRect(Place::StashLeft, QSizeF(1000, 800), 800, screen, area).width(), 1000 * stashScale);
+        // A small one at least stashMinSize on its longer side...
+        QCOMPARE(placeRect(Place::StashLeft, QSizeF(321, 108), 800, screen, area).width(), stashMinSize);
+        QCOMPARE(placeRect(Place::StashLeft, QSizeF(211, 451), 800, screen, area).height(), stashMinSize);
+        // ... or nearly its full size, if smaller (still a stash).
+        const QSizeF tiny(200, 100);
+        const QRectF stashed = placeRect(Place::StashLeft, tiny, 800, screen, area);
+        QVERIFY(stashed.width() < 200 && stashed.width() > 190);
+        QCOMPARE(glance::parkedPlace(stashed, tiny, screen), Place::StashLeft);
     }
 
     void fittingScale()

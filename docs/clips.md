@@ -121,12 +121,23 @@ transformed, with finite regions per window (the clipQuads gotcha, see
 [alt-tab.md](alt-tab.md)).
 
 ### Sizes in parking
-- Parking icons are at least `parkingMinWidth` (180 px) wide, for any
-  window (`parkingScale`; clips were 72 px specks at 15% of 480).
+- Parking icons are at least `parkingMinSize` (180 px) on their longer
+  side, for any window (`parkingScale`; clips were 72 px specks at 15% of
+  480). Until 2026-10-04 it was the width: a tall image clip (211x451)
+  parked as 180x384, hardly smaller, and since parking then started at
+  85% of its size, a drop anywhere in the edge zone made it a parking
+  icon (hover previews in what looked like the stash).
+- Clips in a stash (2026-10-04, the user: treat all windows the same in
+  stash and parking): laid out at their drawn size, whatever
+  minLayoutWidth, so drawn 1:1 with full-size text that rewraps, like
+  Firefox in a stash, and resizable from their edges. Before, drawn at
+  1/2 (the app couldn't go below 400 px wide or its minimum height), so
+  KDE's resize borders sat around the invisible full-size frame.
 - Clips in parking are laid out at twice their drawn width and drawn at
-  1/2, like a stash clip, so text is the same size in both (user: the
-  1:1 version was too big next to the stash; the 400-px layout before that
-  made 3-px text). They count as icons, so hover previews grow them 2x,
+  1/2 (user: the 1:1 version was too big next to the stash; the 400-px
+  layout before that made 3-px text). This once matched the stash's
+  half-size text; now parking text is smaller than in a stash, as for
+  any window. They count as icons, so hover previews grow them 2x,
   to 1:1. The app picks its own height when narrower than it started
   (`resizeEvent`: as tall as its text, up to 480), and Glance takes it
   (`frameChanged`) and re-forms the column (a fixed 150-px minimum

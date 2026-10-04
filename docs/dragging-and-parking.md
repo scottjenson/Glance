@@ -99,7 +99,7 @@ resize edges: KWin's borders sit around the invisible full-size frame.
 and stashed windows drawn below `iconBelow` (0.25) of their original size,
 hold back a plain left press (`isIcon`). Parking counts whatever the
 scale (fixed 2026-10-04): a narrow window is drawn above 0.25 there
-(parking is at least `parkingMinWidth`, 180 px, wide), e.g. Firefox at
+(parking is at least `parkingMinSize`, 180 px, on the longer side), e.g. Firefox at
 its 500 px minimum width, which it reopens at after a logout while
 parked; it got neither icon behaviour nor hover previews. Moving more than `dragThreshold` (6 px) starts KWin's own move
 (`performMousePressCommand(Options::MouseMove, pressPos)`; the frame was

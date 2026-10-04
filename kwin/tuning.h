@@ -21,9 +21,12 @@ enum class Place { ParkingLeft, StashLeft, HalfLeft, HalfRight, StashRight, Park
 inline constexpr qreal zoneFraction = 0.25;
 // Window size at the very edge of the screen (1.0 = full size).
 inline constexpr qreal minScale = 0.15;
-// But no narrower than this (logical pixels): narrow windows (clips,
-// small dialogs) would be specks at minScale (see parkingScale).
-inline constexpr qreal parkingMinWidth = 180.0;
+// But no smaller than this on its longer side (logical pixels): small
+// windows (clips, dialogs) would be specks at minScale (see parkingScale).
+// The longer side, not the width (2026-10-04): a tall narrow image clip
+// was a 180x384 "icon", hardly smaller than the window, and anywhere in
+// the edge zone counted as parking.
+inline constexpr qreal parkingMinSize = 180.0;
 // Stashed windows drawn smaller than this (relative to the original size)
 // act like icons: drag anywhere to move, click passes through. Larger
 // ones stay normal windows, so their content keeps every interaction.
@@ -93,6 +96,11 @@ inline constexpr std::chrono::milliseconds bounceStep{60};
 // most of the zone's width it may take there.
 inline constexpr qreal stashScale = 0.5;
 inline constexpr qreal stashMaxWidth = 0.6;
+// But at least this on its longer side (logical pixels; or nearly its
+// full size, if smaller), so a small window's stash is clearly bigger
+// than its parking icon (1.5 times parkingMinSize; 2026-10-04, the
+// user's call).
+inline constexpr qreal stashMinSize = 1.5 * parkingMinSize;
 // Length of keyboard moves and making-room animations.
 inline constexpr std::chrono::milliseconds animationTime{180};
 // Vertical gap between windows that made room for each other.

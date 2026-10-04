@@ -89,6 +89,11 @@ five findings built and checked by the user (2: direct scanout only
 blocked while something moves; 3: animations repaint only what moves,
 one animation clock per frame); finding 1's hybrid is paused until
 needed.
+Later 2026-10-04 (checked by the user): parked windows drawn 1:1 resize
+from their edges; stashed clips are really resized (full-size text);
+Meta+Left/Right never resize (stops centered in each half of main,
+[docs/keyboard.md](docs/keyboard.md)); stash at least 270 px and
+parking at least 180 px on a window's longer side.
 
 ### 2026-10-03, end of day
 Running in the user's real Plasma session (via use-in-session.sh; after a

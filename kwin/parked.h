@@ -119,6 +119,10 @@ public:
     // Move a window to `place`, gliding from where it is drawn. `scale`:
     // for a stash, the scale to show it at.
     void moveTo(Window *window, Place place, qreal scale = stashScale);
+    // `window` to its stop in `half` of main at its full (unparked) size,
+    // keeping its vertical center, gliding (Meta+Left/Right, see
+    // nextMainStop).
+    void moveToMainStop(Window *window, Side half);
     // `window` into `half` of main at the full usable height, gliding.
     void fillHalf(Window *window, Place half);
     // Put a window of full size `size` in `place` (see placeRect), gliding
@@ -140,10 +144,13 @@ public:
     qreal fittingScale(LogicalOutput *output, const std::vector<Window *> &windows) const;
     // The size to really resize a parked window to (see
     // glance::layoutSize). Clips in parking are laid out at twice the
-    // shown size, whatever minLayoutWidth: drawn at 1/2, like a clip in a
-    // stash, the text is small but readable and reflows into a narrow
-    // note, and the hover preview (at most 1:1) doubles it. The clip app
-    // then picks the height its text needs (see Clips::frameChanged).
+    // shown size, whatever minLayoutWidth: drawn at 1/2, the text is small
+    // but readable and reflows into a narrow note, and the hover preview
+    // (at most 1:1) doubles it. Clips in a stash are laid out at the shown
+    // size, whatever minLayoutWidth (drawn 1:1, like any window whose app
+    // fits: full-size text, resizable from the edges; 2026-10-04, before
+    // drawn at 1/2 and so not resizable). The clip app then picks the
+    // height its text needs (see Clips::frameChanged).
     static QSizeF layoutSize(Window *window, const QSizeF &shown, const QSizeF &original);
 
     // --- Drawing ---

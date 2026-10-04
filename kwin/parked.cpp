@@ -147,6 +147,22 @@ void ParkedWindows::moveTo(Window *window, Place place, qreal scale)
     closeRanks();
 }
 
+void ParkedWindows::moveToMainStop(Window *window, Side half)
+{
+    releaseKdeState(window);
+    const QRectF from = currentlyDrawn(window);
+    const auto closeRanks = leaving(window);
+    const Parked *parked = find(window);
+    const bool isParked = parked && !parked->restoring;
+    const RectF current = window->moveResizeGeometry();
+    const QSizeF size = isParked ? parked->original : QSizeF(current.width(), current.height());
+    const qreal centerY = isParked ? parked->shown.center().y() : current.y() + current.height() / 2;
+    const QRectF rect = mainStopRect(half, size, centerY, window->output()->geometryF(),
+                                     workspace()->clientArea(MaximizeArea, window));
+    resizeAnimated(window, RectF(rect.x(), rect.y(), rect.width(), rect.height()), from);
+    closeRanks();
+}
+
 void ParkedWindows::fillHalf(Window *window, Place half)
 {
     releaseKdeState(window);
@@ -201,6 +217,10 @@ void ParkedWindows::park(Window *window, const QRectF &shown, const QSizeF &orig
         // Drawn at 1/2: half as tall as its new layout (columns go by
         // `shown`).
         m_parked[window].shown.setHeight(layout.height() / 2);
+    } else if (isClip(window)) {
+        // In a stash: drawn 1:1, like a window whose app fits (and so
+        // resizable from its edges).
+        m_parked[window].shown.setSize(layout);
     }
     if (layout != QSizeF(frame.width(), frame.height())) {
         qInfo("glance: %s: original %.0fx%.0f, app minimum %.0fx%.0f, shown %.0fx%.0f -> resize to %.0fx%.0f",
@@ -216,6 +236,13 @@ QSizeF ParkedWindows::layoutSize(Window *window, const QSizeF &shown, const QSiz
 {
     if (isClipInParking(window, shown.width(), original)) {
         return QSizeF(2 * std::round(shown.width()), 2 * std::round(shown.height()));
+    }
+    if (isClip(window)) {
+        // Not the app's minimum height: KWin reports 150 for clips, which
+        // made one-word clips square; the clip picks its own height (see
+        // Clips::frameChanged).
+        const QSizeF appMin = window->clientSizeToFrameSize(window->minSize());
+        return QSizeF(std::max(std::round(shown.width()), appMin.width()), std::round(shown.height()));
     }
     return glance::layoutSize(shown, original, window->clientSizeToFrameSize(window->minSize()));
 }

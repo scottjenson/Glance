@@ -395,13 +395,14 @@ QString Clips::clipApp()
     return QStringLiteral("glance-clip");
 }
 
-// A clip in parking resizes itself to the height its text needs (see
-// resizeEvent in kwin/clip/main.cpp): take it (drawn at 1/2, see
-// layoutSize) and re-form its column.
+// A parked clip resizes itself to the height its text needs (see
+// resizeEvent in kwin/clip/main.cpp): take it (in parking drawn at 1/2,
+// in a stash 1:1, see layoutSize) and re-form its column (parking only,
+// see arrange).
 void Clips::frameChanged(Window *window)
 {
     auto *it = m_parking.find(window);
-    if (!it || it->restoring || !isClipInParking(window, it->shown.width(), it->original)) {
+    if (!it || it->restoring || !isClip(window)) {
         return;
     }
     const RectF frame = window->frameGeometry();

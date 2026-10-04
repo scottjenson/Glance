@@ -342,7 +342,6 @@ private:
             m_focusRing.closed(window); // while the window's item still exists
             m_clips.closed(window);
             m_parking.closed(window);
-            m_keyboard.closed(window);
         });
     }
 };

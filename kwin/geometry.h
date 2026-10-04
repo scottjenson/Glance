@@ -32,7 +32,7 @@ qreal edgeScale(qreal cursorToScreenEdge, qreal cursorToWindowEdge, qreal zoneWi
 qreal shiftOntoScreen(qreal x, qreal width, const QRectF &screen);
 
 // The scale of a window of full size `original` in parking: minScale,
-// or more if that would be narrower than parkingMinWidth.
+// or more if its longer side would be shorter than parkingMinSize.
 qreal parkingScale(const QSizeF &original);
 
 // The app's real size for a window parked at `shown` (drawn size) whose
@@ -52,6 +52,17 @@ int placeIndex(Place place);
 // For a window not parked, with frame `frame`: all of main or a half of it
 // (see halfMatch), or free.
 Place placeOfFrame(const QRectF &frame, const QRectF &screen);
+
+// Meta+Left/Right for a window not parked, with frame `frame`: which
+// half of main to put it in next, keeping its size (centered in that
+// half, kept inside main), always moving towards `direction`; none when
+// it is already at (or past) the last stop: then it goes on into the
+// stash. A window as wide as main has one stop, so it goes straight on.
+std::optional<Side> nextMainStop(Side direction, const QRectF &frame, const QRectF &screen);
+
+// A window of full size `size` at its stop in `half` of main (see
+// nextMainStop), keeping its vertical center where there is room.
+QRectF mainStopRect(Side half, const QSizeF &size, qreal centerY, const QRectF &screen, const QRectF &area);
 
 // For a parked window drawn at `shown` with full size `original`: the
 // stash or parking area on the side its center is on (parking when drawn

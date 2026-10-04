@@ -2,7 +2,7 @@
 // moves a window interactively (title bar or Meta+drag), the window is
 // drawn shrunk around the cursor once its left or right edge goes into the
 // outer quarter of the screen (main stays full size), reaching minScale at
-// the screen edge (but no narrower than parkingMinWidth). Dropped while
+// the screen edge (but no smaller than parkingMinSize). Dropped while
 // shrunk, it is parked where it is drawn; dropped in main, it gets its
 // original size back.
 //

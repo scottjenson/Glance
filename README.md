@@ -59,12 +59,12 @@ Key mechanics:
 
 The Meta key (Super / Windows / Command) is the window system's key:
 
-- **Meta + Left / Right** steps the active window between the six places:
-  parking, stash, and the halves of main, on either side.
+- **Meta + Left / Right** steps the active window along: parking, stash,
+  the left or right half of main, stash, parking. In main it keeps its
+  size (centered in the half); back from a stash it gets the size it had.
 - **Meta + Up** puts it in a half of main, top to bottom (a free half, if
   it is coming from all of main).
-- **Meta + Down** makes it fill main, top to bottom. A window filling main
-  moves straight to the stash and back with Meta + Left / Right.
+- **Meta + Down** makes it fill main, top to bottom.
 - **Meta + Alt + arrows** selects the nearest window in that direction (the
   same keys as in plain KDE), including small windows at the sides.
 - **Meta + double-click** a window to focus on it: it fills the nearer half

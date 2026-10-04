@@ -28,7 +28,7 @@ qreal shiftOntoScreen(qreal x, qreal width, const QRectF &screen)
 
 qreal parkingScale(const QSizeF &original)
 {
-    return std::clamp(parkingMinWidth / original.width(), minScale, 1.0);
+    return std::clamp(parkingMinSize / std::max(original.width(), original.height()), minScale, 1.0);
 }
 
 QSizeF layoutSize(const QSizeF &shown, const QSizeF &original, const QSizeF &appMin)
@@ -76,6 +76,47 @@ Place placeOfFrame(const QRectF &frame, const QRectF &screen)
     return Place::Free;
 }
 
+// Where a window of width `width` goes in `half` of main: centered in
+// it, kept inside main (so a window wider than a half is against main's
+// edge; one wider than main is centered in it).
+static qreal mainStopX(Side half, qreal width, const QRectF &screen)
+{
+    const qreal zoneWidth = screen.width() * zoneFraction;
+    const qreal left = screen.x() + zoneWidth;
+    const qreal right = screen.x() + 3 * zoneWidth;
+    if (width >= right - left) {
+        return (left + right - width) / 2;
+    }
+    const qreal center = half == Side::Left ? left + zoneWidth / 2 : right - zoneWidth / 2;
+    return std::clamp(center - width / 2, left, right - width);
+}
+
+std::optional<Side> nextMainStop(Side direction, const QRectF &frame, const QRectF &screen)
+{
+    // A pixel of slack: frames are whole pixels, the stops may not be.
+    constexpr qreal slack = 1.0;
+    std::optional<std::pair<qreal, Side>> next;
+    for (const Side half : {Side::Left, Side::Right}) {
+        const qreal x = mainStopX(half, frame.width(), screen);
+        const bool ahead = direction == Side::Left ? x < frame.x() - slack : x > frame.x() + slack;
+        const bool nearer = !next || (direction == Side::Left ? x > next->first : x < next->first);
+        if (ahead && nearer) {
+            next = std::pair{x, half};
+        }
+    }
+    if (!next) {
+        return std::nullopt;
+    }
+    return next->second;
+}
+
+QRectF mainStopRect(Side half, const QSizeF &size, qreal centerY, const QRectF &screen, const QRectF &area)
+{
+    const qreal height = std::min(size.height(), area.height());
+    const qreal y = std::clamp(centerY - height / 2, area.y(), std::max(area.y(), area.y() + area.height() - height));
+    return QRectF(mainStopX(half, size.width(), screen), y, size.width(), height);
+}
+
 Place parkedPlace(const QRectF &shown, const QSizeF &original, const QRectF &screen)
 {
     const bool left = shown.center().x() < screen.x() + screen.width() / 2;
@@ -109,8 +150,11 @@ QRectF placeRect(Place place, const QSizeF &size, qreal centerY, const QRectF &s
     case Place::ParkingRight: {
         // In a stash at most stashMaxWidth of the zone wide (wide windows,
         // e.g. from all of main, shrink more), but still above parking size.
+        // At least stashMinSize, below parkBelow so it stays parked.
+        const qreal stashFloor = std::max(parkingScale(size) + 0.03,
+                                          std::min(stashMinSize / std::max(size.width(), size.height()), parkBelow - 0.01));
         const qreal scale = place == Place::StashLeft || place == Place::StashRight
-            ? std::max(parkingScale(size) + 0.03, std::min(stash, zoneWidth * stashMaxWidth / size.width()))
+            ? std::max(stashFloor, std::min(stash, zoneWidth * stashMaxWidth / size.width()))
             : parkingScale(size);
         const QSizeF drawn = size * scale;
         // A stash column is centered in its zone (whatever the windows'

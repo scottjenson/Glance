@@ -67,41 +67,51 @@ bool Keyboard::key(KeyboardKeyEvent *event)
     return false;
 }
 
-void Keyboard::closed(Window *window)
-{
-    m_wasFull.erase(window);
-}
-
-// One step towards `side` along: parking L, stash L, half L, half R,
-// stash R, parking R. A free window goes to the half on that side. A
-// window in all of main goes straight to the stash on that side, and
-// from there back into all of main (m_wasFull).
+// One step towards `side` along: parking L, stash L, left half of main,
+// right half of main, stash R, parking R. Never resizes in main (only
+// Meta+Up/Down do): a window keeps its size, centered in a half (see
+// nextMainStop), and comes back from a stash at the size it had before.
 void Keyboard::stepSideways(Window *window, Side side)
 {
     const bool left = side == Side::Left;
-    const Place from = m_parking.placeOf(window);
-    Place to;
-    if (from == Place::Free) {
-        to = left ? Place::HalfLeft : Place::HalfRight;
-    } else if (from == Place::Full) {
-        to = left ? Place::StashLeft : Place::StashRight;
-        m_wasFull.insert(window);
-    } else {
-        const int i = placeIndex(from);
-        const int j = std::clamp(i + (left ? -1 : 1), 0, 5);
-        if (i == j) {
-            return;
+    if (!m_parking.isParkedNotRestoring(window)) {
+        const RectF frame = window->moveResizeGeometry();
+        if (const auto half = nextMainStop(side, QRectF(frame.x(), frame.y(), frame.width(), frame.height()),
+                                           window->output()->geometryF())) {
+            m_parking.moveToMainStop(window, *half);
+        } else {
+            m_parking.moveTo(window, left ? Place::StashLeft : Place::StashRight);
         }
-        to = placeOrder[j];
-        const bool backIntoMain = (from == Place::StashLeft && to == Place::HalfLeft)
-            || (from == Place::StashRight && to == Place::HalfRight);
-        if (backIntoMain && m_wasFull.erase(window)) {
-            to = Place::Full;
-        } else if (from == Place::HalfLeft || from == Place::HalfRight) {
-            m_wasFull.erase(window);
-        }
+        return;
     }
-    m_parking.moveTo(window, to);
+    switch (m_parking.placeOf(window)) {
+    case Place::ParkingLeft:
+        if (!left) {
+            m_parking.moveTo(window, Place::StashLeft);
+        }
+        break;
+    case Place::StashLeft:
+        if (left) {
+            m_parking.moveTo(window, Place::ParkingLeft);
+        } else {
+            m_parking.moveToMainStop(window, Side::Left);
+        }
+        break;
+    case Place::StashRight:
+        if (left) {
+            m_parking.moveToMainStop(window, Side::Right);
+        } else {
+            m_parking.moveTo(window, Place::ParkingRight);
+        }
+        break;
+    case Place::ParkingRight:
+        if (left) {
+            m_parking.moveTo(window, Place::StashRight);
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 // Meta+Up, the half view: a half of main at full height. A window in a

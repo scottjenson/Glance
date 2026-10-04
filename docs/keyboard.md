@@ -4,11 +4,28 @@
 Agreed 2026-09-29, may evolve; replaces KDE's quick tiling on Meta+arrows,
 intercepted by our input filter, active window only.
 
-- Meta+Left from a free window in main: snap to the left half of main
-  (x = main's left edge, width = half of main; height and vertical
-  position unchanged; real resize). Again: 50% size in the left stash.
-  Again: left parking (15%). Meta+Right mirrors and walks back
-  (parking L → stash L → left half → right half → stash R → parking R).
+- Meta+Left/Right (changed 2026-10-04, the user's call after living
+  with the first version: "Meta+Left and Right never adjust the window
+  size"): parking L ← stash L ← left half of main ← right half of main →
+  stash R → parking R, always one step in the arrow's direction. In main
+  a window keeps its size and vertical position and is centered in a
+  half, kept inside main (`nextMainStop`/`mainStopRect` in
+  kwin/geometry.cpp): a window wider than a half sits against main's
+  edge, one as wide as main has a single stop and goes straight on to a
+  stash. Already at (or past) the last stop on that side, it goes on
+  into the stash. Back from a stash it gets its original size, in the
+  half on that side. Only Meta+Up/Down resize in main.
+  Tried the same day and dropped: stops against main's edges; a small
+  clip then sat right next to the stash and the next press crossed all
+  of main ("the spacing is all mixed up").
+  Before (agreed 2026-09-29): Meta+Left snapped a free window to the left
+  half of main (a real resize to half of main's width, which made small
+  clips 1000 px wide), with `m_wasFull` to bring windows from all of
+  main back as wide; dropped.
+- Stash size by keyboard: `stashScale` (50%), at most `stashMaxWidth` of
+  the zone, at least `stashMinSize` on the longer side (1.5 x parking's 180 px, or nearly
+  full size if the window is smaller; 2026-10-04: before, small windows
+  were stashed barely bigger than their parking icon, 190 vs 180 px).
 - Meta+Up / Meta+Down (decided 2026-10-01, "people who don't want two
   halves"; the idea: use windows at full height in main, then shrink
   them to the sides): two fixed views, always full height, no toggles.
@@ -17,9 +34,7 @@ intercepted by our input filter, active window only.
   "when in doubt go left", `Keyboard::freeHalf` in kwin/keyboard.cpp; a free window the nearer half).
   Meta+Down = the full view: all of main (`Place::Full`, same 80% IoU
   test as halves) at full height. Neither acts on parked windows.
-  Meta+Left/Right from all of main go straight to the stash on that side
-  and back into all of main (`m_wasFull`); half windows walk the ladder
-  as before. Wide windows in a stash are capped at `stashMaxWidth` (60%)
+  Wide windows in a stash are capped at `stashMaxWidth` (60%)
   of the zone (they may overlap neighbours; accepted for now). Placed
   stash windows are centered in the stash zone (2026-10-02, user's idea;
   before, the outer edge sat where a drag gives that scale, which left

@@ -6,6 +6,22 @@
 // resized to a small layout size, see layoutSize) and a drawn rectangle
 // (`shown`); a transform on its scene item fits the one into the other
 // (applyParked). Keeping the two in step is most of Glance.
+//
+// Dropped while shrunk, a window stays exactly where and as large as it was
+// drawn. The app is really resized, down to a phone-like width, so web
+// pages reflow; the rest of the shrink is the transform, which fits the
+// window's current frame into `shown` also while the app is still catching
+// up with the new size. Back in main, a window gets its original size.
+//
+// Columns: the windows in each parking area form one column, centered
+// vertically, in the order of their vertical position (see arrangeArea).
+// Whenever a window arrives (keyboard or drop) or leaves (keyboard, dragged
+// out, closed), the column re-forms, animated. Stashes have no column:
+// windows stay where they were put and may overlap (a keyboard move keeps
+// the window's height); only declutter lines a stash up. Crowding of
+// parking (a column taller than the screen) comes later.
+//
+// Minimize = park: parking is Glance's minimize (see minimizeToParking).
 #pragma once
 
 #include "tuning.h"

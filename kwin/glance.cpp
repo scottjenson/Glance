@@ -5,78 +5,40 @@
 // main and the edge, smaller) and parking (the very edge, icon-sized).
 // "Parked" means dropped while shrunk, in a stash or a parking area.
 //
-// Dragging: a window dragged toward the left or right edge shrinks; Meta+drag
-// adds acceleration and pause-to-snap (see drag.h). Quick tiling by dragging
-// to the side is turned off while the effect is loaded, since it uses the
-// same edges.
-//
-// Parked: dropped while shrunk, the window stays exactly where and as large
-// as it was drawn (its "shown" rectangle). The app is also really resized,
-// down to a phone-like width (see layoutSize), so web pages reflow; the rest
-// of the shrink is a transform on the window's scene item, which always fits
-// the window's current frame into the shown rectangle, also while the app is
-// still catching up with the new size. Dragged back into main, the window is
-// resized to its original size.
-//
-// Input to parked windows: their frames are moved under the pointer so KWin
-// finds what is drawn there, or we forward events ourselves; windows that
-// act like icons can be clicked or dragged from anywhere (see
-// parkedinput.h).
+// This file is the coordinator: the effect KWin loads. It owns the
+// components, hands them window events and painting, and decides in one
+// place which one gets an input event first (see onKey, onMotion,
+// onButton, onAxis). The components, each with its own state; each gets
+// references to the parts it needs:
+// - ParkedWindows (parked.h): parked windows, their places, animation and
+//   columns, and where every window is drawn. Everything builds on it.
+// - ParkedInput (parkedinput.h): pointer input reaches the window drawn
+//   under the pointer; icons are clicked or dragged from anywhere.
+// - WindowDrag (drag.h): shrinking while dragging; Meta+drag acceleration
+//   and pause-to-snap.
+// - Keyboard (keyboard.h): Meta+arrows between places, Meta+Alt+arrows
+//   selection.
+// - AltTab (alttab.h): Alt+Tab hunt and return, the desktop map.
+// - FocusRing (focusring.h): the outline on the active window, its bounce.
+// - HoverPreviews (previews.h): parking icons grow in place on hover.
+// - MetaWheel (wheel.h): Meta+wheel resizes in place.
+// - Declutter (declutter.h): Meta+double-click.
+// - Clips (clips.h): drops and Meta+C become clip windows.
+// - KdeIntegration (kde.h): what Glance switches off in KDE while loaded.
 //
 // It is a KWin effect (not a plain plugin) so that it can mark scaled windows
 // as transformed in prePaintWindow: otherwise KWin clips a window's drawing
 // as if it weren't scaled, and it also treats the window as still covering
 // its full-size area.
 //
-// Keyboard: Meta+arrows move the active window between places,
-// Meta+Alt+arrows select a window (see keyboard.h).
-//
-// Focus ring: the active window gets an outline that bounces when the ring
-// moves by keyboard (see focusring.h).
-//
-// Previews: hovering a parking icon grows it in place (see previews.h).
-//
-// Declutter (Meta+double-click): the window takes a half of main, the
-// others go to the stashes; again undoes it (see declutter.h).
-//
-// Clips: text or images dropped on the desktop, or clipped with Meta+C,
-// become clip windows that drag back into apps (see clips.h).
-//
-// Stacks: the windows in each parking area form one column, centered
-// vertically, in the order of their vertical position (see arrangeArea).
-// Whenever a window arrives (keyboard or drop) or leaves (keyboard, dragged
-// out, closed), the column re-forms, animated. Stashes have no column:
-// windows stay where they were put and may overlap (a keyboard move keeps
-// the window's height); only declutter lines a stash up. Crowding of
-// parking (a column taller than the screen) comes later.
-//
-// Meta+wheel resizes the window under the pointer in place (see wheel.h).
-//
-// Alt+Tab (and Meta+Tab; replaces KDE's window switcher): hunt and return,
-// and the desktop map while Alt is held (see alttab.h).
-//
-// Minimize = park: parking is Glance's minimize. A window being minimized
-// (title-bar button, taskbar, shortcut, the app) is shown again at once and
-// goes to the parking area on the side nearer to it (see
-// ParkedWindows::minimizeToParking);
-// focus moves on, as for a minimize.
-//
 // Known gaps: touch and tablets aren't handled.
 
-#include <core/output.h>
 #include <core/renderviewport.h>
 #include <effect/effect.h>
 #include <effect/effecthandler.h>
 #include <effect/effectwindow.h>
 #include <input.h>
 #include <input_event.h>
-#include <options.h>
-#include <pointer_input.h>
-#include <scene/outlinedborderitem.h>
-#include <scene/windowitem.h>
-#include <wayland/seat.h>
-#include <wayland/surface.h>
-#include <wayland_server.h>
 #include <window.h>
 #include <workspace.h>
 
@@ -85,7 +47,6 @@
 #include "declutter.h"
 #include "drag.h"
 #include "focusring.h"
-#include "geometry.h"
 #include "kde.h"
 #include "keyboard.h"
 #include "parked.h"
@@ -93,21 +54,8 @@
 #include "previews.h"
 #include "wheel.h"
 
-#include <QAction>
-#include <QGuiApplication>
-#include <QMatrix4x4>
-#include <QPalette>
-#include <QPluginLoader>
 #include <QPointer>
 #include <QTimer>
-#include <QTransform>
-
-#include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <functional>
-#include <optional>
-#include <set>
 
 using namespace KWin;
 using namespace glance;
@@ -125,7 +73,6 @@ public:
         }
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
         connect(workspace(), &Workspace::windowAdded, &m_clips, &Clips::placeClip);
-
 
         qInfo("glance: effect loaded");
         if (!m_kde.globalAccel()) {
@@ -214,6 +161,14 @@ public:
         Effect::postPaintScreen();
     }
 
+    // Input, in the order the components get it. While Alt+Tab is on, the
+    // pointer does nothing and keys go to it. A dragged clip follows the
+    // pointer. A held icon press decides between click and drag before
+    // anything else sees motion. Meta+double-click, then drops (clips),
+    // then icon presses get buttons; Meta+wheel gets the wheel. Whatever
+    // is left goes to ParkedInput, which delivers it to the window drawn
+    // under the pointer (or leaves it to KWin when nothing parked is
+    // involved). Returning true means we took the event.
     bool onKey(KeyboardKeyEvent *event)
     {
         if (event->key == Qt::Key_Meta || event->key == Qt::Key_Super_L || event->key == Qt::Key_Super_R) {
@@ -323,7 +278,6 @@ private:
     Filter m_filter;
     KdeIntegration m_kde;
 
-    using Parked = ParkedWindows::Parked;
     ParkedWindows m_parking;
     // Where the last pointer button press was: where a clip drag grabbed
     // the clip.
@@ -379,4 +333,4 @@ private:
 
 KWIN_EFFECT_FACTORY(Glance, "metadata.json")
 
-#include "main.moc"
+#include "glance.moc"

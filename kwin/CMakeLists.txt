@@ -28,7 +28,11 @@ target_link_libraries(glance-core PUBLIC Qt6::Core Qt6::Gui)
 target_include_directories(glance-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 set_target_properties(glance-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-kcoreaddons_add_plugin(glance SOURCES main.cpp parked.cpp clips.cpp alttab.cpp declutter.cpp previews.cpp wheel.cpp focusring.cpp kde.cpp keyboard.cpp drag.cpp parkedinput.cpp INSTALL_NAMESPACE "kwin/effects/plugins")
+# glance.cpp is the effect (the coordinator); the rest are its components.
+kcoreaddons_add_plugin(glance
+    SOURCES glance.cpp parked.cpp parkedinput.cpp drag.cpp keyboard.cpp alttab.cpp focusring.cpp
+            previews.cpp wheel.cpp declutter.cpp clips.cpp kde.cpp
+    INSTALL_NAMESPACE "kwin/effects/plugins")
 target_link_libraries(glance PRIVATE glance-core KWin::kwin KF6::GlobalAccel Qt6::Concurrent)
 # KWin headers missing from kwin-devel (see the note in each).
 target_include_directories(glance SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/kwin-private)

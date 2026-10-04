@@ -269,6 +269,8 @@ public:
         m_wheelSettle.setSingleShot(true);
         m_wheelSettle.setInterval(wheelSettle);
         connect(&m_wheelSettle, &QTimer::timeout, this, &Glance::settleWheel);
+        m_anchorLate.setSingleShot(true);
+        connect(&m_anchorLate, &QTimer::timeout, this, &Glance::anchorLate);
         m_hold.setSingleShot(true);
         m_hold.setInterval(holdDelay);
         connect(&m_hold, &QTimer::timeout, this, [this]() {
@@ -640,7 +642,7 @@ public:
             return releasePending(event);
         }
         // Keep the target of a press until its release.
-        if (!route(event->position, !pressed || event->buttons != event->button)) {
+        if (!route(event->position, !pressed || event->buttons != event->button, true)) {
             return false;
         }
 
@@ -809,6 +811,10 @@ private:
     // forward events ourselves).
     QPointer<Window> m_target;
     bool m_forwarding = false;
+    // When a parked window's frame was last moved under the pointer, and
+    // the timer that lines it up where the pointer stopped (see reanchor).
+    std::chrono::steady_clock::time_point m_anchoredAt;
+    QTimer m_anchorLate;
 
     // Windows that went to a stash from all of main, to come back as wide.
     std::set<Window *> m_wasFull;
@@ -1049,7 +1055,7 @@ private:
             return false;
         }
         // Line the frame up with the pointer, so KWin sees what's under it.
-        route(event->position, false);
+        route(event->position, false, true);
         if (input()->pointer()->decoration()) {
             return false;
         }
@@ -1086,7 +1092,7 @@ private:
             return true;
         }
         workspace()->activateWindow(press.window);
-        route(event->position, false); // points the seat at the window
+        route(event->position, false, true); // points the seat at the window
         auto seat = waylandServer()->seat();
         seat->setTimestamp(press.timestamp);
         seat->notifyPointerButton(press.nativeButton, PointerButtonState::Pressed);
@@ -3657,15 +3663,58 @@ private:
 
     // Move a parked window's frame so that the point of the window drawn at
     // `pos` is also at `pos` in the frame. The drawing stays in place.
-    void reanchor(Window *window, const QPointF &pos)
+    // Returns whether they line up; if not, the caller forwards events with
+    // transformFor, which is exact without moving anything.
+    // Each move is a real geometry change in KWin (window rules, the
+    // window's monitor, the app is told), so pointer motion moves the frame
+    // at most once per refresh; `now` (buttons) moves it at once. When
+    // motion skips a move, anchorLate lines the frame up a refresh later, so
+    // where the pointer stops (tooltips, menus) the frame is right.
+    // The frame swings far past the drawing: never so far that its centre
+    // leaves the window's monitor, or KWin would give it to the next one.
+    bool reanchor(Window *window, const QPointF &pos, bool now)
     {
         if (workspace()->moveResizeWindow() == window) {
-            return;
+            return true;
         }
         const QPointF drawn = displayRect(m_parked.at(window)).topLeft();
         const QPointF topLeft = pos - (pos - drawn) / scaleOf(window);
-        if (topLeft != window->frameGeometry().topLeft()) {
-            window->move(topLeft);
+        const RectF frame = window->frameGeometry();
+        if (topLeft == frame.topLeft()) {
+            return true;
+        }
+        if (!window->output()->geometryF().contains(frame.translated(topLeft - frame.topLeft()).center())) {
+            return false;
+        }
+        const auto clock = std::chrono::steady_clock::now();
+        const auto period = std::chrono::microseconds(1000000000 / std::max<uint32_t>(window->output()->refreshRate(), 1000));
+        if (!now && clock < m_anchoredAt + period) {
+            if (!m_anchorLate.isActive()) {
+                m_anchorLate.start(std::chrono::ceil<std::chrono::milliseconds>(m_anchoredAt + period - clock));
+            }
+            return false;
+        }
+        m_anchorLate.stop();
+        m_anchoredAt = clock;
+        window->move(topLeft);
+        return true;
+    }
+
+    // Motion skipped a move (see reanchor): line the frame up where the
+    // pointer is now. Moving it makes KWin reset the seat's mapping for its
+    // own pointer focus; when we point the seat ourselves, set ours again.
+    void anchorLate()
+    {
+        if (!m_target || !isParked(m_target) || m_pending || workspace()->moveResizeWindow()
+            || waylandServer()->seat()->isDragPointer()) {
+            return;
+        }
+        const QPointF pos = input()->pointer()->pos();
+        if (!drawnRect(m_target).contains(pos) || !reanchor(m_target, pos, true)) {
+            return;
+        }
+        if (m_forwarding) {
+            waylandServer()->seat()->setFocusedPointerSurfaceTransformation(transformFor(m_target));
         }
     }
 
@@ -3737,8 +3786,10 @@ private:
 
     // Make the pointer event at `pos` reach the window really visible there.
     // Returns whether we must forward it ourselves because KWin's own pick is
-    // wrong. With `keep`, a button is held: stay with the current target.
-    bool route(const QPointF &pos, bool keep)
+    // wrong, or the frame isn't lined up (see reanchor). With `keep`, a
+    // button is held: stay with the current target. `now`: a button event,
+    // line the frame up at once.
+    bool route(const QPointF &pos, bool keep, bool now = false)
     {
         // KWin's own moves, drag and drop (and no parked windows) need
         // nothing from us. During drag and drop, re-anchoring would move the
@@ -3752,13 +3803,14 @@ private:
 
         auto pointer = input()->pointer();
         if (keep) {
+            bool exact = true;
             if (m_target && isParked(m_target)) {
-                reanchor(m_target, pos);
-                if (m_forwarding) {
+                exact = reanchor(m_target, pos, now);
+                if (m_forwarding || !exact) {
                     waylandServer()->seat()->setFocusedPointerSurfaceTransformation(transformFor(m_target));
                 }
             }
-            return m_forwarding;
+            return m_forwarding || !exact;
         }
 
         Window *target = pick(pos);
@@ -3771,14 +3823,15 @@ private:
             return false;
         }
 
+        bool exact = true;
         if (target && isParked(target)) {
-            reanchor(target, pos);
+            exact = reanchor(target, pos, now);
             // KWin picked its window before the frame moved; pick again.
             pointer->update();
         }
 
         m_target = target;
-        m_forwarding = target != pointer->hover();
+        m_forwarding = target != pointer->hover() || !exact;
         if (!m_forwarding) {
             syncSeatFocus(pos);
             return false;

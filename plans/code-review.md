@@ -31,6 +31,15 @@ Five changes, in order of importance. The first three touch every frame or every
 
 ### 1. Re-anchoring moves real frames on every pointer motion
 
+**Status (2026-10-04):** step 1 built, waiting for the user's test:
+re-anchoring at most once per refresh for motion and scrolling
+(forwarding in between, a late re-anchor where the pointer stops), at once
+for buttons, and never across to another monitor. Agreed with the user:
+stashed windows must stay fully interactive, so hover behaviour must not
+change. If step 1 works, consider the hybrid (forward motion; move the
+frame only on enter, pause ~100 ms, press, and over the title bar);
+see [docs/dragging-and-parking.md](../docs/dragging-and-parking.md).
+
 **Where:** `route()` calls `reanchor()` (main.cpp:3660) for every motion over a parked window (onMotion, main.cpp:609; route, main.cpp:3774), then `pointer->update()` re-picks.
 
 **Why it matters:** each `window->move()` is a real geometry change in KWin. In 6.7.5 that runs `WaylandWindow::updateGeometry`, which re-evaluates window rules, re-computes the window's output from the frame's center, and sends `wl_surface.enter/leave` to the app; X11 apps also get a ConfigureNotify. That is a lot of work per mouse event (hundreds per second on a gaming mouse).

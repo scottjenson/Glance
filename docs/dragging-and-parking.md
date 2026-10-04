@@ -67,6 +67,18 @@ desktop with the window's coordinates (desktop rubber band). Not done during KWi
 (`workspace()->moveResizeWindow()`). Resetting: KWin only recomputes the
 pointer transformation on enter or geometry change.
 
+Each frame move is a real geometry change in KWin (window rules, the
+window's monitor, the app is told), so motion and scrolling move it at
+most once per refresh (2026-10-04, code review finding 1); in between,
+events are forwarded with `transformFor`, which is exact without moving
+anything, and `anchorLate` lines the frame up a refresh after the pointer
+stops (so tooltips and menus open in the right place). Presses and
+releases move it at once. A move that would put the frame's centre on
+another monitor is skipped (forwarded instead): the frame swings far past
+the drawing, and KWin would give the window to that monitor. Possible
+next step, if needed: move the frame only on enter, pause and press, and
+over the title bar (the "hybrid", talked through with the user).
+
 ## Tiny parked windows act like icons
 `holdPress`, `pendingMotion`,
 `releasePending`; decided with the user 2026-09-29: parked windows drawn

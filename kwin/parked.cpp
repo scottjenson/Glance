@@ -300,8 +300,15 @@ void ParkedWindows::applyParked(Window *window)
     if (it == m_parked.end() || !window->windowItem()) {
         return;
     }
-    const Parked &parked = it->second;
+    Parked &parked = it->second;
     const RectF frame = window->frameGeometry();
+    if (m_resizing && m_resizing->window == window) {
+        // Scaled like the frame's change, so a window drawn over its
+        // frame stays exactly over it.
+        const qreal scale = m_resizing->drawn.width() / m_resizing->frame.width();
+        parked.shown = QRectF(m_resizing->drawn.topLeft() + (frame.topLeft() - m_resizing->frame.topLeft()) * scale,
+                              QSizeF(frame.width(), frame.height()) * scale);
+    }
     if (parked.restoring && !parked.animating && std::abs(frame.width() - parked.original.width()) < 0.5
         && std::abs(frame.height() - parked.original.height()) < 0.5) {
         const QPointF topLeft = parked.shown.topLeft();
@@ -319,6 +326,36 @@ void ParkedWindows::applyParked(Window *window)
     transform.translate(offset.x(), offset.y());
     transform.scale(scale, scale);
     setDrawTransform(window, transform);
+}
+
+void ParkedWindows::resizeStarted(Window *window)
+{
+    auto it = m_parked.find(window);
+    if (it == m_parked.end() || it->second.restoring) {
+        return;
+    }
+    // Resized from where it is drawn now (a hover preview becomes its
+    // place).
+    const QRectF drawn = drawnRect(window);
+    it->second.shown = drawn;
+    it->second.preview.reset();
+    it->second.animating = false;
+    m_resizing = Resizing{window, drawn, window->frameGeometry()};
+}
+
+void ParkedWindows::resizeFinished(Window *window)
+{
+    if (m_resizing && m_resizing->window == window) {
+        m_resizing.reset();
+    }
+}
+
+bool ParkedWindows::drawnAtFrame(Window *window) const
+{
+    const QRectF drawn = drawnRect(window);
+    const RectF frame = window->frameGeometry();
+    return std::abs(drawn.x() - frame.x()) < 0.5 && std::abs(drawn.y() - frame.y()) < 0.5
+        && std::abs(drawn.width() - frame.width()) < 0.5;
 }
 
 void ParkedWindows::animate(Window *window, const QRectF &from)
@@ -389,7 +426,7 @@ Window *ParkedWindows::pick(const QPointF &pos, Window *ignore) const
             || !window->readyForPainting()) {
             continue;
         }
-        if (isParked(window)) {
+        if (isParked(window) && !drawnAtFrame(window)) {
             if (drawnRect(window).contains(pos)) {
                 return window;
             }
@@ -506,6 +543,7 @@ void ParkedWindows::closed(Window *window)
 {
     const auto closeRanks = leaving(window);
     m_parked.erase(window);
+    resizeFinished(window);
     closeRanks();
 }
 

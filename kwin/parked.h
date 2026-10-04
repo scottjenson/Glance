@@ -161,6 +161,11 @@ public:
     // position and size. A restoring window is done once it has its
     // original size; then it just needs to be where it is drawn.
     void applyParked(Window *window);
+    // KWin's interactive resize (a window edge, Meta+right-drag) of a
+    // parked window: while it lasts, the drawing follows the frame at the
+    // window's scale, and the window stays parked where it is drawn.
+    void resizeStarted(Window *window);
+    void resizeFinished(Window *window);
     // Start animating a parked window from `from` to its `shown` place.
     void animate(Window *window, const QRectF &from);
     // Each frame, before painting: move animating windows on (ease-out);
@@ -174,7 +179,9 @@ public:
     // Set how any window is drawn (see applyParked; dragging uses it too).
     void setDrawTransform(Window *window, const QTransform &transform);
     // The window really visible at `pos`, like InputRedirection::findToplevel
-    // but using the drawn rectangle for parked windows.
+    // but using the drawn rectangle for parked windows (unless drawn
+    // exactly over the frame: then KWin's own hit test, which includes
+    // the decoration's resize borders outside the frame).
     Window *pick(const QPointF &pos, Window *ignore = nullptr) const;
     // A parked window that acts like an icon: anything in parking, and a
     // stashed one shown small enough (see iconBelow). Narrow windows (clips,
@@ -218,8 +225,18 @@ Q_SIGNALS:
 
 private:
     static qreal progress(const Parked &parked);
+    // Drawn exactly over its frame (scale 1, lined up).
+    bool drawnAtFrame(Window *window) const;
 
     std::map<Window *, Parked> m_parked;
+    // A parked window KWin is resizing: its drawing and frame at the start.
+    struct Resizing
+    {
+        Window *window;
+        QRectF drawn;
+        RectF frame;
+    };
+    std::optional<Resizing> m_resizing;
 };
 
 } // namespace glance

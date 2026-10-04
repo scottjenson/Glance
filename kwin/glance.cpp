@@ -304,10 +304,16 @@ private:
 
     void watch(Window *window)
     {
+        connect(window, &Window::interactiveMoveResizeStarted, this, [this, window]() {
+            if (window->isInteractiveResize()) {
+                m_parking.resizeStarted(window);
+            }
+        });
         connect(window, &Window::interactiveMoveResizeStepped, this, [this, window]() {
             m_drag.step(window);
         });
         connect(window, &Window::interactiveMoveResizeFinished, this, [this, window]() {
+            m_parking.resizeFinished(window);
             m_drag.finished(window);
         });
         connect(window, &Window::frameGeometryChanged, this, [this, window]() {

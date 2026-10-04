@@ -80,6 +80,19 @@ the drawing, and KWin would give the window to that monitor. Possible
 next step, if needed: move the frame only on enter, pause and press, and
 over the title bar (the "hybrid", talked through with the user).
 
+Resizing parked windows (2026-10-04): a parked window drawn exactly over
+its frame (scale 1, e.g. a stashed Konsole whose app was resized to fit)
+is picked by KWin's own `hitTest`, which includes the decoration's
+invisible resize borders outside the frame. Before, `pick` used only the
+drawn rectangle, so a press in the resize border went to the window
+behind and the resize never started. While KWin resizes a parked window
+(`ParkedWindows::resizeStarted`/`resizeFinished`, from
+`interactiveMoveResizeStarted`), `shown` follows the frame at the
+window's scale; it stays parked at its new size (`original` unchanged).
+Windows drawn smaller than their app (scale < 1: small windows that
+can't shrink, e.g. clips in a stash, and parking icons) still have no
+resize edges: KWin's borders sit around the invisible full-size frame.
+
 ## Tiny parked windows act like icons
 `ParkedInput::holdPress`, `pendingMotion`,
 `releasePending`, with `ParkedWindows::isIcon`; decided with the user 2026-09-29: windows in parking,

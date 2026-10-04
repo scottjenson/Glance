@@ -1,20 +1,26 @@
 # Backlog
 
-## Agreed with the user, not built yet
-- Crowding of parking columns (should take 10-15); stashes are settled
-  (free placement, overlap allowed, Meta+wheel to resize; 2026-10-03).
-- Possible later (stash talk 2026-10-03): Meta+wheel over empty parking
-  space sizes all icons at once (dock-size slider).
-- Declutter follow-ups: double-clicking two windows to share main; QoL
-  tweaks the user noticed but hasn't listed; undo only covers the last
-  declutter (offered: undo a whole chain).
-- Tuning by feel, as the user uses things: Meta+drag gain/build/slow,
-  pause time, snap regions (middle band 20%, parking band 15%); bounce
-  frames; preview grow (2x; 2.5x if unreadable).
-- Watch the logout hang ([docs/logout-hang.md](../docs/logout-hang.md)).
-- Watch KDE's launcher opening by itself (fixed 2026-10-03 as far as
+## Order agreed with the user (2026-10-04)
+1. Alt+Tab phase 2: click a window in the map to choose it
+   ([docs/alt-tab.md](../docs/alt-tab.md)).
+2. Packaging, first steps: an MIT `LICENSE` file; refuse to load when the
+   running KWin differs from the one Glance was built against (it uses
+   KWin internals, see [code-review.md](code-review.md), smaller notes).
+
+## Later (kept, not now)
+- Clips: rich text ([clips-back.md](clips-back.md)); clips aren't
+  restored after a login.
+
+## Watch
+- The logout hang ([docs/logout-hang.md](../docs/logout-hang.md)).
+- KDE's launcher opening by itself (fixed 2026-10-03 as far as
   known, [docs/keyboard.md](../docs/keyboard.md); it happened once more,
   maybe a real Meta tap). If it recurs, log Meta key timings again.
+
+Dropped 2026-10-04 (user: good enough for testing, revisit only if play
+shows a need): crowding of parking columns (10-15 is fine), Meta+wheel
+over empty parking to size all icons, declutter follow-ups, tuning by
+feel, Meta+C with a clipboard image.
 
 ## Polish
 Re-anchor less often (e.g. on press/scroll, or after enough movement;
@@ -29,9 +35,9 @@ or VM load); one unexplained freeze in main that didn't recur.
 Not yet: the user wants quality-of-life features first; shipping is the
 long-term goal. Fedora COPR / Arch AUR, like other third-party KWin effects
 (Better Blur, KDE Rounded Corners). Internal API, so it must be rebuilt per
-Plasma release. `README.md` (with install steps) is done; an MIT `LICENSE`
-file is not (metadata.json already says MIT). The user hasn't decided
-whether to hide their email in commits (GitHub noreply).
+Plasma release. `README.md` (with install steps) is done; the `LICENSE`
+file and the KWin version check are next (see the order above). The user hasn't
+decided whether to hide their email in commits (GitHub noreply).
 
 ## Ideas (not agreed)
 Trackpad gestures (discussed 2026-09-30, skipped for now; KWin's input

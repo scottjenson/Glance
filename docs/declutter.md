@@ -8,7 +8,6 @@ every other window in main goes to a stash; on a stash/parking window, same
 Meta+double-click again undoes (only the last declutter). Stashes are
 balanced (count-based, windows keep their left-to-right order) and each
 stash gets one common scale that fits its column (so it lines up).
-Follow-ups: [plans/backlog.md](../plans/backlog.md).
 
 ## How it works
 The `Declutter` component (`kwin/declutter.h/.cpp`): `button`, `toggle`,

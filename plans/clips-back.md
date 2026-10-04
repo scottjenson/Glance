@@ -16,12 +16,13 @@ simple HTML. Main work: cleaning web HTML down to bold/italic/links/
 lists/headings; images inside web HTML are often remote links.
 
 Images: built ([docs/clips.md](../docs/clips.md), "Image clips"). Left
-out: Meta+C with a clipboard image (Firefox's Copy Image gives real PNG
-data, so it would be easy), https-only drags (download).
+out: Meta+C with a clipboard image (dropped by the user, 2026-10-04),
+https-only drags (download).
 
 ## Open questions
 - Clips after logout: the files stay in ~/Clips but the windows aren't
-  restored at login.
+  restored at login (kept for later, 2026-10-04).
+- Alt+Tab shows clips with the icon only.
 - Parked windows' invisible full-size frames can catch drops meant for
   other parked windows (KWin's drag and drop goes by frames; the general
   input-transform limit, see the backlog's long term).

@@ -70,7 +70,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map (phase 1; phase 2 listed there) |
 | [docs/logout-hang.md](docs/logout-hang.md) | Plasmashell hangs at logout: a KDE clipboard deadlock (root cause known, harmless, left alone) |
 | [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
-| [plans/backlog.md](plans/backlog.md) | Agreed-but-unbuilt items, polish, packaging, ideas |
+| [plans/backlog.md](plans/backlog.md) | The agreed order of work, polish, packaging, ideas |
 | [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text |
 | [plans/code-review.md](plans/code-review.md) | Architecture/performance review (2026-10-03): 5 fixes to make, what to keep; read before touching painting, input routing or clips |
 | [plans/refactor.md](plans/refactor.md) | Splitting main.cpp into components (review finding 5; done through stage 4); the smoke test to run after changes |
@@ -106,14 +106,12 @@ Meta+drag activates and raises; image clips (Firefox drops tested by the
 user; Dolphin file drops and dragging an image clip into apps not yet
 confirmed). README.md is up to date.
 
-Next: not decided; ask the user. Suggested: the fixes in
-[plans/code-review.md](plans/code-review.md); crowding of parking columns
-(agreed, needs design talk first); Meta+C with a clipboard image; stash follow-ups (should small stashed windows stop
-acting like icons? Meta+wheel speed/direction by feel). Other
-candidates: Alt+Tab phase 2 (click in the map etc.,
-[docs/alt-tab.md](docs/alt-tab.md)); declutter follow-ups; rich-text
-clips; open clip questions (clips aren't restored after login; Alt+Tab
-shows clips with the icon only).
+Next (agreed 2026-10-04, in this order): Alt+Tab phase 2, click a
+window in the map to choose it ([docs/alt-tab.md](docs/alt-tab.md));
+then packaging's first steps, an MIT LICENSE file and refusing to load
+on a different KWin version. Later: rich-text clips, restoring clips
+after login. The rest of the list was dropped for now
+([plans/backlog.md](plans/backlog.md)).
 
 ## How the effect works (kwin/glance.cpp and its components, the basics)
 - It is a KWin **effect**, not a plain `KWin::Plugin`, so `prePaintWindow`

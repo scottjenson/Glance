@@ -128,9 +128,7 @@ visible; the label identifies it.
 - Testing without a keyboard: `GLANCE_TEST_MAP=1` opens the map 3 s after
   loading (see CLAUDE.md for the headless screenshot loop).
 
-## Phase 2 (agreed to wait until phase 1 had been used)
-- Mouse in the map: click a window to choose it.
-- App grouping hint: the selected window's sibling windows lightly
-  undimmed.
-- Tuning by feel: map scale (50%), dim level, hold delay, animation time,
-  pile threshold.
+## Phase 2
+- Mouse in the map: click a window to choose it (next, 2026-10-04).
+- Later, maybe: the selected window's sibling windows lightly undimmed
+  (app grouping hint).

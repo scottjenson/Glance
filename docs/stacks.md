@@ -27,5 +27,5 @@ predict, and the automatic placement felt heavy-handed. Now:
 
 ## How it works
 `arrange` and `leaving` only act on parking areas (`isParkingArea`: areas
-0 and 2 of `areaOf`). Still open: crowding of parking (10-15 icons), see
-[plans/backlog.md](../plans/backlog.md).
+0 and 2 of `areaOf`). Crowding of parking: 10-15 icons per column is
+enough for testing (user, 2026-10-04); no extra crowding design for now.

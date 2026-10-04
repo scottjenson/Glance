@@ -138,9 +138,14 @@ shows clips with the icon only).
   WideMonitorUX on 2026-09-30), branch
   `main`, remote `origin` over HTTPS. `gh` is logged in and is the git
   credential helper, so `git push` works without prompts.
-  If a push says the token is invalid (happened 2026-10-03), the user
-  runs `gh auth login -h github.com -p https -w` (browser login with a
-  one-time code; a hand-made token needs repo, read:org and workflow).
+  If a push says the token is invalid (happened twice on 2026-10-03,
+  suspected: the keyring loses it at logout), the user runs
+  `gh auth login -h github.com -p https -w --insecure-storage` (the agent
+  may not; give it as a tiny script, the VM clipboard is broken). It
+  shows an 8-character code: the user types it at
+  github.com/login/device on the Mac and clicks Authorize (no
+  checkboxes; a hand-made token needs repo, read:org and workflow). On
+  2026-10-03 it still landed in the keyring: watch after the next logout.
 - Local git identity (repo-only config): Scott Jenson <scott@jenson.org>.
 - The user wants work committed and pushed so nothing is lost. Commit when a
   change is done and working; ask before pushing anything unusual.

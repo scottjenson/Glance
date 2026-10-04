@@ -26,10 +26,8 @@ parking (`isPreviewable`): since stashes are free placement, a stashed
 window dropped near the edge can be icon-sized too, and it previewed by
 mistake (fixed 2026-10-03).
 
-## Meta+wheel zoom
-A Meta+wheel zoom (see [meta-wheel.md](meta-wheel.md)) is the lasting
-version of a preview: capped at the preview size, it makes room in the
-column instead of covering neighbours. `previewRect` goes by the icon's
-unzoomed size (`baseWidth`), so a zoomed icon still previews to the same
-size. After a zoom, `m_noPreview` keeps that icon from previewing until
-the pointer leaves it.
+## Meta+wheel
+Meta+wheel over an icon sizes its preview, up to the width of the edge
+zone ([meta-wheel.md](meta-wheel.md), `resizePreview`). Shrunk back to
+icon size it closes, and `m_noPreview` keeps it from previewing again
+until the pointer leaves.

@@ -2,13 +2,17 @@
 
 ## Design
 Agreed 2026-09-30, made stronger 2026-10-01: the active window has a 4 px
-accent-colored outline, same width on screen at any scale. Whenever a window
-gets the ring (any focus change: click, Meta+Alt+arrows, Alt+Tab, new
-window; user, 2026-10-02: "any window that gets highlighted for any reason")
-it bounces like a pressed button (user's design): frames 100%, 99%, 98%,
+accent-colored outline, same width on screen at any scale. When the ring
+moves by keyboard (Meta+Alt+arrows, Alt+Tab, and the chosen window after
+the Alt+Tab map) the window bounces like a pressed button (user's design): frames 100%, 99%, 98%,
 99%, 100%, 60 ms apart (`bounceFrames`, `bounceStep`; tried before: 3 frames
 to 96% at 150/100 ms, "chunky"; 5 frames to 96%, "too violent"; the user
 wants a tiny wiggle), stepped; every step, no movement-vs-release logic.
+Keyboard only since 2026-10-03 (`bounceRing`): before, any focus change
+bounced (user, 2026-10-02: "any window that gets highlighted for any
+reason"), and clicks, drags and apps taking focus made it busy (a text
+drag bounced windows back and forth). With the mouse the user is looking
+at the window already; with the keyboard focus can land anywhere.
 Tried and rejected the same day: a glow blooming on arrival ("overdone") and
 a ring travelling between windows (unclear whether it helped). Dimming
 inactive windows was rejected: stashed windows are meant to be used, not

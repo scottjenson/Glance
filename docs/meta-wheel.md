@@ -10,23 +10,27 @@ nothing else moves (except in parking, below).
 - **Stash**: drawn larger or smaller at once, between just above parking
   size and full size; the app gets the new size (`park`) once the
   scrolling stops (`wheelSettle`, 400 ms). It stays a stash window.
-- **Parking icon**: zooms between icon size and its hover-preview size,
-  never more, so it stays in parking ("no breaking out", user's rule).
-  One icon at a time; the column makes room like a slow, controlled Mac
-  dock: the windows above and below stay packed against it and slide
-  away (or back). A column that would go off screen shifts back on; one
-  that can't fit stops the zoom. The zoom is a "right now" thing: it is
-  lost when the window leaves parking. A preview open on the icon is the
-  starting size; the icon doesn't preview again until the pointer leaves.
+- **Parking icon**: sizes its hover preview (2026-10-03, second
+  version): up opens it at once (no wait) and grows it, down shrinks it;
+  from icon size up to the width of the edge zone (covers the stash,
+  never main), the screen height and the original size. It stays a
+  preview: it closes when the pointer leaves, so nothing is left in the
+  way. Shrunk to icon size it closes and stays closed until the pointer
+  leaves. Grown past the app's size, the app is resized to it when the
+  scrolling stops (sharp, not upscaled) and back when it closes. Clips:
+  up to 1:1 (their layout is their own).
+  First version (replaced): a lasting zoom between icon and preview
+  size, the column making room like a dock. The user: since hovering
+  already opens the preview, the wheel could only shrink it; growing for
+  good past it would cover the stash.
 
 ## How it works
 `metaWheel` (from `onAxis`): Meta alone, vertical, no buttons, no move or
 drag; target is `pick` (the window drawn there). Factor
 `exp(-delta * step)`, step `wheelStepWheel` (10% per 15-unit notch) or
 `wheelStepFinger` for touchpads. `resizeInMain`, `resizeInStash`
-(+ `settleWheel`), `zoomIcon` (+ `moveInColumn`). `Parked::zoom` holds the
-icon's zoom; `shown` is the zoomed rectangle, and everything that judges
-a window's place by its scale uses `baseWidth` (shown width / zoom).
+(+ `settleWheel`), `resizePreview` (+ `settleWheel` grows the app,
+`shrinkApp` in `closePreview` shrinks it back).
 
 A stash size set this way survives the next drag: the drag starts at that
 size (see `holdScale` in [dragging-and-parking.md](dragging-and-parking.md)).

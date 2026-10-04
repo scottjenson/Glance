@@ -50,3 +50,21 @@ Meta+Alt selects. Activates the nearest window in that direction by *drawn*
 position (centers, KWin's `switchWindow` scoring). KDE's own "Switch Window
 Left/Right/Up/Down" actions are disabled while loaded (they use real frames,
 wrong for parked windows); keys passed on, as for Meta+arrows.
+
+## Meta alone and KDE's launcher (2026-10-03)
+KDE opens its launcher when Meta is pressed and released with nothing in
+between. The user saw it open by itself mid-demo. Two causes: KWin calls
+the tap off when it sees a click or scroll during the press, but in its
+GlobalShortcut filter, which runs after ours, so a Meta+wheel or Meta
+click Glance takes left the tap standing; and VMware Fusion sometimes
+sends Command as an instant press+release (see CLAUDE.md). Now only a
+real tap opens the launcher (`metaKey`, `cancelMetaTap`):
+- a click or scroll Glance takes with a modifier held calls it off
+  (`Filter::pointerButton`/`pointerAxis`);
+- a press held longer than `metaTapMax` (400 ms) doesn't count (you meant
+  something else and let go), nor one shorter than `metaTapMin` (10 ms,
+  no hand is that fast: VMware's taps).
+KWin doesn't export its call for this; `cancelMetaTap` invokes the
+`cancelModiferOnlySequence` slot (sic) on KWin's kglobalaccel plugin, a
+static Qt plugin found through `QPluginLoader::staticPlugins()`. A warning
+is logged at load if it isn't found.

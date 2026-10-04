@@ -6,8 +6,8 @@ ordered by vertical position (an arriving window that lands on another
 goes below it). Arrivals (keyboard, drop) and departures (keyboard,
 dragged out, closed) re-form the column, animated (`arrangeArea`). The user
 said fixed slots would feel weird; it should be fluid. Parking is a
-managed dock, so tidying itself is expected there. Icons can be zoomed one
-at a time with Meta+wheel; the column makes room ([meta-wheel.md](meta-wheel.md)).
+managed dock, so tidying itself is expected there. Meta+wheel over an icon
+sizes its hover preview ([meta-wheel.md](meta-wheel.md)).
 
 ## Stash: free placement
 Stashes have no column (user's decision, 2026-10-03). Before, a window

@@ -60,7 +60,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 |---|---|
 | [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking, input to parked windows, icon-like tiny windows, minimize = park |
 | [docs/stacks.md](docs/stacks.md) | Parking columns; stashes are free placement |
-| [docs/meta-wheel.md](docs/meta-wheel.md) | Meta+wheel resizes in place; parking icons zoom |
+| [docs/meta-wheel.md](docs/meta-wheel.md) | Meta+wheel resizes in place; over parking icons it sizes the preview |
 | [docs/keyboard.md](docs/keyboard.md) | Meta+arrows ladder, Meta+Up/Down views, Meta+Alt+arrows selection |
 | [docs/meta-drag.md](docs/meta-drag.md) | Meta+drag acceleration and pause to snap |
 | [docs/focus-ring.md](docs/focus-ring.md) | Focus ring and bounce |
@@ -83,10 +83,13 @@ the docs table. Last changes (tested by the user, committed): Alt+Tab
 phase 1 (2026-10-02), minimize = park and the glance-clip app with
 drag-to-paste, free stash placement (no stash column), Meta+wheel
 resize/zoom ([docs/meta-wheel.md](docs/meta-wheel.md)) and previews for
-parking icons only (all 2026-10-03). Nothing uncommitted.
+parking icons only (all 2026-10-03). Later on 2026-10-03 (tested): a
+stashed window keeps its size when dragged, Meta+wheel over a parking icon
+sizes its preview, the bounce only on keyboard focus moves, KDE's launcher
+only on a real Meta tap. Built, not yet tested: Meta+drag activates (KDE's
+mouse command switched to "Activate, Raise and Move").
 
-Next: not decided; ask the user. Suggested: stash follow-ups (a
-hand-resized stash window keeps its size when dragged; should small
+Next: not decided; ask the user. Suggested: stash follow-ups (should small
 stashed windows stop acting like icons? Meta+wheel speed/direction by
 feel), then crowding of parking columns (agreed, needs design talk
 first). Other candidates: Alt+Tab phase 2
@@ -242,6 +245,14 @@ bt 20'"` (symbols download on demand; `coredumpctl list` first).
   with Ctrl+C in the VM. If a Meta+letter shortcut does nothing (no
   `glance:` log line), check Fusion's Key Mappings. Command+Tab may be
   taken by macOS itself before the VM sees it; check when building Meta+Tab.
+  Fusion sometimes holds Command back (2026-10-03, seen in a key log): the
+  Meta press reaches KWin only at release, as an instant press+release,
+  unless a click comes first. Then Meta+wheel arrives as a plain scroll
+  (Meta+drag still works, the click lets Command through). Workaround:
+  Command+click on the empty desktop once; it works again. Trigger not
+  pinned down (around switching to the Mac / making a clip).
+  Those instant taps also opened KDE's launcher at random; Glance now
+  ignores taps under 10 ms ([docs/keyboard.md](docs/keyboard.md)).
 - plasma-keyboard (KDE's on-screen keyboard, started by KWin) sometimes
   crashes at login inside Mesa's VMware `svga` driver (context creation;
   checked 2026-10-03 with `coredumpctl debug`): a VM GPU issue, not Glance.

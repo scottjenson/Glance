@@ -31,3 +31,11 @@ All numbers are first guesses to tune by feel. User verdict (2026-10-01):
 "a little weird" but worth the trade-off. Snapping mode (2026-10-02): "works
 well enough"; tuning may follow. The drag's start place uses our own
 recorded press: KWin's `interactiveMoveResizeAnchor()` follows the cursor.
+
+A Meta+drag activates and raises the window (2026-10-03, user: the
+dragged window didn't get the focus ring). KDE's Meta+left-drag is its
+mouse command "Move" (`commandAll1`), which doesn't activate; while
+Glance is loaded it is "Activate, Raise and Move" (`activatingMetaDrag`,
+kept on settings reloads, restored on unload), as a title-bar drag does
+with its press. Tried first and didn't work: activating from `dragStep`
+at the start of the move (the ring stayed on the old window).

@@ -1,6 +1,6 @@
 # Version check: a dialog when KWin didn't load Glance
 
-Built 2026-10-04. User's goal: after a Plasma update, a message on the
+Built and checked by the user 2026-10-04. User's goal: after a Plasma update, a message on the
 screen that is impossible to miss, instead of Glance silently doing
 nothing.
 

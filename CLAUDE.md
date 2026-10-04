@@ -112,10 +112,9 @@ in the map (built 2026-10-04: hover selects, click chooses; checked by
 the user, Meta+Tab untested as macOS takes Command+Tab,
 [docs/alt-tab.md](docs/alt-tab.md)); then packaging's first steps: the
 MIT LICENSE file (added 2026-10-04) and the version check (built
-2026-10-04, [docs/version-check.md](docs/version-check.md); the user
-runs `use-in-session.sh on` again for the login dialog, and tries
-`kwin/build/bin/glance-check --test`). Later: rich-text clips, restoring clips
-after login. The rest of the list was dropped for now
+2026-10-04, [docs/version-check.md](docs/version-check.md); checked by
+the user). That order is done; what comes next isn't decided: ask the
+user. Kept for later: rich-text clips, restoring clips after login. The rest of the list was dropped for now
 ([plans/backlog.md](plans/backlog.md)).
 
 ## How the effect works (kwin/glance.cpp and its components, the basics)

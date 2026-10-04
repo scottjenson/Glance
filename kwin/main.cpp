@@ -92,11 +92,7 @@
 // the window's height); only declutter lines a stash up. Crowding of
 // parking (a column taller than the screen) comes later.
 //
-// Meta+wheel resizes the window under the pointer in place, anchored at
-// the pointer (see metaWheel): in main a real resize, in a stash a scaled
-// one (the app follows when the scrolling stops). Over a parking icon it
-// sizes the icon's hover preview, up to the width of the edge zone; the
-// preview still closes when the pointer leaves (see resizePreview).
+// Meta+wheel resizes the window under the pointer in place (see wheel.h).
 //
 // Alt+Tab (and Meta+Tab; replaces KDE's window switcher): hunt and return,
 // and the desktop map while Alt is held (see alttab.h).
@@ -110,73 +106,45 @@
 // title bar doesn't respond and the cursor shape may be wrong.
 
 #include <core/output.h>
-#include <core/rendertarget.h>
 #include <core/renderviewport.h>
 #include <effect/effect.h>
 #include <effect/effecthandler.h>
 #include <effect/effectwindow.h>
 #include <input.h>
 #include <input_event.h>
-#include <keyboard_input.h>
-#include <main.h>
-#include <opengl/glutils.h>
 #include <options.h>
 #include <pointer_input.h>
 #include <scene/outlinedborderitem.h>
 #include <scene/windowitem.h>
-#include <utils/filedescriptor.h>
-#include <wayland/abstract_data_source.h>
-#include <wayland/clientconnection.h>
 #include <wayland/seat.h>
 #include <wayland/surface.h>
 #include <wayland_server.h>
 #include <window.h>
 #include <workspace.h>
 
-#include "geometry.h"
 #include "alttab.h"
 #include "clips.h"
 #include "declutter.h"
+#include "geometry.h"
 #include "parked.h"
 #include "previews.h"
-
-#include <KGlobalAccel>
+#include "wheel.h"
 
 #include <QAction>
-#include <QDateTime>
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QFontMetricsF>
 #include <QGuiApplication>
-#include <QIcon>
-#include <QImage>
-#include <QImageReader>
 #include <QMatrix4x4>
-#include <QMimeDatabase>
-#include <QPainter>
 #include <QPalette>
 #include <QPluginLoader>
 #include <QPointer>
-#include <QProcess>
-#include <QSocketNotifier>
-#include <QStyleHints>
 #include <QTimer>
 #include <QTransform>
-#include <QUrl>
 
 #include <algorithm>
-#include <functional>
 #include <chrono>
 #include <cmath>
-#include <map>
-#include <numeric>
+#include <functional>
 #include <optional>
 #include <set>
-
-#include <dlfcn.h>
-#include <fcntl.h>
-#include <unistd.h>
 
 using namespace KWin;
 using namespace glance;
@@ -216,15 +184,6 @@ public:
             }
         });
 
-        connect(&m_previews, &HoverPreviews::closing, this, [this](Window *window) {
-            if (m_wheelWindow == window) {
-                m_wheelSettle.stop();
-                m_wheelWindow = nullptr;
-            }
-        });
-        m_wheelSettle.setSingleShot(true);
-        m_wheelSettle.setInterval(wheelSettle);
-        connect(&m_wheelSettle, &QTimer::timeout, this, &Glance::settleWheel);
         m_anchorLate.setSingleShot(true);
         connect(&m_anchorLate, &QTimer::timeout, this, &Glance::anchorLate);
         updateRing();
@@ -521,7 +480,7 @@ public:
         if (m_altTab.switching() || m_altTab.mapShown()) {
             return true;
         }
-        if (metaWheel(event)) {
+        if (m_wheel.axis(event)) {
             return true;
         }
         if (!route(event->position, event->buttons != Qt::NoButton)) {
@@ -582,6 +541,7 @@ private:
     AltTab m_altTab{m_parking};
     Declutter m_declutter{m_parking};
     HoverPreviews m_previews{m_parking};
+    MetaWheel m_wheel{m_parking, m_previews};
 
     // The window being dragged while we draw it scaled, its original size,
     // and its scale relative to that.
@@ -654,10 +614,6 @@ private:
     };
     std::optional<PendingPress> m_pending;
 
-    // Meta+wheel on a stashed window or a preview (see metaWheel): the
-    // window, and the timer that resizes the app once the scrolling stops.
-    QPointer<Window> m_wheelWindow;
-    QTimer m_wheelSettle;
     // When Meta went down (see metaKey).
     std::chrono::microseconds m_metaDown{};
     // KWin's kglobalaccel plugin (see cancelMetaTap).
@@ -1295,149 +1251,6 @@ private:
                 window->move(frame.topLeft() + QPointF(m_leadX, 0));
             }
             m_parking.setDrawTransform(window, QTransform());
-        }
-    }
-
-    // --- Meta+wheel: resizing in place ---
-
-    // Meta+wheel (vertical) over a window grows it (scrolling up) or shrinks
-    // it, anchored at the pointer: the point under it stays put. In main the
-    // app is really resized at once. In a stash it is drawn larger or
-    // smaller (between just above parking size and full size), and the app
-    // gets the new size once the scrolling stops (wheelSettle). Over a
-    // parking icon it sizes the icon's preview (see resizePreview). Returns
-    // whether the event was taken.
-    bool metaWheel(PointerAxisEvent *event)
-    {
-        if (event->modifiers != Qt::MetaModifier || event->orientation != Qt::Vertical || event->delta == 0
-            || event->buttons != Qt::NoButton || workspace()->moveResizeWindow() || waylandServer()->seat()->isDrag()) {
-            return false;
-        }
-        Window *window = m_parking.pick(event->position);
-        if (!window || !manageable(window)) {
-            return false;
-        }
-        const qreal step = event->source == PointerAxisSource::Wheel ? wheelStepWheel : wheelStepFinger;
-        const qreal factor = std::exp(-event->delta * step);
-        auto *it = m_parking.find(window);
-        if (!it) {
-            resizeInMain(window, factor, event->position);
-        } else if (it->restoring) {
-            return true; // on its way somewhere: wait
-        } else if (m_parking.isParkingArea(m_parking.areaOf(window))) {
-            resizePreview(window, factor, event->position);
-        } else {
-            resizeInStash(window, factor, event->position);
-        }
-        return true;
-    }
-
-    void resizeInMain(Window *window, qreal factor, const QPointF &pos)
-    {
-        const RectF frame = window->moveResizeGeometry();
-        const RectF area = workspace()->clientArea(MaximizeArea, window);
-        const QSizeF appMin = window->clientSizeToFrameSize(window->minSize());
-        const QSizeF from(frame.width(), frame.height());
-        // Both sides by the same factor, each within its own limits.
-        const QSizeF to(std::clamp(from.width() * factor, std::max(wheelMinWidth, appMin.width()), std::max(area.width(), appMin.width())),
-                        std::clamp(from.height() * factor, std::max(wheelMinHeight, appMin.height()), std::max(area.height(), appMin.height())));
-        if (std::abs(to.width() - from.width()) < 0.5 && std::abs(to.height() - from.height()) < 0.5) {
-            return;
-        }
-        releaseKdeState(window);
-        const QRectF target = keptIn(QRectF(scaledTopLeft(QPointF(frame.x(), frame.y()), pos, from, to), to), area);
-        window->moveResize(RectF(target.x(), target.y(), target.width(), target.height()));
-    }
-
-    void resizeInStash(Window *window, qreal factor, const QPointF &pos)
-    {
-        Parked &parked = m_parking.at(window);
-        const qreal scale = parked.shown.width() / parked.original.width();
-        const qreal want = std::clamp(scale * factor, parkingScale(parked.original) + 0.03, parkBelow - 0.01);
-        if (std::abs(want - scale) < 1e-4) {
-            return;
-        }
-        if (m_wheelWindow && m_wheelWindow != window) {
-            settleWheel();
-        }
-        const QSizeF size = parked.shown.size() * (want / scale);
-        const QRectF from = m_parking.displayRect(parked);
-        parked.shown = keptIn(QRectF(scaledTopLeft(parked.shown.topLeft(), pos, parked.shown.size(), size), size),
-                              window->output()->geometryF());
-        if (parked.preview) { // a small stashed window can be previewed
-            parked.preview.reset();
-            m_previews.suppress(window);
-        }
-        m_parking.animate(window, from);
-        m_wheelWindow = window;
-        m_wheelSettle.start();
-    }
-
-    // The scrolling stopped: a stashed window's app is resized to fit (see
-    // park); a preview grown past its app's size gets the app resized to
-    // it, so it stays sharp (until the preview closes, see HoverPreviews::shrinkApp).
-    void settleWheel()
-    {
-        m_wheelSettle.stop();
-        if (Window *window = m_wheelWindow; window && m_parking.isParkedNotRestoring(window)) {
-            const Parked parked = m_parking.at(window);
-            if (!m_parking.isParkingArea(m_parking.areaOf(window))) {
-                m_parking.park(window, parked.shown, parked.original);
-            } else if (parked.preview && parked.preview->width() > window->frameGeometry().width() + 0.5) {
-                window->moveResize(RectF(parked.preview->topLeft(), parked.preview->size().toSize()));
-            }
-        }
-        m_wheelWindow = nullptr;
-    }
-
-    // Over a parking icon: its hover preview grows or shrinks (opening at
-    // once if it isn't open), anchored at its screen edge and vertically at
-    // the pointer, from icon size up to the width of the edge zone (so it
-    // covers the stash but never main), the screen height, and the
-    // original size; clips (whose layout is their own) up to 1:1. It is
-    // still a preview: it closes when the pointer leaves, so nothing stays
-    // in the way. Shrunk back to icon size it closes, and doesn't open
-    // again until the pointer leaves the icon. Grown past the app's size,
-    // the app follows once the scrolling stops (settleWheel).
-    void resizePreview(Window *window, qreal factor, const QPointF &pos)
-    {
-        Parked &parked = m_parking.at(window);
-        const RectF screen = window->output()->geometryF();
-        const RectF area = workspace()->clientArea(MaximizeArea, window);
-        const RectF frame = window->frameGeometry();
-        const QRectF current = parked.preview ? *parked.preview : parked.shown;
-        const qreal aspect = current.height() / current.width();
-        const qreal minWidth = parked.shown.width();
-        const qreal maxWidth = std::max(minWidth, isClip(window) ? frame.width()
-                                                                 : std::min({screen.width() * zoneFraction, area.height() / aspect,
-                                                                             parked.original.width()}));
-        const qreal width = std::clamp(current.width() * factor, minWidth, maxWidth);
-        if (std::abs(width - current.width()) < 0.5) {
-            return;
-        }
-        m_previews.stopTimers();
-        if (width <= minWidth + 0.5) {
-            if (parked.preview) {
-                m_previews.close(window);
-            }
-            m_previews.suppress(window);
-            return;
-        }
-        if (m_wheelWindow && m_wheelWindow != window) {
-            settleWheel();
-        }
-        if (Window *old = m_previews.current(); old && old != window) {
-            m_previews.close(old);
-        }
-        const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-        const QSizeF size(width, width * aspect);
-        const qreal anchor = std::clamp((pos.y() - current.y()) / current.height(), 0.0, 1.0);
-        const qreal y = std::clamp(pos.y() - anchor * size.height(), area.y(),
-                                   std::max(area.y(), area.y() + area.height() - size.height()));
-        m_previews.show(window, QRectF(QPointF(left ? parked.shown.left() : parked.shown.right() - size.width(), y), size));
-        if (!isClip(window)) {
-            m_wheelWindow = window;
-            m_wheelSettle.start();
         }
     }
 

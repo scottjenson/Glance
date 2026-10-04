@@ -22,6 +22,7 @@
 #include <KGlobalAccel>
 
 #include <QAction>
+#include <QBuffer>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -33,6 +34,7 @@
 #include <QSocketNotifier>
 #include <QTimer>
 #include <QUrl>
+#include <QtConcurrentRun>
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -42,6 +44,42 @@ using namespace KWin;
 
 namespace glance
 {
+
+namespace
+{
+
+// Save a clip's data as a new file in ~/Clips, or copy the dropped image
+// file there (closing the clip deletes its file). Returns its path, or
+// empty. Runs on a worker thread: an image can be large, and KWin's main
+// thread paints every frame and handles all input.
+QString saveClip(const QByteArray &data, const QString &imageFile, const QString &suffix)
+{
+    const QDir dir(QDir::home().filePath(QLatin1String(clipsFolder)));
+    if (!dir.mkpath(QStringLiteral("."))) {
+        qWarning("glance: clip: can't create %s", qPrintable(dir.path()));
+        return {};
+    }
+    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
+    QString path = dir.filePath(stamp + QLatin1Char('.') + suffix);
+    for (int i = 2; QFile::exists(path); ++i) {
+        path = dir.filePath(QStringLiteral("%1 (%2).%3").arg(stamp).arg(i).arg(suffix));
+    }
+    if (!imageFile.isEmpty()) {
+        if (!QFile::copy(imageFile, path)) {
+            qWarning("glance: clip: can't copy %s to %s", qPrintable(imageFile), qPrintable(path));
+            return {};
+        }
+        return path;
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size()) {
+        qWarning("glance: clip: can't write %s", qPrintable(path));
+        return {};
+    }
+    return path;
+}
+
+} // namespace
 
 Clips::Clips(ParkedWindows &parking, const QPointF &lastPress)
     : m_parking(parking)
@@ -217,7 +255,13 @@ void Clips::readClip()
     char buffer[4096];
     while (m_clip) {
         const ssize_t n = read(m_clip->fd, buffer, sizeof(buffer));
-        if (n > 0) {
+        if (n > 0 && m_clip->text.size() + n > clipMaxBytes) {
+            qWarning("glance: clip: more than %lld MB of %s, given up", qlonglong(clipMaxBytes >> 20),
+                     qPrintable(m_clip->mimeType));
+            m_clip->tooLarge = true;
+            m_clip->text.clear();
+            finishClip();
+        } else if (n > 0) {
             m_clip->text.append(buffer, n);
         } else if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
             return; // more to come
@@ -228,8 +272,9 @@ void Clips::readClip()
 }
 
 // All data read (or given up): for a drop, end the drag and pass the
-// release on; save and open the clip. A dragged file that isn't a single
-// image is dropped where it was going after all (on Plasma).
+// release on; save the clip (see saveClip) and open it. A dragged file that
+// isn't a single image is dropped where it was going after all (on
+// Plasma).
 void Clips::finishClip()
 {
     const std::unique_ptr<ClipRead> clip = std::move(m_clip);
@@ -254,21 +299,18 @@ void Clips::finishClip()
         seat->notifyPointerButton(clip->nativeButton, PointerButtonState::Released);
         seat->notifyPointerFrame();
     }
-    if (!ours) {
+    if (!ours || clip->tooLarge) {
         return;
     }
 
-    if (image && QImage::fromData(clip->text).isNull()) {
+    // Only the image's header is read, not the whole image decoded.
+    QBuffer imageData(&clip->text);
+    if (image && (!imageData.open(QIODevice::ReadOnly) || !QImageReader(&imageData).canRead())) {
         qWarning("glance: clip: no image received (%s, %lld bytes)", qPrintable(clip->mimeType), qlonglong(clip->text.size()));
         return;
     }
     if (!image && imageFile.isEmpty() && clip->text.trimmed().isEmpty()) {
         qWarning("glance: clip: no text received");
-        return;
-    }
-    const QDir dir(QDir::home().filePath(QLatin1String(clipsFolder)));
-    if (!dir.mkpath(QStringLiteral("."))) {
-        qWarning("glance: clip: can't create %s", qPrintable(dir.path()));
         return;
     }
     QString suffix = QStringLiteral("txt");
@@ -277,26 +319,20 @@ void Clips::finishClip()
     } else if (!imageFile.isEmpty()) {
         suffix = QFileInfo(imageFile).suffix().toLower();
     }
-    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
-    QString path = dir.filePath(stamp + QLatin1Char('.') + suffix);
-    for (int i = 2; QFile::exists(path); ++i) {
-        path = dir.filePath(QStringLiteral("%1 (%2).%3").arg(stamp).arg(i).arg(suffix));
-    }
-    // A dropped image file is copied: closing the clip deletes its file.
-    if (!imageFile.isEmpty()) {
-        if (!QFile::copy(imageFile, path)) {
-            qWarning("glance: clip: can't copy %s to %s", qPrintable(imageFile), qPrintable(path));
-            return;
-        }
-    } else {
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly) || file.write(clip->text) != clip->text.size()) {
-            qWarning("glance: clip: can't write %s", qPrintable(path));
-            return;
-        }
-        file.close();
-    }
+    const QString what = imageFile.isEmpty() ? QStringLiteral("%1 bytes of %2").arg(clip->text.size()).arg(clip->mimeType) : imageFile;
+    QtConcurrent::run(saveClip, clip->text, imageFile, suffix)
+        .then(this, [this, what, position = clip->position, place = clip->place](const QString &path) {
+            if (!path.isEmpty()) {
+                qInfo("glance: clip: %s -> %s", qPrintable(what), qPrintable(path));
+                openClip(path, position, place);
+            }
+        });
+}
 
+// Open a saved clip in glance-clip; its window goes to `position`, or to
+// the parking column `place` (see placeClip).
+void Clips::openClip(const QString &path, const QPointF &position, std::optional<Place> place)
+{
     // KWin's own environment for the apps it starts, without the plugin
     // path that loads this effect from the build folder. Started in its own
     // systemd scope in app.slice, like apps Plasma starts: otherwise it
@@ -318,10 +354,8 @@ void Clips::finishClip()
         return;
     }
     m_clipPid = pid;
-    m_clipPosition = clip->position;
-    m_clipPlace = clip->place;
-    qInfo("glance: clip: %s -> %s", qPrintable(imageFile.isEmpty() ? QStringLiteral("%1 bytes of %2").arg(clip->text.size()).arg(clip->mimeType) : imageFile),
-          qPrintable(path));
+    m_clipPosition = position;
+    m_clipPlace = place;
 }
 
 // The local image file a dropped file list (text/uri-list: one URL per

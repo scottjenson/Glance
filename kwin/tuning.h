@@ -78,6 +78,9 @@ inline constexpr qreal parkingBand = 0.15;
 // image (it may encode it first).
 inline constexpr std::chrono::milliseconds clipTimeout{2000};
 inline constexpr std::chrono::milliseconds clipImageTimeout{6000};
+// The most data a clip takes (text or an image, in bytes): more is given up
+// on, so an app can't grow KWin's memory without end.
+inline constexpr qsizetype clipMaxBytes = 50 * 1024 * 1024;
 
 // Width of the focus ring on screen (logical pixels).
 inline constexpr qreal ringWidth = 4.0;

@@ -92,6 +92,8 @@ private:
         std::unique_ptr<QSocketNotifier> notifier = nullptr;
         QString mimeType = {};
         QByteArray text = {};
+        // More than clipMaxBytes came: given up on.
+        bool tooLarge = false;
         QPointF position;
         std::optional<Place> place = std::nullopt;
         bool fromDrag = false;
@@ -118,6 +120,7 @@ private:
     bool startClip(KWin::AbstractDataSource *source, const QString &mimeType, ClipRead clip);
     void readClip();
     void finishClip();
+    void openClip(const QString &path, const QPointF &position, std::optional<Place> place);
     static QString droppedImageFile(const QByteArray &uriList);
     static QString clipApp();
     static Window *clipWindowOf(KWin::AbstractDataSource *source);

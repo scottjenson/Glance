@@ -1,4 +1,4 @@
-# Alt+Tab: hunt and return, the desktop map (built, phase 1)
+# Alt+Tab: hunt and return, the desktop map (built: phase 1, pointer in the map)
 
 Designed and built 2026-10-02; tested by the user the same day.
 
@@ -60,8 +60,16 @@ window becomes first, the one you came from second.
     place (ring + bounce). Esc: cancel, back as before.
   - Panels, notifications and anything else not in the map fade out. The
     wallpaper shrinks with the map; the bands above and below are black.
-  - The pointer does nothing while switching (clicks, wheel and motion
-    are swallowed; the cursor still moves).
+  - **The pointer** (phase 2, 2026-10-04): moving it over a window in the
+    map selects it (undimmed, ring and label, no bounce: that is for
+    keyboard moves); releasing Alt then chooses it, as after a Tab. A left
+    click on a window chooses it at once: the map closes and the window
+    gets focus in place (ring + bounce). The label counts as part of the
+    selected window. Clicks elsewhere, other buttons and the wheel do
+    nothing; whatever the pointer does while switching is swallowed (a
+    click's release too, even after the map has closed), the cursor still
+    moves. Like KDE's own switcher, a clicked window gets the keyboard back
+    while Alt is still held.
 - **Drawing only**: real frames never move, so apps don't re-lay out and
   the return is exact.
 
@@ -100,7 +108,9 @@ visible; the label identifies it.
   `FocusChain` isn't exported to plugins.
 
 ## How it works (the `AltTab` component, kwin/alttab.h/.cpp)
-- `key` / `startSwitch` / `step` / `finishSwitch`; `m_hold` opens the
+- `key` / `startSwitch` / `step` / `finishSwitch`; the pointer:
+  `motion` / `button`, hit-tested with `mapWindowAt` (front to back,
+  where the map draws each window in this frame; `m_labelRect` first); `m_hold` opens the
   map (`openMap`); `closeMap` animates back from wherever it is.
 - `paintWindow`: on top of everything else (parked transforms, bounce),
   the paint data's scale and translation take each window from where it
@@ -126,9 +136,9 @@ visible; the label identifies it.
 - Log lines: `glance: switch started`, `map shown (N windows, M spread)`,
   `window chosen: ...`, `switch cancelled`.
 - Testing without a keyboard: `GLANCE_TEST_MAP=1` opens the map 3 s after
-  loading (see CLAUDE.md for the headless screenshot loop).
+  loading (`=N`: after N s) (see CLAUDE.md for the headless screenshot loop).
 
 ## Phase 2
-- Mouse in the map: click a window to choose it (next, 2026-10-04).
+- Mouse in the map: built 2026-10-04 (see Interaction, "The pointer").
 - Later, maybe: the selected window's sibling windows lightly undimmed
   (app grouping hint).

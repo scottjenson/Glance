@@ -6,7 +6,9 @@
 // overlapping windows spread into rows above and below their pile; a label
 // at the bottom of the selected window names it (icon and title). Tab /
 // Shift+Tab move the selection, releasing Alt focuses it where it is, Esc
-// cancels. Nothing moves: only the drawing changes.
+// cancels. The pointer selects too: moving over a window in the map selects
+// it, clicking one chooses it at once. Nothing moves: only the drawing
+// changes.
 //
 // The focus ring (kept by the effect) follows the selection: see
 // highlighted, mapZoom and the signals.
@@ -34,6 +36,7 @@ namespace KWin
 {
 class GLTexture;
 struct KeyboardKeyEvent;
+struct PointerButtonEvent;
 class RenderTarget;
 class RenderViewport;
 class ScreenPrePaintData;
@@ -61,6 +64,12 @@ public:
     // Every key while a switch is on, and the one that starts it. Returns
     // whether to swallow it.
     bool key(KWin::KeyboardKeyEvent *event);
+    // The pointer while a switch is on or the map is up: it does nothing
+    // else meanwhile. Moving over a window in the map selects it, a left
+    // click on one chooses it. Return whether to swallow the event (also
+    // the release of a press swallowed here).
+    bool motion(const QPointF &position);
+    bool button(const KWin::PointerButtonEvent *event);
 
     // The window that gets the focus ring: the active one, or during a
     // switch the selected one (then the chosen one until it is active).
@@ -118,6 +127,7 @@ private:
     void noteActivated(Window *window);
     void startSwitch(Qt::KeyboardModifier modifier);
     void step(int direction);
+    void select(Window *window);
     Window *mapSelected() const;
     void finishSwitch(bool accept);
 
@@ -127,6 +137,7 @@ private:
     qreal mapProgress() const;
     QRectF toMap(const QRectF &rect) const;
     QRectF mapped(Window *window, const QRectF &from) const;
+    Window *mapWindowAt(const QPointF &position) const;
     std::map<Window *, QRectF> spreadPiles(const QRectF &screen) const;
 
     void paintLabel(const KWin::RenderTarget &renderTarget, const KWin::RenderViewport &viewport,
@@ -144,12 +155,17 @@ private:
     std::optional<Map> m_map;
     // How far open the map is in this frame (0 to 1).
     qreal m_mapOpen = 0;
-    // The label's texture, its size on screen, and what it shows.
+    // The label's texture, its size, where it was last drawn, and what it
+    // shows.
     std::unique_ptr<KWin::GLTexture> m_label;
     QSizeF m_labelSize;
+    QRectF m_labelRect;
     QPointer<Window> m_labelWindow;
     QString m_labelCaption;
     qreal m_labelScale = 0;
+    // Pointer buttons pressed while switching: their releases are
+    // swallowed too, even after the switch ends.
+    std::set<quint32> m_buttons;
 };
 
 } // namespace glance

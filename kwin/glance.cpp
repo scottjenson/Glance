@@ -171,8 +171,8 @@ public:
         Effect::postPaintScreen();
     }
 
-    // Input, in the order the components get it. While Alt+Tab is on, the
-    // pointer does nothing and keys go to it. A dragged clip follows the
+    // Input, in the order the components get it. While Alt+Tab is on, keys
+    // go to it and the pointer only selects or chooses in its map. A dragged clip follows the
     // pointer. A held icon press decides between click and drag before
     // anything else sees motion. Meta+double-click, then drops (clips),
     // then icon presses get buttons; Meta+wheel gets the wheel. Whatever
@@ -197,8 +197,8 @@ public:
 
     bool onMotion(PointerMotionEvent *event)
     {
-        if (m_altTab.switching() || m_altTab.mapShown()) {
-            return true; // the pointer does nothing while switching
+        if (m_altTab.motion(event->position)) {
+            return true;
         }
         if (m_clips.dragging()) {
             m_clips.follow(event->position);
@@ -214,7 +214,7 @@ public:
     bool onButton(PointerButtonEvent *event)
     {
         const bool pressed = event->state == PointerButtonState::Pressed;
-        if (pressed && (m_altTab.switching() || m_altTab.mapShown())) {
+        if (m_altTab.button(event)) {
             return true;
         }
         if (pressed) {

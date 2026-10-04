@@ -67,7 +67,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/declutter.md](docs/declutter.md) | Meta+double-click declutter and undo |
 | [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
 | [docs/clips.md](docs/clips.md) | Text and image drops and Meta+C become clip windows (glance-clip sticky notes) that drag back into documents |
-| [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map (phase 1; phase 2 listed there) |
+| [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map; hover selects, click chooses |
 | [docs/logout-hang.md](docs/logout-hang.md) | Plasmashell hangs at logout: a KDE clipboard deadlock (root cause known, harmless, left alone) |
 | [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
 | [plans/backlog.md](plans/backlog.md) | The agreed order of work, polish, packaging, ideas |
@@ -106,9 +106,10 @@ Meta+drag activates and raises; image clips (Firefox drops tested by the
 user; Dolphin file drops and dragging an image clip into apps not yet
 confirmed). README.md is up to date.
 
-Next (agreed 2026-10-04, in this order): Alt+Tab phase 2, click a
-window in the map to choose it ([docs/alt-tab.md](docs/alt-tab.md));
-then packaging's first steps, an MIT LICENSE file and refusing to load
+Next (agreed 2026-10-04, in this order): Alt+Tab phase 2, the pointer
+in the map (built 2026-10-04: hover selects, click chooses; waiting for
+the user's check, [docs/alt-tab.md](docs/alt-tab.md)); then packaging's
+first steps, an MIT LICENSE file and refusing to load
 on a different KWin version. Later: rich-text clips, restoring clips
 after login. The rest of the list was dropped for now
 ([plans/backlog.md](plans/backlog.md)).
@@ -246,7 +247,8 @@ QT_FORCE_STDERR_LOGGING=1 kwin_wayland --virtual --socket es-check
 
 Headless screenshot loop (the agent can check drawing itself, no logout):
 a virtual KWin on its own D-Bus, with windows, `GLANCE_TEST_MAP=1` (opens
-the Alt+Tab map 3 s after loading) and Spectacle; then measure the PNG:
+the Alt+Tab map 3 s after loading; `=N`: after N s, as Konsole can take
+longer to start) and Spectacle; then measure the PNG:
 `GLANCE_TEST_MAP=1 XDG_RUNTIME_DIR=/run/user/1000
 QT_PLUGIN_PATH=$PWD/kwin/build/bin dbus-run-session -- kwin_wayland
 --virtual --width 4004 --height 1630 --scale 1.5 --socket glance-test

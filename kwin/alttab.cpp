@@ -53,9 +53,11 @@ AltTab::AltTab(ParkedWindows &parking)
         }
     });
     // For checking the map without a keyboard (e.g. in a headless KWin
-    // with a screenshot): GLANCE_TEST_MAP=1 opens it 3 s after loading.
+    // with a screenshot): GLANCE_TEST_MAP=1 opens it 3 s after loading,
+    // GLANCE_TEST_MAP=N after N s (slow-starting apps).
     if (qEnvironmentVariableIsSet("GLANCE_TEST_MAP")) {
-        QTimer::singleShot(3000, this, [this]() {
+        const int seconds = std::max(3, qEnvironmentVariableIntValue("GLANCE_TEST_MAP"));
+        QTimer::singleShot(seconds * 1000, this, [this]() {
             startSwitch(Qt::AltModifier);
             step(1); // the hold timer then opens the map
         });
@@ -178,6 +180,56 @@ void AltTab::step(int direction)
     }
 }
 
+// The pointer moved over `window` in the map: it becomes the selection.
+// The ring follows without a bounce (that is for keyboard moves).
+void AltTab::select(Window *window)
+{
+    const auto it = std::ranges::find_if(m_switch->windows, [window](const QPointer<Window> &w) {
+        return w == window;
+    });
+    if (it == m_switch->windows.end() || window == mapSelected()) {
+        return;
+    }
+    m_switch->index = int(it - m_switch->windows.begin());
+    Q_EMIT ringChanged();
+    effects->addRepaintFull(); // the selection is undimmed, the label moves
+}
+
+bool AltTab::motion(const QPointF &position)
+{
+    if (!m_switch && !m_map) {
+        return false;
+    }
+    if (m_switch && m_map && !m_map->closing) {
+        if (Window *window = mapWindowAt(position)) {
+            select(window);
+        }
+    }
+    return true;
+}
+
+// A left click on a window in the map chooses it, as releasing the modifier
+// would (like KDE's own switcher, the window gets the keyboard back while
+// the modifier is still held). Clicks elsewhere do nothing.
+bool AltTab::button(const PointerButtonEvent *event)
+{
+    if (event->state == PointerButtonState::Released) {
+        return m_buttons.erase(event->nativeButton) > 0;
+    }
+    if (!m_switch && !m_map) {
+        return false;
+    }
+    m_buttons.insert(event->nativeButton);
+    if (event->button == Qt::LeftButton && m_switch && m_map && !m_map->closing) {
+        if (Window *window = mapWindowAt(event->position)) {
+            select(window);
+            qInfo("glance: chosen by click");
+            finishSwitch(true);
+        }
+    }
+    return true;
+}
+
 // The selected window: the switch's, or the chosen one while the map
 // closes.
 Window *AltTab::mapSelected() const
@@ -294,6 +346,27 @@ QRectF AltTab::mapped(Window *window, const QRectF &from) const
 {
     auto it = m_map->spread.find(window);
     return lerpRect(from, it != m_map->spread.end() ? it->second : toMap(from), m_mapOpen);
+}
+
+// The window the map draws at `position` in this frame, or null. The label
+// counts as part of the selected window (it is drawn over its neighbours).
+Window *AltTab::mapWindowAt(const QPointF &position) const
+{
+    Window *selected = mapSelected();
+    if (selected && m_label && m_labelWindow == selected && m_labelRect.contains(position)) {
+        return selected;
+    }
+    const auto &stacking = workspace()->stackingOrder();
+    for (auto it = stacking.rbegin(); it != stacking.rend(); ++it) {
+        if (!m_map->windows.contains(*it)) {
+            continue;
+        }
+        const QRectF drawn = m_parking.currentlyDrawn(*it);
+        if (drawn.width() > 0 && mapped(*it, drawn).contains(position)) {
+            return *it;
+        }
+    }
+    return nullptr;
 }
 
 qreal AltTab::mapZoom(Window *window) const
@@ -425,6 +498,7 @@ void AltTab::paintLabel(const RenderTarget &renderTarget, const RenderViewport &
     const QSizeF size = m_labelSize;
     const qreal x = std::clamp(drawn.center().x() - size.width() / 2, area.left(), area.right() - size.width());
     const QPointF topLeft(x, drawn.bottom() - size.height());
+    m_labelRect = QRectF(topLeft, size);
     QMatrix4x4 mvp = viewport.projectionMatrix();
     mvp.translate(std::round(topLeft.x() * scale), std::round(topLeft.y() * scale));
     const qreal opacity = m_mapOpen;

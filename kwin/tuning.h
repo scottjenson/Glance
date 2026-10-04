@@ -24,9 +24,10 @@ inline constexpr qreal minScale = 0.15;
 // But no narrower than this (logical pixels): narrow windows (clips,
 // small dialogs) would be specks at minScale (see parkingScale).
 inline constexpr qreal parkingMinWidth = 180.0;
-// Parked windows drawn smaller than this (relative to the original size)
+// Stashed windows drawn smaller than this (relative to the original size)
 // act like icons: drag anywhere to move, click passes through. Larger
 // ones stay normal windows, so their content keeps every interaction.
+// Windows in parking are always icons, whatever their scale.
 inline constexpr qreal iconBelow = 0.25;
 // How far (logical pixels) a press on an icon must move to become a drag.
 inline constexpr qreal dragThreshold = 6.0;

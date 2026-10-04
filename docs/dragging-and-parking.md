@@ -81,9 +81,13 @@ over the title bar (the "hybrid", talked through with the user).
 
 ## Tiny parked windows act like icons
 `holdPress`, `pendingMotion`,
-`releasePending`; decided with the user 2026-09-29: parked windows drawn
-below `iconBelow` (0.25) of their original size hold back a plain left
-press. Moving more than `dragThreshold` (6 px) starts KWin's own move
+`releasePending`; decided with the user 2026-09-29: windows in parking,
+and stashed windows drawn below `iconBelow` (0.25) of their original size,
+hold back a plain left press (`isIcon`). Parking counts whatever the
+scale (fixed 2026-10-04): a narrow window is drawn above 0.25 there
+(parking is at least `parkingMinWidth`, 180 px, wide), e.g. Firefox at
+its 500 px minimum width, which it reopens at after a logout while
+parked; it got neither icon behaviour nor hover previews. Moving more than `dragThreshold` (6 px) starts KWin's own move
 (`performMousePressCommand(Options::MouseMove, pressPos)`; the frame was
 re-anchored at the press, so the grabbed spot stays under the cursor);
 releasing sooner delivers press + release to the app as a click (original

@@ -34,9 +34,8 @@
 // as if it weren't scaled, and it also treats the window as still covering
 // its full-size area.
 //
-// Tiny parked windows (below iconBelow of their original size; and clips in
-// parking, which are drawn at 1/2) act like
-// icons: a left-button press on one is held back.
+// Windows in parking, and stashed ones below iconBelow of their original
+// size, act like icons (see isIcon): a left-button press on one is held back.
 // Dragging it more than a few pixels moves the window (KWin's own move, so
 // it grows back out of the edge zone); releasing it without dragging passes
 // the press and release to the app as a click. So small parked windows can
@@ -993,11 +992,7 @@ private:
         Window *window = pick(event->position);
         // Clips get their presses: dragging a clip drags its text, and an
         // app can only start a drag from a press it received.
-        if (!window || !m_parking.isParked(window) || isClip(window)) {
-            return false;
-        }
-        const Parked &parked = m_parking.at(window);
-        if (parked.restoring || parked.shown.width() / parked.original.width() >= iconBelow) {
+        if (!window || isClip(window) || !isIcon(window)) {
             return false;
         }
         // Line the frame up with the pointer, so KWin sees what's under it.
@@ -1707,13 +1702,16 @@ private:
 
     // --- Hover previews ---
 
-    // A parked window shown small enough to act like an icon (see iconBelow).
+    // A parked window that acts like an icon: anything in parking, and a
+    // stashed one shown small enough (see iconBelow). Narrow windows (clips,
+    // Firefox at its 500 px minimum) are drawn above iconBelow in parking
+    // (see parkingScale) but are icons there all the same.
     bool isIcon(Window *window) const
     {
-        auto *it = m_parking.find(window);
-        return it && !it->restoring
-            && (it->shown.width() / it->original.width() < iconBelow
-                || isClipInParking(window, it->shown.width(), it->original));
+        const Parked *parked = m_parking.find(window);
+        return parked && !parked->restoring
+            && (parked->shown.width() / parked->original.width() < iconBelow
+                || m_parking.isParkingArea(m_parking.areaOf(window)));
     }
 
     // The previewed window, if it still is one.

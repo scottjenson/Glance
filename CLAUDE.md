@@ -140,6 +140,9 @@ aren't restored after login; Alt+Tab shows clips with the icon only).
   WideMonitorUX on 2026-09-30), branch
   `main`, remote `origin` over HTTPS. `gh` is logged in and is the git
   credential helper, so `git push` works without prompts.
+  If a push says the token is invalid (happened 2026-10-03), the user
+  runs `gh auth login -h github.com -p https -w` (browser login with a
+  one-time code; a hand-made token needs repo, read:org and workflow).
 - Local git identity (repo-only config): Scott Jenson <scott@jenson.org>.
 - The user wants work committed and pushed so nothing is lost. Commit when a
   change is done and working; ask before pushing anything unusual.

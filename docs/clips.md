@@ -2,7 +2,8 @@
 
 The start of "erase the lines between windows, files and the clipboard".
 Clips are glance-clip windows (sticky notes) whose text drags back into
-documents (below). Rich text and images are planned:
+documents (below). Image clips: see "Image clips" below (built
+2026-10-03). Rich text is planned:
 [plans/clips-back.md](../plans/clips-back.md).
 
 `dropToClip`, `readClip`, `finishClip`, `placeClip`: a text drag released
@@ -39,6 +40,29 @@ were KWrite windows (no longer needed).
 `kwin/kwin-private/` holds `wayland/abstract_data_source.h` (copied from
 KWin 6.7.5; Fedora's kwin-devel doesn't install it, libkwin exports the
 class). Keep it in step with the installed KWin.
+
+## Image clips (built 2026-10-03)
+Agreed with the user 2026-10-03. A drop on the desktop asks for image data
+before text (`clipMimeType` with `images`: image/png first, then any image
+type Qt reads). Firefox's image drags carry the pixels (image/png, jpeg,
+gif, plus its link, text/uri-list, file promises; checked in the log, which
+shows each desktop drop's types), at the best resolution it loaded. Other
+apps' image drags work the same. A drag with only text/uri-list is read
+first (`droppedImageFile`): a single local image file (Dolphin, Spectacle)
+is copied into ~/Clips; anything else is dropped on Plasma after all
+(`finishClip` passes the release on without cancelling the drag). Links
+without image data stay Plasma's. Images get `clipImageTimeout` (6 s; the
+app may encode first). Meta+C stays text only (the user left the
+clipboard-image fallback out).
+
+glance-clip shows an image file as an image clip (`ImageView`): the image
+fills the window under the yellow title bar, starting at its own size
+(pixels taken as logical px) scaled down to fit 480x480. Made wider or
+narrower (Glance, parking) it takes the image's proportions again; made
+only taller or shorter by hand it keeps that. Dragged out it offers PNG
+data, Qt's image and the file (file://, for file managers and upload
+forms); moved, the window closes at once but the file goes a minute later
+(Dolphin asks "copy here?" before reading it). Ctrl+C copies the image.
 
 Possibly related: the plasmashell logout hang,
 [docs/logout-hang.md](logout-hang.md).

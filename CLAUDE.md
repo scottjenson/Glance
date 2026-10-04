@@ -66,12 +66,12 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/focus-ring.md](docs/focus-ring.md) | Focus ring; bounce on keyboard focus moves only |
 | [docs/declutter.md](docs/declutter.md) | Meta+double-click declutter and undo |
 | [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
-| [docs/clips.md](docs/clips.md) | Text drops and Meta+C become clip windows (glance-clip sticky notes) that drag back into documents |
+| [docs/clips.md](docs/clips.md) | Text and image drops and Meta+C become clip windows (glance-clip sticky notes) that drag back into documents |
 | [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map (phase 1; phase 2 listed there) |
 | [docs/logout-hang.md](docs/logout-hang.md) | Plasmashell hangs at logout: a KDE clipboard deadlock (root cause known, harmless, left alone) |
 | [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
 | [plans/backlog.md](plans/backlog.md) | Agreed-but-unbuilt items, polish, packaging, ideas |
-| [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text and images |
+| [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text |
 
 When a plan is built, move its design into a `docs/` file and update the
 table and Status.
@@ -83,13 +83,12 @@ committed: everything in the docs table. Latest (all 2026-10-03): a
 stashed window keeps its size when dragged; Meta+wheel over a parking
 icon sizes its hover preview; the bounce only on keyboard focus moves;
 KDE's launcher only on a real Meta tap (the user keeps an eye on it);
-Meta+drag activates and raises. Nothing uncommitted; README.md is up to
-date.
+Meta+drag activates and raises; image clips (Firefox drops tested by the
+user; Dolphin file drops and dragging an image clip into apps not yet
+confirmed). README.md is up to date.
 
 Next: not decided; ask the user. Suggested: crowding of parking columns
-(agreed, needs design talk first); image clips (findings in
-[plans/clips-back.md](plans/clips-back.md): Firefox's Copy Image gives
-real PNG data); stash follow-ups (should small stashed windows stop
+(agreed, needs design talk first); Meta+C with a clipboard image; stash follow-ups (should small stashed windows stop
 acting like icons? Meta+wheel speed/direction by feel). Other
 candidates: Alt+Tab phase 2 (click in the map etc.,
 [docs/alt-tab.md](docs/alt-tab.md)); declutter follow-ups; rich-text

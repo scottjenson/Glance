@@ -14,8 +14,13 @@
 // It looks like a sticky note: yellow, title bar included (a KDE color
 // scheme of its own, which KWin's title bar follows), and no title (the
 // text is right below it).
+//
+// An image clip (an image file: dropped image data or an image file, see
+// Glance) shows the image filling the window, in its proportions, and drags
+// out as PNG data and as the file (for file managers and upload forms).
 
 #include <QApplication>
+#include <QBuffer>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QDir>
@@ -24,13 +29,16 @@
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QIcon>
+#include <QImageReader>
 #include <QLabel>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QScrollArea>
 #include <QShortcut>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWindow>
 
@@ -77,12 +85,39 @@ static QString writeColorScheme()
     return path;
 }
 
+// An image clip's body: the image scaled to fit, centered (the window
+// keeps the image's proportions, so it fills it).
+class ImageView : public QWidget
+{
+public:
+    explicit ImageView(const QImage &image)
+        : m_image(image)
+    {
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        QSizeF size = m_image.size();
+        size.scale(this->size(), Qt::KeepAspectRatio);
+        const QRectF target((width() - size.width()) / 2, (height() - size.height()) / 2, size.width(), size.height());
+        painter.drawImage(target, m_image);
+    }
+
+private:
+    QImage m_image;
+};
+
 class ClipWindow : public QWidget
 {
 public:
-    ClipWindow(const QString &path, const QString &text)
+    // A text clip shows `text`; an image clip (`image` not null) `image`.
+    ClipWindow(const QString &path, const QString &text, const QImage &image)
         : m_path(path)
         , m_text(text)
+        , m_image(image)
     {
         setWindowTitle(QString()); // the text is right below
         QPalette palette = this->palette();
@@ -95,6 +130,40 @@ public:
         setPalette(palette);
         setAutoFillBackground(true);
         setWindowIcon(QIcon::fromTheme(QStringLiteral("klipper"), QIcon::fromTheme(QStringLiteral("edit-paste"))));
+
+        auto copy = new QShortcut(QKeySequence::Copy, this);
+        connect(copy, &QShortcut::activated, this, [this]() {
+            if (isImage()) {
+                QGuiApplication::clipboard()->setImage(m_image);
+            } else {
+                QGuiApplication::clipboard()->setText(m_text);
+            }
+        });
+
+        // Logging out closes the window too; the clip file stays then.
+        connect(qApp, &QGuiApplication::commitDataRequest, this, [this]() {
+            m_sessionEnding = true;
+        });
+
+        auto layout = new QVBoxLayout(this);
+        layout->setContentsMargins(0, 0, 0, 0);
+
+        if (isImage()) {
+            auto view = new ImageView(image);
+            view->setCursor(Qt::OpenHandCursor);
+            view->installEventFilter(this);
+            layout->addWidget(view);
+            // Small enough for Glance's parking layout.
+            setMinimumSize(40, 40);
+            // Its own size (taken as logical pixels), scaled down to fit
+            // the start size.
+            QSize size = image.size();
+            if (size.width() > startWidth || size.height() > startMaxHeight) {
+                size.scale(startWidth, startMaxHeight, Qt::KeepAspectRatio);
+            }
+            resize(size.expandedTo(minimumSize()));
+            return;
+        }
 
         m_label = new QLabel(text);
         m_label->setTextFormat(Qt::PlainText);
@@ -115,24 +184,12 @@ public:
         // last line shows there's more).
         m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         m_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        auto layout = new QVBoxLayout(this);
-        layout->setContentsMargins(0, 0, 0, 0);
         layout->addWidget(m_scroll);
 
         // Presses and drags anywhere on the text (and the empty space
         // below it) start the drag.
         m_label->installEventFilter(this);
         m_scroll->viewport()->installEventFilter(this);
-
-        auto copy = new QShortcut(QKeySequence::Copy, this);
-        connect(copy, &QShortcut::activated, this, [this]() {
-            QGuiApplication::clipboard()->setText(m_text);
-        });
-
-        // Logging out closes the window too; the clip file stays then.
-        connect(qApp, &QGuiApplication::commitDataRequest, this, [this]() {
-            m_sessionEnding = true;
-        });
 
         // Glance lays parked clips out small (a narrow note in parking).
         setMinimumSize(100, 80);
@@ -177,9 +234,24 @@ protected:
     // Made narrower than it started (Glance does that in parking): as tall
     // as the text needs at the new width, up to startMaxHeight, so a short
     // clip is a short note. Glance takes the height it chooses.
+    // An image clip made wider or narrower (by Glance, or by hand) takes
+    // the image's proportions again; one made only taller or shorter by
+    // hand keeps the change.
     void resizeEvent(QResizeEvent *event) override
     {
         QWidget::resizeEvent(event);
+        if (isImage()) {
+            if (event->size().width() == event->oldSize().width() || m_image.width() <= 0) {
+                return;
+            }
+            const int height = std::max(minimumHeight(), qRound(width() * qreal(m_image.height()) / m_image.width()));
+            if (std::abs(height - this->height()) > 1) {
+                QTimer::singleShot(0, this, [this, height]() {
+                    resize(width(), height);
+                });
+            }
+            return;
+        }
         if (width() >= startWidth) {
             return;
         }
@@ -193,14 +265,38 @@ protected:
 
     void closeEvent(QCloseEvent *event) override
     {
-        if (!m_sessionEnding) {
+        if (!m_sessionEnding && !m_keepFile) {
             QFile::remove(m_path);
         }
         event->accept();
     }
 
 private:
-    // The whole text as a drag. Only copying is offered to the target (any
+    bool isImage() const
+    {
+        return !m_image.isNull();
+    }
+
+    // The clip as data for a drag: the text, or the image as PNG (any app
+    // that takes images takes PNG) and the file.
+    QMimeData *mimeData() const
+    {
+        auto mime = new QMimeData;
+        if (!isImage()) {
+            mime->setText(m_text);
+            return mime;
+        }
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        m_image.save(&buffer, "PNG");
+        mime->setData(QStringLiteral("image/png"), png);
+        mime->setImageData(m_image);
+        mime->setUrls({QUrl::fromLocalFile(m_path)});
+        return mime;
+    }
+
+    // The whole clip as a drag. Only copying is offered to the target (any
     // app that takes text accepts a copy); whether the clip then goes is
     // ours to decide: it does unless Shift is held at the drop.
     // Glance draws the note itself under the pointer, so the drag picture
@@ -209,10 +305,8 @@ private:
     // below, rather than onto the clip itself.
     void drag()
     {
-        auto mime = new QMimeData;
-        mime->setText(m_text);
         auto drag = new QDrag(this);
-        drag->setMimeData(mime);
+        drag->setMimeData(mimeData());
         QPixmap invisible(1, 1);
         invisible.fill(Qt::transparent);
         drag->setPixmap(invisible);
@@ -224,7 +318,20 @@ private:
                     result == Qt::IgnoreAction ? "" : (copy ? ", Shift: copied, the clip stays" : ": moved, the clip goes"));
         std::fflush(stdout);
         if (result != Qt::IgnoreAction && !copy) {
-            close();
+            if (isImage()) {
+                // The app may read the file a while later (a file manager
+                // asks whether to copy it first): the window goes, the
+                // file a minute later.
+                m_keepFile = true;
+                QGuiApplication::setQuitOnLastWindowClosed(false);
+                close();
+                QTimer::singleShot(std::chrono::minutes(1), qApp, [path = m_path]() {
+                    QFile::remove(path);
+                    QCoreApplication::quit();
+                });
+            } else {
+                close();
+            }
         }
     }
 
@@ -239,11 +346,13 @@ private:
 
     QString m_path;
     QString m_text;
+    QImage m_image;
     QLabel *m_label = nullptr;
     QScrollArea *m_scroll = nullptr;
     QPoint m_pressPos;
     bool m_pressed = false;
     bool m_sessionEnding = false;
+    bool m_keepFile = false;
 };
 
 int main(int argc, char **argv)
@@ -264,7 +373,13 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "glance-clip: can't read %s\n", argv[1]);
         return 1;
     }
-    ClipWindow window(QFileInfo(path).absoluteFilePath(), QString::fromUtf8(file.readAll()));
+    const QByteArray data = file.readAll();
+    // An image file is an image clip, anything else text.
+    QImage image;
+    if (QImageReader(path).canRead()) {
+        image = QImageReader(path).read();
+    }
+    ClipWindow window(QFileInfo(path).absoluteFilePath(), image.isNull() ? QString::fromUtf8(data) : QString(), image);
     window.show();
     return app.exec();
 }

@@ -45,6 +45,9 @@ Key mechanics:
   keep at the side like any window. Drop it at the very edge of the screen
   and it goes straight to parking. Drag a clip into a document to paste
   its text there (the clip is used up; hold Shift to keep it).
+- **Images become clips too:** drag an image out of a web page (or an
+  image file out of Dolphin) onto the desktop, and it becomes a clip
+  showing the image. Drag it into an app or a folder to use it there.
 - **Meta + C clips the selected text:** highlight text in any window and
   press Meta+C, and it becomes a clip in parking on that window's side.
 - **The active window has an outline** in your accent color, so you can

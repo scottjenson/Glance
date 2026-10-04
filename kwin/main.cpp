@@ -176,7 +176,9 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QImage>
+#include <QImageReader>
 #include <QMatrix4x4>
+#include <QMimeDatabase>
 #include <QPainter>
 #include <QPalette>
 #include <QPluginLoader>
@@ -186,6 +188,7 @@
 #include <QStyleHints>
 #include <QTimer>
 #include <QTransform>
+#include <QUrl>
 
 #include <algorithm>
 #include <functional>
@@ -821,13 +824,14 @@ private:
     };
     std::optional<PendingPress> m_pending;
 
-    // Text being turned into a clip (see startClip): the text read so far,
-    // where the clip goes, and for a drop (see dropToClip) the held-back
-    // release.
+    // Text or an image being turned into a clip (see startClip): the type
+    // asked for, the data read so far, where the clip goes, and for a drop
+    // (see dropToClip) the held-back release.
     struct ClipRead
     {
         int fd = -1;
         std::unique_ptr<QSocketNotifier> notifier = nullptr;
+        QString mimeType = {};
         QByteArray text = {};
         QPointF position;
         std::optional<Place> place = std::nullopt;
@@ -1177,8 +1181,10 @@ private:
     // zone's width), dropped text becomes a parking icon (see placeClip),
     // and a snapping drag snaps to parking (see snapTargetAt).
     static constexpr qreal parkingBand = 0.15;
-    // How long to wait for a dragging app to hand over its text.
+    // How long to wait for a dragging app to hand over its text, and its
+    // image (it may encode it first).
     static constexpr std::chrono::milliseconds clipTimeout{2000};
+    static constexpr std::chrono::milliseconds clipImageTimeout{6000};
 
     // Width of the focus ring on screen (logical pixels).
     static constexpr qreal ringWidth = 4.0;
@@ -2573,12 +2579,13 @@ private:
 
     // --- Clips: text dropped on the desktop ---
 
-    // A text drag released over the desktop: rather than letting Plasma
-    // make a sticky-note widget of it, ask the dragging app for the text and
-    // hold the release back. Once the text is in (finishClip), the drag is
-    // cancelled, so nothing is dropped anywhere, and the release passed on.
-    // Returns whether the release was taken. Dragged files and links (they
-    // come with text/uri-list) are left to Plasma.
+    // A text or image drag released over the desktop: rather than letting
+    // Plasma make a sticky-note widget of it, ask the dragging app for the
+    // data and hold the release back. Once it is in (finishClip), the drag
+    // is cancelled, so nothing is dropped anywhere, and the release passed
+    // on. Returns whether the release was taken. Dragged files: a single
+    // image file becomes a clip, anything else is dropped on Plasma after
+    // all; links without image data are left to Plasma.
     bool dropToClip(PointerButtonEvent *event)
     {
         auto seat = waylandServer()->seat();
@@ -2590,7 +2597,11 @@ private:
         if (under && !under->isDesktop() && !(isIcon(under) && parkingSide(event->position))) {
             return false;
         }
-        const QString mimeType = clipMimeType(seat->dragSource()->mimeTypes());
+        const QStringList types = seat->dragSource()->mimeTypes();
+        const QString mimeType = clipMimeType(types, true);
+        if (!m_clipDrag) {
+            qInfo("glance: clip: drop offers %s", qPrintable(types.join(QLatin1Char(' '))));
+        }
         if (mimeType.isEmpty()) {
             return false;
         }
@@ -2628,7 +2639,7 @@ private:
             qInfo("glance: clip: no text selected in %s", qPrintable(window->caption()));
             return;
         }
-        const QString mimeType = clipMimeType(source->mimeTypes());
+        const QString mimeType = clipMimeType(source->mimeTypes(), false);
         if (mimeType.isEmpty()) {
             return;
         }
@@ -2639,12 +2650,26 @@ private:
                   ClipRead{.position = drawn.center(), .place = left ? Place::ParkingLeft : Place::ParkingRight});
     }
 
-    // Plain text offered as one of `types`, or empty. Files and links (they
-    // come with text/uri-list) don't count.
-    static QString clipMimeType(const QStringList &types)
+    // What to ask for of `types` to make a clip, or empty: with `images`,
+    // image data first (an image dragged out of a browser comes with its
+    // link too), then a file list (finishClip takes it only if it is one
+    // image file); then plain text, unless it comes with a file list or
+    // link (text/uri-list).
+    static QString clipMimeType(const QStringList &types, bool images)
     {
+        if (images) {
+            if (types.contains(QStringLiteral("image/png"))) {
+                return QStringLiteral("image/png");
+            }
+            const QList<QByteArray> readable = QImageReader::supportedMimeTypes();
+            for (const QString &type : types) {
+                if (type.startsWith(QLatin1String("image/")) && readable.contains(type.toLatin1())) {
+                    return type;
+                }
+            }
+        }
         if (types.contains(QStringLiteral("text/uri-list"))) {
-            return {};
+            return images ? QStringLiteral("text/uri-list") : QString();
         }
         for (const char *type : {"text/plain;charset=utf-8", "text/plain", "UTF8_STRING"}) {
             if (types.contains(QLatin1String(type))) {
@@ -2654,8 +2679,8 @@ private:
         return {};
     }
 
-    // Ask `source` for its text; it arrives in readClip, and finishClip
-    // makes the clip. Returns whether it started.
+    // Ask `source` for its text or image; it arrives in readClip, and
+    // finishClip makes the clip. Returns whether it started.
     bool startClip(AbstractDataSource *source, const QString &mimeType, ClipRead clip)
     {
         int fds[2];
@@ -2666,12 +2691,15 @@ private:
         // it closes it; we read fds[0] as data arrives.
         source->requestData(mimeType, FileDescriptor(fds[1]));
         clip.fd = fds[0];
+        clip.mimeType = mimeType;
         clip.notifier = std::make_unique<QSocketNotifier>(fds[0], QSocketNotifier::Read);
         m_clip = std::make_unique<ClipRead>(std::move(clip));
         connect(m_clip->notifier.get(), &QSocketNotifier::activated, this, &Glance::readClip);
-        QTimer::singleShot(clipTimeout, this, [this, fd = fds[0]]() {
+        // Images take longer: the app may encode them first.
+        const auto timeout = mimeType.startsWith(QLatin1String("image/")) ? clipImageTimeout : clipTimeout;
+        QTimer::singleShot(timeout, this, [this, fd = fds[0]]() {
             if (m_clip && m_clip->fd == fd) {
-                qWarning("glance: clip: the app took too long to hand over the text");
+                qWarning("glance: clip: the app took too long to hand over the data");
                 finishClip();
             }
         });
@@ -2693,8 +2721,9 @@ private:
         }
     }
 
-    // All text read (or given up): for a drop, end the drag and pass the
-    // release on; save and open the clip.
+    // All data read (or given up): for a drop, end the drag and pass the
+    // release on; save and open the clip. A dragged file that isn't a
+    // single image is dropped where it was going after all (on Plasma).
     void finishClip()
     {
         const std::unique_ptr<ClipRead> clip = std::move(m_clip);
@@ -2703,15 +2732,31 @@ private:
         clip->notifier.release()->deleteLater();
         close(clip->fd);
 
+        QString imageFile;
+        if (clip->mimeType == QLatin1String("text/uri-list")) {
+            imageFile = droppedImageFile(clip->text);
+        }
+        const bool image = clip->mimeType.startsWith(QLatin1String("image/"));
+        const bool ours = image || !imageFile.isEmpty() || clip->mimeType != QLatin1String("text/uri-list");
+
         if (clip->fromDrag) {
             auto seat = waylandServer()->seat();
-            seat->cancelDrag();
+            if (ours) {
+                seat->cancelDrag();
+            }
             seat->setTimestamp(clip->timestamp);
             seat->notifyPointerButton(clip->nativeButton, PointerButtonState::Released);
             seat->notifyPointerFrame();
         }
+        if (!ours) {
+            return;
+        }
 
-        if (clip->text.trimmed().isEmpty()) {
+        if (image && QImage::fromData(clip->text).isNull()) {
+            qWarning("glance: clip: no image received (%s, %lld bytes)", qPrintable(clip->mimeType), qlonglong(clip->text.size()));
+            return;
+        }
+        if (!image && imageFile.isEmpty() && clip->text.trimmed().isEmpty()) {
             qWarning("glance: clip: no text received");
             return;
         }
@@ -2720,17 +2765,31 @@ private:
             qWarning("glance: clip: can't create %s", qPrintable(dir.path()));
             return;
         }
+        QString suffix = QStringLiteral("txt");
+        if (image) {
+            suffix = QMimeDatabase().mimeTypeForName(clip->mimeType).preferredSuffix();
+        } else if (!imageFile.isEmpty()) {
+            suffix = QFileInfo(imageFile).suffix().toLower();
+        }
         const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
-        QString path = dir.filePath(stamp + QStringLiteral(".txt"));
+        QString path = dir.filePath(stamp + QLatin1Char('.') + suffix);
         for (int i = 2; QFile::exists(path); ++i) {
-            path = dir.filePath(QStringLiteral("%1 (%2).txt").arg(stamp).arg(i));
+            path = dir.filePath(QStringLiteral("%1 (%2).%3").arg(stamp).arg(i).arg(suffix));
         }
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly) || file.write(clip->text) != clip->text.size()) {
-            qWarning("glance: clip: can't write %s", qPrintable(path));
-            return;
+        // A dropped image file is copied: closing the clip deletes its file.
+        if (!imageFile.isEmpty()) {
+            if (!QFile::copy(imageFile, path)) {
+                qWarning("glance: clip: can't copy %s to %s", qPrintable(imageFile), qPrintable(path));
+                return;
+            }
+        } else {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly) || file.write(clip->text) != clip->text.size()) {
+                qWarning("glance: clip: can't write %s", qPrintable(path));
+                return;
+            }
+            file.close();
         }
-        file.close();
 
         // KWin's own environment for the apps it starts, without the plugin
         // path that loads this effect from the build folder. Started in its
@@ -2755,7 +2814,30 @@ private:
         m_clipPid = pid;
         m_clipPosition = clip->position;
         m_clipPlace = clip->place;
-        qInfo("glance: clip: %lld bytes -> %s", qlonglong(clip->text.size()), qPrintable(path));
+        qInfo("glance: clip: %s -> %s", qPrintable(imageFile.isEmpty() ? QStringLiteral("%1 bytes of %2").arg(clip->text.size()).arg(clip->mimeType) : imageFile),
+              qPrintable(path));
+    }
+
+    // The local image file a dropped file list (text/uri-list: one URL per
+    // line, # comments) holds, if it holds just one, else empty.
+    static QString droppedImageFile(const QByteArray &uriList)
+    {
+        QStringList files;
+        for (const QByteArray &line : uriList.split('\n')) {
+            const QByteArray trimmed = line.trimmed();
+            if (trimmed.isEmpty() || trimmed.startsWith('#')) {
+                continue;
+            }
+            const QUrl url(QString::fromUtf8(trimmed));
+            if (!url.isLocalFile()) {
+                return {};
+            }
+            files.append(url.toLocalFile());
+        }
+        if (files.size() != 1 || !QImageReader(files.first()).canRead()) {
+            return {};
+        }
+        return files.first();
     }
 
     // The clip app: the one built with this plugin (bin/glance-clip in the

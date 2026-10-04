@@ -230,6 +230,34 @@ qreal ParkedWindows::fittingScale(LogicalOutput *output, const std::vector<Windo
     return glance::fittingScale(heights, workspace()->clientArea(MaximizeArea, output).height());
 }
 
+// Minimize = park: show a minimized window again and put it in the
+// parking area on the side nearer to where it is drawn (one already
+// there stays). Called while the minimize is under way: KWin has moved
+// focus on (wanted: minimize means out of the way) and minimized its
+// dialogs, which come back with it. KDE's minimize animation (Squash)
+// is reversed before it starts, so nothing flashes. Windows Meta+arrows
+// can't move (full screen, fixed size, not normal) minimize as usual.
+void ParkedWindows::minimizeToParking(Window *window)
+{
+    if (!window->isNormalWindow() || window->isFullScreen() || !window->isMovable() || !window->isResizable()
+        || !window->windowItem() || workspace()->moveResizeWindow() == window) {
+        return;
+    }
+    window->setMinimized(false);
+    if (window->isMinimized()) {
+        return; // a window rule keeps it minimized
+    }
+    const Place place = placeOf(window);
+    if (place == Place::ParkingLeft || place == Place::ParkingRight) {
+        qInfo("glance: minimize: already parked: %s", qPrintable(window->caption()));
+        return;
+    }
+    const RectF screen = window->output()->geometryF();
+    const bool left = currentlyDrawn(window).center().x() < screen.x() + screen.width() / 2;
+    moveTo(window, left ? Place::ParkingLeft : Place::ParkingRight);
+    qInfo("glance: minimize -> parking %s: %s", left ? "left" : "right", qPrintable(window->caption()));
+}
+
 // --- Drawing ---
 
 qreal ParkedWindows::progress(const Parked &parked)

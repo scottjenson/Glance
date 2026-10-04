@@ -113,6 +113,9 @@ public:
     // Park a window: draw it at `shown`, and really resize the app (see
     // layoutSize). `original` is its size before it was first parked.
     void park(Window *window, const QRectF &shown, const QSizeF &original);
+    // Minimize = park: a window being minimized is shown again and goes to
+    // the parking area on the side nearer to it (see the .cpp).
+    void minimizeToParking(Window *window);
     // The scale at which `windows`, at their full sizes, fit in one column
     // (see glance::fittingScale).
     qreal fittingScale(LogicalOutput *output, const std::vector<Window *> &windows) const;

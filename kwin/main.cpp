@@ -42,15 +42,8 @@
 // be dragged from anywhere and still work as widgets (buttons, scrolling).
 // Not for KDE title bars (KWin handles those) or presses with modifiers.
 //
-// Keyboard (replaces KDE's quick tiling on Meta+arrows): Meta+Left/Right
-// step the active window between left parking, left stash, left half of
-// main, right half of main, right stash and right parking; a free window in
-// main first snaps to the half on that side. A window in all of main (see
-// Meta+Down) goes straight to the stash on that side, and comes back as
-// wide (see stepSideways). Windows move horizontally and keep their
-// vertical position. Meta+Up: the half view, a half of main at full height;
-// Meta+Down: the full view, all of main at full height. Keyboard moves
-// animate (the drawing glides to the new place while the app resizes).
+// Keyboard: Meta+arrows move the active window between places,
+// Meta+Alt+arrows select a window (see keyboard.h).
 //
 // Meta+drag: moves the window like a title-bar drag (following the
 // pointer, shrinking by the edge rule), with two additions. Acceleration:
@@ -64,10 +57,6 @@
 // is in snapping mode: moving into another region snaps there (no sizes in
 // between); releasing the mouse keeps it, releasing Meta lets it follow the
 // pointer again (see leadStep).
-//
-// Selecting (Meta+Alt+arrows, KDE's own keys for this): activates the
-// nearest window in that direction, judged by where windows are drawn (KDE's
-// version uses the real frames, which are wrong for parked windows).
 //
 // Focus ring: the active window gets an outline that bounces when the ring
 // moves by keyboard (see focusring.h).
@@ -95,7 +84,8 @@
 //
 // Minimize = park: parking is Glance's minimize. A window being minimized
 // (title-bar button, taskbar, shortcut, the app) is shown again at once and
-// goes to the parking area on the side nearer to it (see minimizeToParking);
+// goes to the parking area on the side nearer to it (see
+// ParkedWindows::minimizeToParking);
 // focus moves on, as for a minimize.
 //
 // Known gaps: touch and tablets aren't handled; in the forwarding case the
@@ -124,6 +114,7 @@
 #include "focusring.h"
 #include "geometry.h"
 #include "kde.h"
+#include "keyboard.h"
 #include "parked.h"
 #include "previews.h"
 #include "wheel.h"
@@ -268,7 +259,6 @@ public:
         Effect::postPaintScreen();
     }
 
-    // Meta+arrows and Meta+Alt+arrows (see the header comment).
     bool onKey(KeyboardKeyEvent *event)
     {
         if (event->key == Qt::Key_Meta || event->key == Qt::Key_Super_L || event->key == Qt::Key_Super_R) {
@@ -286,44 +276,7 @@ public:
         if (m_altTab.switching() || (!m_pending && m_altTab.startsSwitch(event))) {
             return m_altTab.key(event);
         }
-        const Qt::Key key = event->key;
-        if (key != Qt::Key_Left && key != Qt::Key_Right && key != Qt::Key_Up && key != Qt::Key_Down) {
-            return false;
-        }
-        if (event->modifiers == (Qt::MetaModifier | Qt::AltModifier)) {
-            if (event->state != KeyboardKeyState::Released && !workspace()->moveResizeWindow()) {
-                selectToward(key);
-            }
-            return false; // passed on, like Meta+arrows below
-        }
-        if (event->modifiers != Qt::MetaModifier) {
-            return false;
-        }
-        Window *window = workspace()->activeWindow();
-        if (!window || !window->isNormalWindow() || window->isFullScreen() || !window->isMovable()
-            || !window->isResizable() || workspace()->moveResizeWindow() || !window->windowItem()) {
-            return false;
-        }
-        if (event->state == KeyboardKeyState::Pressed) {
-            switch (key) {
-            case Qt::Key_Left:
-                stepSideways(window, Side::Left);
-                break;
-            case Qt::Key_Right:
-                stepSideways(window, Side::Right);
-                break;
-            case Qt::Key_Up:
-                halfView(window);
-                break;
-            default:
-                fullView(window);
-                break;
-            }
-        }
-        // Pass the key on: KDE's shortcut system must see it, or it takes
-        // releasing Meta as Meta tapped alone and opens the launcher. Its own
-        // quick tiling on these keys is disabled (see KdeIntegration).
-        return false;
+        return m_keyboard.key(event);
     }
 
     bool onMotion(PointerMotionEvent *event)
@@ -456,6 +409,7 @@ private:
     HoverPreviews m_previews{m_parking};
     MetaWheel m_wheel{m_parking, m_previews};
     FocusRing m_focusRing{m_parking, m_altTab};
+    Keyboard m_keyboard{m_parking, m_focusRing};
 
     // The window being dragged while we draw it scaled, its original size,
     // and its scale relative to that.
@@ -514,9 +468,6 @@ private:
     std::chrono::steady_clock::time_point m_anchoredAt;
     QTimer m_anchorLate;
 
-    // Windows that went to a stash from all of main, to come back as wide.
-    std::set<Window *> m_wasFull;
-
     // A left-button press on a parked window, held back until we know
     // whether it is a click or a drag.
     struct PendingPress
@@ -543,7 +494,7 @@ private:
         });
         connect(window, &Window::minimizedChanged, this, [this, window]() {
             if (window->isMinimized()) {
-                minimizeToParking(window);
+                m_parking.minimizeToParking(window);
             }
         });
         if (window->isMinimized()) {
@@ -551,7 +502,7 @@ private:
             // starts minimized): once it is set up.
             QTimer::singleShot(0, this, [this, window = QPointer<Window>(window)]() {
                 if (window && window->isMinimized()) {
-                    minimizeToParking(window);
+                    m_parking.minimizeToParking(window);
                 }
             });
         }
@@ -562,7 +513,7 @@ private:
             m_focusRing.closed(window); // while the window's item still exists
             m_clips.closed(window);
             m_parking.closed(window);
-            m_wasFull.erase(window);
+            m_keyboard.closed(window);
         });
     }
 
@@ -629,120 +580,6 @@ private:
         seat->notifyPointerButton(event->nativeButton, PointerButtonState::Released);
         seat->notifyPointerFrame();
         return true;
-    }
-
-    // --- Keyboard: stepping between places ---
-
-    // One step towards `side` along: parking L, stash L, half L, half R,
-    // stash R, parking R. A free window goes to the half on that side. A
-    // window in all of main goes straight to the stash on that side, and
-    // from there back into all of main (m_wasFull).
-    void stepSideways(Window *window, Side side)
-    {
-        const bool left = side == Side::Left;
-        const Place from = m_parking.placeOf(window);
-        Place to;
-        if (from == Place::Free) {
-            to = left ? Place::HalfLeft : Place::HalfRight;
-        } else if (from == Place::Full) {
-            to = left ? Place::StashLeft : Place::StashRight;
-            m_wasFull.insert(window);
-        } else {
-            const int i = placeIndex(from);
-            const int j = std::clamp(i + (left ? -1 : 1), 0, 5);
-            if (i == j) {
-                return;
-            }
-            to = placeOrder[j];
-            const bool backIntoMain = (from == Place::StashLeft && to == Place::HalfLeft)
-                || (from == Place::StashRight && to == Place::HalfRight);
-            if (backIntoMain && m_wasFull.erase(window)) {
-                to = Place::Full;
-            } else if (from == Place::HalfLeft || from == Place::HalfRight) {
-                m_wasFull.erase(window);
-            }
-        }
-        m_parking.moveTo(window, to);
-    }
-
-    // Minimize = park: show a minimized window again and put it in the
-    // parking area on the side nearer to where it is drawn (one already
-    // there stays). Called while the minimize is under way: KWin has moved
-    // focus on (wanted: minimize means out of the way) and minimized its
-    // dialogs, which come back with it. KDE's minimize animation (Squash)
-    // is reversed before it starts, so nothing flashes. Windows Meta+arrows
-    // can't move (full screen, fixed size, not normal) minimize as usual.
-    void minimizeToParking(Window *window)
-    {
-        if (!window->isNormalWindow() || window->isFullScreen() || !window->isMovable() || !window->isResizable()
-            || !window->windowItem() || workspace()->moveResizeWindow() == window) {
-            return;
-        }
-        window->setMinimized(false);
-        if (window->isMinimized()) {
-            return; // a window rule keeps it minimized
-        }
-        const Place place = m_parking.placeOf(window);
-        if (place == Place::ParkingLeft || place == Place::ParkingRight) {
-            qInfo("glance: minimize: already parked: %s", qPrintable(window->caption()));
-            return;
-        }
-        const RectF screen = window->output()->geometryF();
-        const bool left = m_parking.currentlyDrawn(window).center().x() < screen.x() + screen.width() / 2;
-        m_parking.moveTo(window, left ? Place::ParkingLeft : Place::ParkingRight);
-        qInfo("glance: minimize -> parking %s: %s", left ? "left" : "right", qPrintable(window->caption()));
-    }
-
-    // Meta+Up, the half view: a half of main at full height. A window in a
-    // half stays in it; one in all of main goes to a free half (see
-    // freeHalf); any other to the half nearer to it. Not for parked windows.
-    void halfView(Window *window)
-    {
-        if (m_parking.isParkedNotRestoring(window)) {
-            return;
-        }
-        const Place place = m_parking.placeOf(window);
-        Place half = place;
-        if (place == Place::Full) {
-            half = freeHalf(window);
-        } else if (place != Place::HalfLeft && place != Place::HalfRight) {
-            const RectF screen = window->output()->geometryF();
-            half = m_parking.currentlyDrawn(window).center().x() < screen.x() + screen.width() / 2 ? Place::HalfLeft : Place::HalfRight;
-        }
-        m_parking.fillHalf(window, half);
-    }
-
-    // Meta+Down, the full view: all of main at full height. Not for parked
-    // windows.
-    void fullView(Window *window)
-    {
-        if (m_parking.isParkedNotRestoring(window)) {
-            return;
-        }
-        releaseKdeState(window);
-        const RectF screen = window->output()->geometryF();
-        const RectF area = workspace()->clientArea(MaximizeArea, window);
-        const qreal zoneWidth = screen.width() * zoneFraction;
-        m_parking.resizeAnimated(window, RectF(screen.x() + zoneWidth, area.y(), 2 * zoneWidth, area.height()), m_parking.currentlyDrawn(window));
-    }
-
-    // The half of main for `window`: the free one if the other is taken by
-    // another window, else (both free or both taken) the left one.
-    Place freeHalf(Window *window) const
-    {
-        bool taken[2] = {false, false};
-        for (Window *other : workspace()->stackingOrder()) {
-            if (other == window || !manageable(other) || other->output() != window->output() || m_parking.isParkedNotRestoring(other)) {
-                continue;
-            }
-            const Place place = m_parking.placeOf(other);
-            if (place == Place::HalfLeft) {
-                taken[0] = true;
-            } else if (place == Place::HalfRight) {
-                taken[1] = true;
-            }
-        }
-        return taken[0] && !taken[1] ? Place::HalfRight : Place::HalfLeft;
     }
 
     // --- Dragging ---
@@ -1079,58 +916,6 @@ private:
                 window->move(frame.topLeft() + QPointF(m_leadX, 0));
             }
             m_parking.setDrawTransform(window, QTransform());
-        }
-    }
-
-    // --- Selecting ---
-
-    // Meta+Alt+arrow: activate the nearest window in that direction, by
-    // where windows are drawn (centers), scored like KWin's own
-    // Workspace::switchWindow: distance along the arrow, plus how far off
-    // to the side, plus a penalty for being far off to the side but close.
-    void selectToward(Qt::Key key)
-    {
-        Window *active = workspace()->activeWindow();
-        const QPointF from = active ? m_parking.currentlyDrawn(active).center() : input()->pointer()->pos();
-        Window *best = nullptr;
-        qreal bestScore = 0;
-        for (Window *window : workspace()->stackingOrder()) {
-            if (window == active || !m_parking.switchable(window)) {
-                continue;
-            }
-            const QPointF to = m_parking.currentlyDrawn(window).center();
-            qreal distance;
-            qreal offset;
-            switch (key) {
-            case Qt::Key_Left:
-                distance = from.x() - to.x();
-                offset = std::abs(to.y() - from.y());
-                break;
-            case Qt::Key_Right:
-                distance = to.x() - from.x();
-                offset = std::abs(to.y() - from.y());
-                break;
-            case Qt::Key_Up:
-                distance = from.y() - to.y();
-                offset = std::abs(to.x() - from.x());
-                break;
-            default:
-                distance = to.y() - from.y();
-                offset = std::abs(to.x() - from.x());
-                break;
-            }
-            if (distance <= 0) {
-                continue;
-            }
-            const qreal score = distance + offset + offset * offset / distance;
-            if (!best || score < bestScore) {
-                best = window;
-                bestScore = score;
-            }
-        }
-        if (best) {
-            workspace()->activateWindow(best);
-            m_focusRing.bounce(best);
         }
     }
 

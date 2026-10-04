@@ -72,6 +72,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
 | [plans/backlog.md](plans/backlog.md) | Agreed-but-unbuilt items, polish, packaging, ideas |
 | [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text |
+| [plans/code-review.md](plans/code-review.md) | Architecture/performance review (2026-10-03): 5 fixes to make, what to keep; read before touching painting, input routing or clips |
 
 When a plan is built, move its design into a `docs/` file and update the
 table and Status.
@@ -87,7 +88,8 @@ Meta+drag activates and raises; image clips (Firefox drops tested by the
 user; Dolphin file drops and dragging an image clip into apps not yet
 confirmed). README.md is up to date.
 
-Next: not decided; ask the user. Suggested: crowding of parking columns
+Next: not decided; ask the user. Suggested: the fixes in
+[plans/code-review.md](plans/code-review.md); crowding of parking columns
 (agreed, needs design talk first); Meta+C with a clipboard image; stash follow-ups (should small stashed windows stop
 acting like icons? Meta+wheel speed/direction by feel). Other
 candidates: Alt+Tab phase 2 (click in the map etc.,

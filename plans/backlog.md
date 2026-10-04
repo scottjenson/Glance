@@ -17,7 +17,8 @@
   maybe a real Meta tap). If it recurs, log Meta key timings again.
 
 ## Polish
-Re-anchor less often (e.g. on press/scroll, or after enough movement);
+Re-anchor less often (e.g. on press/scroll, or after enough movement;
+now finding 1 of [code-review.md](code-review.md), with a multi-monitor bug);
 overlapping parked windows; title-bar buttons of parked windows; text
 quality (the Wayfire halving scaler, [docs/wayfire.md](../docs/wayfire.md);
 pixel-exact placement at 1x/2x); fractional KDE scales. Earlier

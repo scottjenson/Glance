@@ -76,14 +76,7 @@
 // it steps through bounceFrames (100% down to 98% and back), bounceStep
 // apart (see bounceRing, startBounce).
 //
-// Previews: hovering a parking icon (not a small stashed window) makes it
-// grow in place to previewGrow times its size (at most 1:1 with the app's resized layout,
-// so it stays sharp), anchored at its screen edge and centered on its spot,
-// over its neighbours, which stay put and partly visible. The pointer stays
-// over it, so it can still be dragged, and clicks pass through as for any
-// icon. The first waits previewDelay; moving into a neighbour's spot then
-// switches at once (both animate); leaving closes it after previewGrace
-// (see updateHover).
+// Previews: hovering a parking icon grows it in place (see previews.h).
 //
 // Declutter (Meta+double-click): the window takes a half of main, the
 // others go to the stashes; again undoes it (see declutter.h).
@@ -145,6 +138,7 @@
 #include "clips.h"
 #include "declutter.h"
 #include "parked.h"
+#include "previews.h"
 
 #include <KGlobalAccel>
 
@@ -222,18 +216,10 @@ public:
             }
         });
 
-        m_previewOpen.setSingleShot(true);
-        m_previewOpen.setInterval(previewDelay);
-        connect(&m_previewOpen, &QTimer::timeout, this, [this]() {
-            if (m_previewCandidate && isPreviewable(m_previewCandidate)) {
-                openPreview(m_previewCandidate);
-            }
-        });
-        m_previewClose.setSingleShot(true);
-        m_previewClose.setInterval(previewGrace);
-        connect(&m_previewClose, &QTimer::timeout, this, [this]() {
-            if (Window *window = previewWindow()) {
-                closePreview(window);
+        connect(&m_previews, &HoverPreviews::closing, this, [this](Window *window) {
+            if (m_wheelWindow == window) {
+                m_wheelSettle.stop();
+                m_wheelWindow = nullptr;
             }
         });
         m_wheelSettle.setSingleShot(true);
@@ -481,7 +467,7 @@ public:
         if (m_pending) {
             return pendingMotion(event);
         }
-        updateHover(event->position, event->buttons);
+        m_previews.update(event->position, event->buttons);
         if (!route(event->position, event->buttons != Qt::NoButton)) {
             return false;
         }
@@ -595,6 +581,7 @@ private:
     Clips m_clips{m_parking, m_lastPress};
     AltTab m_altTab{m_parking};
     Declutter m_declutter{m_parking};
+    HoverPreviews m_previews{m_parking};
 
     // The window being dragged while we draw it scaled, its original size,
     // and its scale relative to that.
@@ -634,6 +621,7 @@ private:
     QPointF m_leadLast;
     std::vector<std::pair<std::chrono::steady_clock::time_point, QPointF>> m_leadSamples;
     std::optional<Gesture> m_snapped;
+    QTimer m_snapDwell;
     // Snapping mode: the window's center and the pointer (plus lead) at the
     // first snap; the region follows the pointer's movement from there.
     QPointF m_snapAnchor;
@@ -665,17 +653,6 @@ private:
         std::chrono::microseconds timestamp;
     };
     std::optional<PendingPress> m_pending;
-
-    // The previewed window, the one the pointer waits on, and the timers to
-    // open and close previews (see updateHover).
-    QPointer<Window> m_preview;
-    QPointer<Window> m_previewCandidate;
-    QTimer m_previewOpen;
-    QTimer m_snapDwell;
-    QTimer m_previewClose;
-    // An icon whose preview Meta+wheel just closed: no hover preview for it
-    // until the pointer leaves it.
-    QPointer<Window> m_noPreview;
 
     // Meta+wheel on a stashed window or a preview (see metaWheel): the
     // window, and the timer that resizes the app once the scrolling stops.
@@ -1321,148 +1298,6 @@ private:
         }
     }
 
-    // --- Hover previews ---
-
-    // The previewed window, if it still is one.
-    Window *previewWindow()
-    {
-        if (m_preview && !(m_parking.isParked(m_preview) && m_parking.at(m_preview).preview)) {
-            m_preview = nullptr;
-        }
-        return m_preview;
-    }
-
-    // The parking icon whose home spot in its column is at `pos` (the spot counts
-    // also while that window is out as a preview), half the gap around it
-    // included so moving along the column never falls between two.
-    Window *iconAt(const QPointF &pos) const
-    {
-        for (const auto &[window, parked] : m_parking.all()) {
-            if (isPreviewable(window) && !window->isMinimized() && window->isOnCurrentDesktop()
-                && parked.shown.adjusted(0, -arrangeGap / 2, 0, arrangeGap / 2).contains(pos)) {
-                return window;
-            }
-        }
-        return nullptr;
-    }
-
-    // Previews are for parking icons only: a stashed window can be as small
-    // as an icon (dropped near the edge) but isn't one to preview.
-    bool isPreviewable(Window *window) const
-    {
-        return m_parking.isIcon(window) && m_parking.isParkingArea(m_parking.areaOf(window));
-    }
-
-    // On every pointer motion: the icon whose home spot is under the pointer
-    // grows after previewDelay, or at once if another is grown already (that
-    // one shrinks at the same time), also where the grown one covers that
-    // spot. Elsewhere over the grown one it stays; anywhere else it shrinks
-    // after previewGrace. Nothing changes while a button is held, a window is
-    // moved, or something is dragged.
-    void updateHover(const QPointF &pos, Qt::MouseButtons buttons)
-    {
-        if (buttons != Qt::NoButton || workspace()->moveResizeWindow() || waylandServer()->seat()->isDrag()) {
-            m_previewOpen.stop();
-            return;
-        }
-        Window *preview = previewWindow();
-        Window *icon = iconAt(pos);
-        if (m_noPreview && icon != m_noPreview) {
-            m_noPreview = nullptr;
-        }
-        if (icon && icon == m_noPreview) {
-            m_previewOpen.stop();
-            m_previewClose.stop();
-            return;
-        }
-        if (!icon && preview && m_parking.drawnRect(preview).contains(pos)) {
-            m_previewOpen.stop();
-            m_previewClose.stop();
-            return;
-        }
-        if (!icon) {
-            m_previewOpen.stop();
-            m_previewCandidate = nullptr;
-            if (preview && !m_previewClose.isActive()) {
-                m_previewClose.start();
-            }
-            return;
-        }
-        m_previewClose.stop();
-        if (icon == preview) {
-            m_previewOpen.stop();
-        } else if (preview) {
-            m_previewOpen.stop();
-            openPreview(icon);
-        } else if (icon != m_previewCandidate || !m_previewOpen.isActive()) {
-            m_previewCandidate = icon;
-            m_previewOpen.start();
-        }
-    }
-
-    // In place: previewGrow times its home spot (at most 1:1 with the app's
-    // current layout, and the screen height), at its screen edge, centered
-    // vertically on its spot.
-    QRectF previewRect(Window *window) const
-    {
-        const Parked &parked = m_parking.at(window);
-        const RectF screen = window->output()->geometryF();
-        const RectF area = workspace()->clientArea(MaximizeArea, window);
-        const RectF frame = window->frameGeometry();
-        const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
-        const qreal scale = std::min({previewGrow * parked.shown.width() / frame.width(), 1.0,
-                                      area.height() / frame.height()});
-        const QSizeF size = QSizeF(frame.width(), frame.height()) * scale;
-        const qreal x = left ? parked.shown.left() : parked.shown.right() - size.width();
-        const qreal y = std::clamp(parked.shown.center().y() - size.height() / 2, area.y(),
-                                   std::max(area.y(), area.y() + area.height() - size.height()));
-        return QRectF(QPointF(x, y), size);
-    }
-
-    void openPreview(Window *window)
-    {
-        if (Window *old = previewWindow(); old && old != window) {
-            closePreview(old);
-        }
-        m_previewCandidate = nullptr;
-        const QRectF from = m_parking.currentlyDrawn(window);
-        m_parking.at(window).preview = previewRect(window);
-        m_preview = window;
-        workspace()->raiseWindow(window);
-        m_parking.animate(window, from);
-    }
-
-    void closePreview(Window *window)
-    {
-        const QRectF from = m_parking.currentlyDrawn(window);
-        Parked &parked = m_parking.at(window);
-        parked.preview.reset();
-        if (window == m_preview) {
-            m_preview = nullptr;
-        }
-        shrinkApp(window);
-        m_parking.animate(window, from);
-    }
-
-    // A preview enlarged with Meta+wheel may have resized the app (see
-    // settleWheel): back to its parked layout size.
-    void shrinkApp(Window *window)
-    {
-        if (m_wheelWindow == window) {
-            m_wheelSettle.stop();
-            m_wheelWindow = nullptr;
-        }
-        const Parked &parked = m_parking.at(window);
-        const RectF frame = window->frameGeometry();
-        if (isClip(window) || parked.restoring) {
-            return;
-        }
-        const QSizeF layout = m_parking.layoutSize(window, parked.shown.size(), parked.original);
-        if (layout.width() < frame.width() - 0.5) {
-            window->moveResize(RectF(parked.shown.topLeft(), layout));
-        }
-    }
-
     // --- Meta+wheel: resizing in place ---
 
     // Meta+wheel (vertical) over a window grows it (scrolling up) or shrinks
@@ -1531,8 +1366,7 @@ private:
                               window->output()->geometryF());
         if (parked.preview) { // a small stashed window can be previewed
             parked.preview.reset();
-            m_preview = nullptr;
-            m_noPreview = window;
+            m_previews.suppress(window);
         }
         m_parking.animate(window, from);
         m_wheelWindow = window;
@@ -1541,7 +1375,7 @@ private:
 
     // The scrolling stopped: a stashed window's app is resized to fit (see
     // park); a preview grown past its app's size gets the app resized to
-    // it, so it stays sharp (until the preview closes, see shrinkApp).
+    // it, so it stays sharp (until the preview closes, see HoverPreviews::shrinkApp).
     void settleWheel()
     {
         m_wheelSettle.stop();
@@ -1581,33 +1415,26 @@ private:
         if (std::abs(width - current.width()) < 0.5) {
             return;
         }
-        m_previewOpen.stop();
-        m_previewClose.stop();
+        m_previews.stopTimers();
         if (width <= minWidth + 0.5) {
             if (parked.preview) {
-                closePreview(window);
+                m_previews.close(window);
             }
-            m_noPreview = window;
+            m_previews.suppress(window);
             return;
         }
         if (m_wheelWindow && m_wheelWindow != window) {
             settleWheel();
         }
-        if (Window *old = previewWindow(); old && old != window) {
-            closePreview(old);
+        if (Window *old = m_previews.current(); old && old != window) {
+            m_previews.close(old);
         }
         const bool left = parked.shown.center().x() < screen.x() + screen.width() / 2;
         const QSizeF size(width, width * aspect);
         const qreal anchor = std::clamp((pos.y() - current.y()) / current.height(), 0.0, 1.0);
         const qreal y = std::clamp(pos.y() - anchor * size.height(), area.y(),
                                    std::max(area.y(), area.y() + area.height() - size.height()));
-        const QRectF from = m_parking.currentlyDrawn(window);
-        parked.preview = QRectF(QPointF(left ? parked.shown.left() : parked.shown.right() - size.width(), y), size);
-        m_preview = window;
-        m_previewCandidate = nullptr;
-        m_noPreview = nullptr;
-        workspace()->raiseWindow(window);
-        m_parking.animate(window, from);
+        m_previews.show(window, QRectF(QPointF(left ? parked.shown.left() : parked.shown.right() - size.width(), y), size));
         if (!isClip(window)) {
             m_wheelWindow = window;
             m_wheelSettle.start();

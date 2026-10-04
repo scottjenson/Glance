@@ -5,12 +5,10 @@
 // main and the edge, smaller) and parking (the very edge, icon-sized).
 // "Parked" means dropped while shrunk, in a stash or a parking area.
 //
-// Dragging: while KWin moves a window interactively (title bar or Meta+drag),
-// the window is drawn shrunk around the cursor once its left or right edge
-// goes into the outer quarter of the screen (main stays full size), reaching
-// minScale at the screen edge (but no narrower than parkingMinWidth). Quick
-// tiling by dragging to the side is turned off while the effect is loaded,
-// since it uses the same edges.
+// Dragging: a window dragged toward the left or right edge shrinks; Meta+drag
+// adds acceleration and pause-to-snap (see drag.h). Quick tiling by dragging
+// to the side is turned off while the effect is loaded, since it uses the
+// same edges.
 //
 // Parked: dropped while shrunk, the window stays exactly where and as large
 // as it was drawn (its "shown" rectangle). The app is also really resized,
@@ -44,19 +42,6 @@
 //
 // Keyboard: Meta+arrows move the active window between places,
 // Meta+Alt+arrows select a window (see keyboard.h).
-//
-// Meta+drag: moves the window like a title-bar drag (following the
-// pointer, shrinking by the edge rule), with two additions. Acceleration:
-// horizontally the window gets ahead of the pointer, more the longer you
-// keep moving fast in one direction (gain up to leadMaxGain); reversing
-// or slowing down goes back to 1:1, so corrections are precise. The
-// screen edges stop it, and overshoot isn't stored. Pause to snap: holding
-// still for snapDwell snaps the window to the region it is in (see
-// snapTargetAt: a half of main or, in a middle band, all of main, both at
-// full height; a stash; parking at the very edge). From then on the drag
-// is in snapping mode: moving into another region snaps there (no sizes in
-// between); releasing the mouse keeps it, releasing Meta lets it follow the
-// pointer again (see leadStep).
 //
 // Focus ring: the active window gets an outline that bounces when the ring
 // moves by keyboard (see focusring.h).
@@ -111,6 +96,7 @@
 #include "alttab.h"
 #include "clips.h"
 #include "declutter.h"
+#include "drag.h"
 #include "focusring.h"
 #include "geometry.h"
 #include "kde.h"
@@ -152,18 +138,6 @@ public:
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
         connect(workspace(), &Workspace::windowAdded, &m_clips, &Clips::placeClip);
 
-        m_snapDwell.setSingleShot(true);
-        m_snapDwell.setInterval(snapDwell);
-        connect(&m_snapDwell, &QTimer::timeout, this, [this]() {
-            if (m_dragged && !m_snapped && (input()->keyboardModifiers() & Qt::MetaModifier)) {
-                m_snapAnchor = m_dragDisplayed.center();
-                m_snapPointer = input()->pointer()->pos() + QPointF(m_leadX, 0);
-                m_snapped = snapTargetAt(m_dragged, m_snapAnchor);
-                m_leadRun = 0;
-                dragStep(m_dragged);
-            }
-        });
-
         m_anchorLate.setSingleShot(true);
         connect(&m_anchorLate, &QTimer::timeout, this, &Glance::anchorLate);
 
@@ -176,9 +150,6 @@ public:
     ~Glance() override
     {
         input()->uninstallInputEventFilter(&m_filter);
-        if (m_dragged && m_dragged->windowItem()) {
-            m_dragged->windowItem()->setTransform(QTransform());
-        }
         // Back to normal: full size, where they are drawn.
         m_parking.restoreAll();
     }
@@ -186,12 +157,12 @@ public:
     // Only take part in painting while something is scaled.
     bool isActive() const override
     {
-        return !m_parking.empty() || m_dragged || m_focusRing.bouncing() || m_altTab.mapShown() || m_clips.dragging();
+        return !m_parking.empty() || m_drag.window() || m_focusRing.bouncing() || m_altTab.mapShown() || m_clips.dragging();
     }
 
     void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
     {
-        if (m_parking.isParked(w->window()) || w->window() == m_dragged) {
+        if (m_parking.isParked(w->window()) || w->window() == m_drag.window()) {
             data.setTransformed();
         }
         m_focusRing.prePaintWindow(w->window(), data);
@@ -240,9 +211,7 @@ public:
     void prePaintScreen(ScreenPrePaintData &data) override
     {
         m_parking.advance();
-        if (m_dragged && m_dragAnimating) {
-            dragStep(m_dragged);
-        }
+        m_drag.prePaintScreen();
         m_clips.prePaintScreen(data);
         m_altTab.prePaintScreen(data);
         Effect::prePaintScreen(data);
@@ -250,7 +219,7 @@ public:
 
     void postPaintScreen() override
     {
-        if (m_dragAnimating || m_altTab.mapShown()) {
+        if (m_drag.animating() || m_altTab.mapShown()) {
             effects->addRepaintFull();
         }
         if (m_parking.anyAnimating()) {
@@ -264,14 +233,10 @@ public:
         if (event->key == Qt::Key_Meta || event->key == Qt::Key_Super_L || event->key == Qt::Key_Super_R) {
             m_kde.metaKey(event);
         }
-        if (m_dragged) {
+        if (m_drag.window()) {
             // Meta pressed or released during a drag: switch between gesture
-            // and normal drag now, once KWin has updated its modifier state.
-            QTimer::singleShot(0, this, [this]() {
-                if (m_dragged) {
-                    dragStep(m_dragged);
-                }
-            });
+            // and normal drag.
+            m_drag.modifiersChanged();
         }
         if (m_altTab.switching() || (!m_pending && m_altTab.startsSwitch(event))) {
             return m_altTab.key(event);
@@ -400,8 +365,8 @@ private:
 
     using Parked = ParkedWindows::Parked;
     ParkedWindows m_parking;
-    // Where the last pointer button press was: where a drag (of a window or
-    // a clip) started.
+    // Where the last pointer button press was: where a clip drag grabbed
+    // the clip.
     QPointF m_lastPress;
     Clips m_clips{m_parking, m_lastPress};
     AltTab m_altTab{m_parking};
@@ -410,54 +375,7 @@ private:
     MetaWheel m_wheel{m_parking, m_previews};
     FocusRing m_focusRing{m_parking, m_altTab};
     Keyboard m_keyboard{m_parking, m_focusRing};
-
-    // The window being dragged while we draw it scaled, its original size,
-    // and its scale relative to that.
-    QPointer<Window> m_dragged;
-    QSizeF m_dragOriginal;
-    qreal m_dragScale = 1.0;
-    // A stashed window keeps its size when a drag starts (see followRect):
-    // the held scale, and which side of it the edge rule was on (0: not
-    // known yet).
-    std::optional<qreal> m_dragHold;
-    qreal m_dragHoldSide = 0;
-
-    // A Meta+drag snap's target place.
-    struct Gesture
-    {
-        int key; // tells targets apart
-        QRectF drawn; // where the window is shown meanwhile
-        std::optional<Place> place = std::nullopt;
-    };
-    // Where the dragged window was when the drag started, where it is drawn
-    // now, the current gesture target, and the glide between them.
-    QPointF m_dragPress;
-    QRectF m_dragStartFrame;
-    qreal m_dragStartCenterY = 0;
-    QRectF m_dragDisplayed;
-    std::optional<Gesture> m_dragGesture;
-    // Acceleration state of the current Meta+drag (see leadStep): how far
-    // the window is ahead of the pointer horizontally, the direction and
-    // length of the current run, movement against it so far (jitter until
-    // reversalJitter), the last pointer position and recent ones (for the
-    // speed); the pause-to-snap target, where the pointer was then, and
-    // the timer.
-    qreal m_leadX = 0;
-    int m_leadDir = 0;
-    qreal m_leadRun = 0;
-    qreal m_leadAgainst = 0;
-    QPointF m_leadLast;
-    std::vector<std::pair<std::chrono::steady_clock::time_point, QPointF>> m_leadSamples;
-    std::optional<Gesture> m_snapped;
-    QTimer m_snapDwell;
-    // Snapping mode: the window's center and the pointer (plus lead) at the
-    // first snap; the region follows the pointer's movement from there.
-    QPointF m_snapAnchor;
-    QPointF m_snapPointer;
-    int m_dragModeKey = -1;
-    bool m_dragAnimating = false;
-    QRectF m_dragAnimFrom;
-    std::chrono::steady_clock::time_point m_dragAnimStart;
+    WindowDrag m_drag{m_parking};
 
     // Where we last pointed the seat, and whether KWin disagreed (so we
     // forward events ourselves).
@@ -482,10 +400,10 @@ private:
     void watch(Window *window)
     {
         connect(window, &Window::interactiveMoveResizeStepped, this, [this, window]() {
-            dragStep(window);
+            m_drag.step(window);
         });
         connect(window, &Window::interactiveMoveResizeFinished, this, [this, window]() {
-            dragFinished(window);
+            m_drag.finished(window);
         });
         connect(window, &Window::frameGeometryChanged, this, [this, window]() {
             m_clips.frameChanged(window);
@@ -580,343 +498,6 @@ private:
         seat->notifyPointerButton(event->nativeButton, PointerButtonState::Released);
         seat->notifyPointerFrame();
         return true;
-    }
-
-    // --- Dragging ---
-
-    // KWin has moved the dragged window so the grabbed spot is under the
-    // cursor. Draw it scaled around the cursor by the edge rule, or, while
-    // Meta is held and the drag matches a gesture, at the gesture's target;
-    // switching between the two glides. A parked window being dragged stops
-    // being parked: its frame was re-anchored around the cursor when it was
-    // grabbed, so the drag continues from where it is drawn.
-    void dragStep(Window *window)
-    {
-        if (!window->isInteractiveMove() || !window->windowItem()) {
-            return;
-        }
-        const RectF frame = window->frameGeometry();
-        const QPointF cursor = input()->pointer()->pos();
-        if (m_dragged != window) {
-            // Start of a drag. The scale is relative to the original size,
-            // which a parked (resized) window remembers.
-            auto *it = m_parking.find(window);
-            const bool parked = it && !it->restoring;
-            m_dragOriginal = it ? it->original : QSizeF(frame.width(), frame.height());
-            m_dragPress = m_lastPress;
-            const QPointF moved = cursor - m_dragPress;
-            m_dragStartFrame = QRectF(frame.x() - moved.x(), frame.y() - moved.y(), frame.width(), frame.height());
-            m_dragStartCenterY = parked ? it->shown.center().y() : m_dragStartFrame.center().y();
-            m_dragDisplayed = m_parking.currentlyDrawn(window);
-            m_dragHold.reset();
-            m_dragHoldSide = 0;
-            if (parked && !m_parking.isParkingArea(m_parking.areaOf(window))) {
-                m_dragHold = it->shown.width() / it->original.width();
-            }
-            m_dragGesture.reset();
-            m_dragModeKey = -1;
-            m_leadX = 0;
-            m_leadDir = 0;
-            m_leadRun = 0;
-            m_leadAgainst = 0;
-            m_leadLast = cursor;
-            m_leadSamples.clear();
-            m_snapped.reset();
-            m_snapDwell.stop();
-            m_dragAnimating = false;
-            const auto closeRanks = m_parking.leaving(window);
-            m_parking.erase(window);
-            m_dragged = window;
-            closeRanks();
-        }
-
-        const std::optional<Gesture> gesture = leadStep(window, cursor);
-        // The edge rule around where the window is: the pointer plus the
-        // window's lead (the frame shifted with it keeps the grab offset).
-        const QRectF want = gesture ? gesture->drawn
-                                    : followRect(window, RectF(frame.x() + m_leadX, frame.y(), frame.width(), frame.height()),
-                                                 cursor + QPointF(m_leadX, 0));
-        const int key = gesture ? gesture->key : -1;
-        if (key != m_dragModeKey) {
-            m_dragModeKey = key;
-            m_dragAnimFrom = m_dragDisplayed;
-            m_dragAnimStart = std::chrono::steady_clock::now();
-            m_dragAnimating = true;
-        }
-        QRectF shown = want;
-        if (m_dragAnimating) {
-            const auto elapsed = std::chrono::steady_clock::now() - m_dragAnimStart;
-            const qreal t = std::clamp(std::chrono::duration<qreal>(elapsed) / glance::animationTime, 0.0, 1.0);
-            if (t >= 1.0) {
-                m_dragAnimating = false;
-            } else {
-                shown = lerpRect(m_dragAnimFrom, want, 1.0 - std::pow(1.0 - t, 3));
-            }
-        }
-        m_dragDisplayed = shown;
-        m_dragGesture = gesture;
-
-        // The item's coordinates start at the frame's top-left corner.
-        QTransform transform;
-        transform.translate(shown.x() - frame.x(), shown.y() - frame.y());
-        transform.scale(shown.width() / frame.width(), shown.height() / frame.height());
-        m_parking.setDrawTransform(window, transform);
-    }
-
-    // Where the edge rule draws the dragged window: scaled around the cursor.
-    QRectF followRect(Window *window, const RectF &frame, const QPointF &cursor)
-    {
-        const RectF screen = window->moveResizeOutput()->geometryF();
-        const qreal left = frame.x();
-        const qreal right = frame.x() + frame.width();
-        // From the current frame size to the original size.
-        const qreal grow = m_dragOriginal.width() / frame.width();
-
-        // Full size while the window stays within main (the middle half);
-        // shrinks as its left or right edge goes into the edge zone.
-        const qreal zoneWidth = screen.width() * zoneFraction;
-        qreal total = std::min({1.0,
-                                edgeScale(cursor.x() - screen.x(), (cursor.x() - left) * grow, zoneWidth),
-                                edgeScale(screen.x() + screen.width() - cursor.x(), (right - cursor.x()) * grow, zoneWidth)});
-        total = std::max(total, parkingScale(m_dragOriginal));
-        if (m_dragHold) {
-            total = holdScale(frame, cursor, total, screen);
-        }
-        m_dragScale = total;
-        // The scale to draw the current frame at.
-        const qreal scale = total * grow;
-
-        // Fallback when even minScale doesn't fit: slide it back on screen
-        // (the cursor then detaches from the grabbed spot).
-        const qreal drawnLeft = cursor.x() + (left - cursor.x()) * scale;
-        const qreal shift = shiftOntoScreen(drawnLeft, frame.width() * scale, screen);
-        return QRectF(drawnLeft + shift, cursor.y() + (frame.y() - cursor.y()) * scale,
-                      frame.width() * scale, frame.height() * scale);
-    }
-
-    // A window dragged out of a stash keeps the size it had there (set by
-    // the drop or by Meta+wheel), so the drag doesn't start with a jump:
-    // the edge rule (`rule`) takes over once it reaches that size (no jump
-    // then), or with a glide once the window's center leaves the stash.
-    qreal holdScale(const RectF &frame, const QPointF &cursor, qreal rule, const RectF &screen)
-    {
-        const qreal hold = *m_dragHold;
-        const qreal side = rule - hold;
-        if (m_dragHoldSide == 0) {
-            m_dragHoldSide = side < 0 ? -1 : 1;
-        }
-        if (side * m_dragHoldSide <= 0) {
-            m_dragHold.reset();
-            return rule;
-        }
-        const qreal scale = hold * m_dragOriginal.width() / frame.width();
-        const qreal centerX = cursor.x() + (frame.x() + frame.width() / 2 - cursor.x()) * scale - screen.x();
-        const qreal zoneWidth = screen.width() * zoneFraction;
-        const qreal band = zoneWidth * parkingBand;
-        const bool inStash = (centerX >= band && centerX < zoneWidth)
-            || (centerX <= screen.width() - band && centerX > screen.width() - zoneWidth);
-        if (!inStash) {
-            m_dragHold.reset();
-            m_dragAnimFrom = m_dragDisplayed;
-            m_dragAnimStart = std::chrono::steady_clock::now();
-            m_dragAnimating = true;
-            return rule;
-        }
-        return hold;
-    }
-
-    // Acceleration and snapping, on every drag step: updates the window's
-    // lead (see updateLead) and returns the snap target, if snapping. The
-    // first snap comes from m_snapDwell (a pause); then, in snapping mode,
-    // the target follows the region the window would be in (the pointer's
-    // movement since the snap, added to the window's center then). Without
-    // Meta the gain is 1 (the lead stays) and there is no snapping.
-    std::optional<Gesture> leadStep(Window *window, const QPointF &cursor)
-    {
-        const auto now = std::chrono::steady_clock::now();
-        const bool moved = cursor != m_leadLast;
-        const qreal dx = cursor.x() - m_leadLast.x();
-        m_leadLast = cursor;
-        if (moved) {
-            m_leadSamples.emplace_back(now, cursor);
-            std::erase_if(m_leadSamples, [&](const auto &sample) {
-                return now - sample.first > leadSampleTime;
-            });
-        }
-        if (!(input()->keyboardModifiers() & Qt::MetaModifier)) {
-            m_snapDwell.stop();
-            m_leadRun = 0;
-            m_snapped.reset();
-            return std::nullopt;
-        }
-        if (moved) {
-            updateLead(window, cursor, dx, now);
-            if (!m_snapped) {
-                m_snapDwell.start();
-            }
-        }
-        if (m_snapped) {
-            const QPointF point = m_snapAnchor + (cursor + QPointF(m_leadX, 0) - m_snapPointer);
-            if (auto target = snapTargetAt(window, point); target->key != m_snapped->key) {
-                m_snapped = target;
-            }
-        }
-        return m_snapped;
-    }
-
-    // Acceleration: each horizontal pointer movement moves the window that
-    // much times the gain, which grows from 1 to leadMaxGain over the run
-    // (movement in one direction); a reversal (reversalJitter the other way)
-    // or moving slower than leadSlow starts a new run at 1. The lead keeps
-    // the window between the screen edges, so overshoot isn't stored.
-    void updateLead(Window *window, const QPointF &cursor, qreal dx, std::chrono::steady_clock::time_point now)
-    {
-        // Slow: 1:1 (precise).
-        const auto &[t0, p0] = m_leadSamples.front();
-        const qreal dt = std::chrono::duration<qreal>(now - t0).count();
-        if (dt <= 0 || std::abs(cursor.x() - p0.x()) / dt < leadSlow) {
-            m_leadRun = 0;
-            m_leadAgainst = 0;
-            return;
-        }
-        if (dx == 0) {
-            return;
-        }
-        const RectF screen = window->moveResizeOutput()->geometryF();
-        const int dir = dx < 0 ? -1 : 1;
-        qreal gain = 1.0;
-        if (m_leadDir == 0 || dir == m_leadDir) {
-            m_leadDir = dir;
-            m_leadRun += std::abs(dx);
-            m_leadAgainst = 0;
-            gain = 1.0 + (leadMaxGain - 1.0) * std::min(1.0, m_leadRun / (screen.width() * leadBuild));
-        } else {
-            m_leadAgainst += std::abs(dx);
-            if (m_leadAgainst >= reversalJitter) {
-                m_leadDir = dir; // reversed: a new run, at 1:1
-                m_leadRun = m_leadAgainst;
-                m_leadAgainst = 0;
-            }
-        }
-        m_leadX += (gain - 1.0) * dx;
-        const qreal x = std::clamp(cursor.x() + m_leadX, screen.x(), screen.x() + screen.width());
-        m_leadX = x - cursor.x();
-    }
-
-    // The snap target for a window centered at `point`, by region: in the
-    // parking band parking, elsewhere in an edge zone the stash, in main a
-    // half, or all of main in the middle band (snapFullBand); halves and all
-    // of main at full height.
-    std::optional<Gesture> snapTargetAt(Window *window, const QPointF &point) const
-    {
-        const RectF screen = window->moveResizeOutput()->geometryF();
-        const RectF area = workspace()->clientArea(MaximizeArea, window);
-        const qreal zoneWidth = screen.width() * zoneFraction;
-        const qreal x = point.x() - screen.x();
-        const qreal width = screen.width();
-        Place place;
-        if (x < zoneWidth * parkingBand) {
-            place = Place::ParkingLeft;
-        } else if (x < zoneWidth) {
-            place = Place::StashLeft;
-        } else if (x > width - zoneWidth * parkingBand) {
-            place = Place::ParkingRight;
-        } else if (x > width - zoneWidth) {
-            place = Place::StashRight;
-        } else if (x < width / 2 - width * snapFullBand / 2) {
-            place = Place::HalfLeft;
-        } else if (x > width / 2 + width * snapFullBand / 2) {
-            place = Place::HalfRight;
-        } else {
-            place = Place::Full;
-        }
-        QRectF drawn;
-        switch (place) {
-        case Place::HalfLeft:
-        case Place::HalfRight:
-            drawn = QRectF(screen.x() + (place == Place::HalfLeft ? zoneWidth : 2 * zoneWidth), area.y(), zoneWidth, area.height());
-            break;
-        case Place::Full:
-            drawn = QRectF(screen.x() + zoneWidth, area.y(), 2 * zoneWidth, area.height());
-            break;
-        default:
-            drawn = m_parking.placeRect(window, place, m_dragOriginal, point.y());
-            break;
-        }
-        return Gesture{.key = int(place), .drawn = drawn, .place = place};
-    }
-
-    // Released with a gesture target: go there, gliding from where it is
-    // shown.
-    void commitGesture(Window *window, const Gesture &gesture, const QRectF &from)
-    {
-        if (!gesture.place) {
-            return;
-        }
-        switch (*gesture.place) {
-        case Place::HalfLeft:
-        case Place::HalfRight:
-        case Place::Full: {
-            // At full height: exactly the target rectangle.
-            const QRectF &r = gesture.drawn;
-            releaseKdeState(window);
-            m_parking.resizeAnimated(window, RectF(r.x(), r.y(), r.width(), r.height()), from);
-            break;
-        }
-        default:
-            m_parking.commitPlace(window, *gesture.place, m_dragOriginal, gesture.drawn.center().y(), from);
-            break;
-        }
-    }
-
-    // Dropped: park it where it is drawn, or restore full size.
-    void dragFinished(Window *window)
-    {
-        if (window != m_dragged) {
-            return;
-        }
-        m_dragged = nullptr;
-        m_dragAnimating = false;
-        m_snapDwell.stop();
-        m_snapped.reset();
-        const std::optional<Gesture> gesture = m_dragGesture;
-        m_dragGesture.reset();
-        if (!window->windowItem()) {
-            return;
-        }
-        if (gesture) {
-            commitGesture(window, *gesture, m_dragDisplayed);
-            return;
-        }
-
-        const RectF frame = window->frameGeometry();
-        const QRectF drawn = window->windowItem()->transform()
-                                 .mapRect(QRectF(0, 0, frame.width(), frame.height()))
-                                 .translated(frame.topLeft());
-
-        if (m_dragScale < parkBelow) {
-            m_parking.park(window, drawn, m_dragOriginal);
-            m_parking.arrange(window);
-        } else if (m_dragOriginal != QSizeF(frame.width(), frame.height())) {
-            // Back to the original size, keeping the grabbed spot under the
-            // cursor (plus the window's lead): the drawing grows around it
-            // until the app has resized.
-            const QPointF cursor = input()->pointer()->pos();
-            const QPointF lead(m_leadX, 0);
-            const qreal grow = m_dragOriginal.width() / frame.width();
-            const QRectF target(cursor + lead - (cursor - frame.topLeft()) * grow, m_dragOriginal);
-            m_parking.set(window, Parked{.shown = target, .original = m_dragOriginal, .restoring = true});
-            qInfo("glance: %s: restore to %.0fx%.0f", qPrintable(window->caption()),
-                  m_dragOriginal.width(), m_dragOriginal.height());
-            window->moveResize(RectF(target.topLeft(), m_dragOriginal));
-            m_parking.applyParked(window);
-        } else {
-            // Full size: where it is drawn (ahead of the pointer by the lead).
-            if (m_leadX != 0) {
-                window->move(frame.topLeft() + QPointF(m_leadX, 0));
-            }
-            m_parking.setDrawTransform(window, QTransform());
-        }
     }
 
     // --- Drawing and input for managed windows ---

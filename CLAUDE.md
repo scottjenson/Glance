@@ -149,6 +149,8 @@ shows clips with the icon only).
   github.com/login/device on the Mac and clicks Authorize (no
   checkboxes; a hand-made token needs repo, read:org and workflow). On
   2026-10-03 it still landed in the keyring: watch after the next logout.
+  On 2026-10-04 it went invalid again with no logout in between (a push
+  worked, one ~30 min later failed): not only logouts. Script: ~/gh-login.sh.
 - Local git identity (repo-only config): Scott Jenson <scott@jenson.org>.
 - The user wants work committed and pushed so nothing is lost. Commit when a
   change is done and working; ask before pushing anything unusual.

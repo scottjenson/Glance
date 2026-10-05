@@ -101,7 +101,7 @@ size), parking icons are laid out 600 px wide (phone layout); a window
 dragged out of a stash shrinks at once (the old hold made it stay large,
 then snap small) ([docs/dragging-and-parking.md](docs/dragging-and-parking.md));
 replaces the 1:1 stash rule (stashed windows lose edge resizing).
-Waiting for the user's check. Next: mipmaps for scaled windows (text
+Checked by the user ("the scaling feels much better"). Next: mipmaps for scaled windows (text
 breaks up and shimmers below half size).
 
 ### 2026-10-03, end of day

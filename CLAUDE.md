@@ -72,6 +72,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 | [docs/logout-hang.md](docs/logout-hang.md) | Plasmashell hangs at logout: a KDE clipboard deadlock (root cause known, harmless, left alone) |
 | [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
 | [plans/backlog.md](plans/backlog.md) | The agreed order of work, polish, packaging, ideas |
+| [plans/remembered-places.md](plans/remembered-places.md) | Windows reopen where they were (main, stash, parking), per app, matched by title |
 | [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text |
 | [plans/code-review.md](plans/code-review.md) | Architecture/performance review (2026-10-03): 5 fixes to make, what to keep; read before touching painting, input routing or clips |
 | [plans/refactor.md](plans/refactor.md) | Splitting main.cpp into components (review finding 5; done through stage 4); the smoke test to run after changes |
@@ -117,7 +118,10 @@ the user). That order is done. Then (2026-10-04): parked windows get
 their full size back when a logout starts, so Firefox no longer reopens
 at its parked size ([docs/dragging-and-parking.md](docs/dragging-and-parking.md),
 Logging out); checked by the user; then changed so they stay drawn in
-place (they visibly grew before closing): waiting for the user's check. Kept for later: rich-text clips, restoring clips after login. The rest of the list was dropped for now
+place (they visibly grew before closing): waiting for the user's check.
+Next: remembered places ([plans/remembered-places.md](plans/remembered-places.md)),
+planned with the user 2026-10-04, open questions there (first: keep or
+remove the logout step). Kept for later: rich-text clips, restoring clips after login. The rest of the list was dropped for now
 ([plans/backlog.md](plans/backlog.md)).
 
 ## How the effect works (kwin/glance.cpp and its components, the basics)

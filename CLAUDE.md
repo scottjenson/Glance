@@ -116,7 +116,8 @@ MIT LICENSE file (added 2026-10-04) and the version check (built
 the user). That order is done. Then (2026-10-04): parked windows get
 their full size back when a logout starts, so Firefox no longer reopens
 at its parked size ([docs/dragging-and-parking.md](docs/dragging-and-parking.md),
-Logging out); waiting for the user's check across a real logout. Kept for later: rich-text clips, restoring clips after login. The rest of the list was dropped for now
+Logging out); checked by the user; then changed so they stay drawn in
+place (they visibly grew before closing): waiting for the user's check. Kept for later: rich-text clips, restoring clips after login. The rest of the list was dropped for now
 ([plans/backlog.md](plans/backlog.md)).
 
 ## How the effect works (kwin/glance.cpp and its components, the basics)

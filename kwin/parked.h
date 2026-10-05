@@ -225,10 +225,11 @@ public:
     void closed(Window *window);
     // Unloading: every parked window back to full size, where it is drawn.
     void restoreAll();
-    // Logging out: the same, and they are parked no more. Apps remember
-    // their window size when they are closed at logout (Firefox reopens at
-    // it), so they must have their full size by then.
-    void unparkAll();
+    // Logging out: apps remember their window size when they are closed at
+    // logout (Firefox reopens at it), so every parked window really gets its
+    // original size back first. They stay parked, drawn where they are, so
+    // nothing changes on the screen.
+    void fullSizeForLogout();
 
 Q_SIGNALS:
     // A window's draw transform changed (its focus ring follows it).

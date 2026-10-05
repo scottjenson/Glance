@@ -584,20 +584,16 @@ void ParkedWindows::restoreAll()
     }
 }
 
-void ParkedWindows::unparkAll()
+void ParkedWindows::fullSizeForLogout()
 {
     if (m_parked.empty()) {
         return;
     }
     qInfo("glance: logging out: %d parked windows back to full size", int(m_parked.size()));
     for (auto &[window, parked] : m_parked) {
-        if (window->windowItem()) {
-            setDrawTransform(window, QTransform());
-        }
-        window->moveResize(RectF(parked.shown.topLeft(), parked.original));
+        parked.restoring = false; // else unparked (drawn full size) once it has it
+        window->moveResize(RectF(window->frameGeometry().topLeft(), parked.original));
     }
-    m_parked.clear();
-    m_resizing.reset();
 }
 
 } // namespace glance

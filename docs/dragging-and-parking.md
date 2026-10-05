@@ -49,8 +49,12 @@ Unloading resizes parked windows back to their original size.
 **Logging out** (2026-10-04): apps remember their window size when they
 are closed at logout, and Firefox reopened at its 500 px parked size,
 which then became its "original". So at the start of a logout every
-parked window gets its original size back and is no longer parked
-(`ParkedWindows::unparkAll`), before any app is asked to close. The
+parked app really gets its original size back
+(`ParkedWindows::fullSizeForLogout`), before any app is asked to close.
+The windows stay parked, drawn where they are (scaled down further), so
+nothing changes on the screen (the first version unparked them: they
+grew in place for a moment before closing, which the user found
+visually odd). The
 moment: Plasma's ksmserver (`performLogout`) moves KWin's session state
 out of Normal first (`EffectsHandler::sessionStateChanged`; KWin's
 `SessionManager` isn't exported to plugins); apps are closed only after
@@ -58,12 +62,11 @@ its session save and plasma-fallback-session-save
 (`plasma-shutdown`: `closeWaylandWindows`). ksmserver's numbers for the
 states are off by one from KWin's (its Saving arrives as Quitting, its
 Normal after a cancelled logout as Saving), so any state but Normal
-counts. A manual "save session" doesn't change the state. A cancelled
-logout leaves the windows unparked. Windows keep the top-left corner
-they were drawn at (parked on the right, they reach past the screen
-edge; Wayland apps don't know their position, so it isn't remembered).
-Headless check: `setState` on KWin's /Session over D-Bus brings a parked
-Konsole from 540x374 back to 1800x1246.
+counts. A manual "save session" doesn't change the state. After a
+cancelled logout the windows stay parked at their full layout size
+(smaller text until they are moved). Headless check: `setState` on
+KWin's /Session over D-Bus brings a parked Konsole from 540x374 back to
+1800x1246.
 
 ## Input to parked windows
 `ParkedInput` (kwin/parkedinput.cpp): `route`, `reanchor`, and

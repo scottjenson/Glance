@@ -71,6 +71,11 @@ void FocusRing::update()
     m_window = window;
 }
 
+KWin::Item *FocusRing::ring() const
+{
+    return m_ring;
+}
+
 // The ring moved by keyboard (Alt+Tab, Meta+Alt+arrows): it bounces
 // there. Clicks, drags and apps taking the focus don't bounce: the
 // user's eyes are already on the window (user, 2026-10-03: bouncing

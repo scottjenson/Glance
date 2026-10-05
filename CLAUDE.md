@@ -58,7 +58,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 ## Features (built) and plans
 | | |
 |---|---|
-| [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking, input to parked windows, icon-like tiny windows, minimize = park |
+| [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking (zoom in the stash, phone layout in parking), drawing small windows (mipmaps), input to parked windows, icon-like tiny windows, minimize = park |
 | [docs/stacks.md](docs/stacks.md) | Parking columns; stashes are free placement |
 | [docs/meta-wheel.md](docs/meta-wheel.md) | Meta+wheel resizes in place; over parking icons it sizes the preview |
 | [docs/keyboard.md](docs/keyboard.md) | Meta+arrows ladder, Meta+Up/Down views, Meta+Alt+arrows selection, Meta alone and KDE's launcher |
@@ -101,8 +101,11 @@ size), parking icons are laid out 600 px wide (phone layout); a window
 dragged out of a stash shrinks at once (the old hold made it stay large,
 then snap small) ([docs/dragging-and-parking.md](docs/dragging-and-parking.md));
 replaces the 1:1 stash rule (stashed windows lose edge resizing).
-Checked by the user ("the scaling feels much better"). Next: mipmaps for scaled windows (text
-breaks up and shimmers below half size).
+Checked by the user ("the scaling feels much better"). Then: windows
+drawn below half size are drawn from mipmaps (no broken-up, shimmering
+text; [docs/dragging-and-parking.md](docs/dragging-and-parking.md),
+Drawing small windows). Waiting for the user's check (the user has
+screenshots of parking from before).
 
 ### 2026-10-03, end of day
 Running in the user's real Plasma session (via use-in-session.sh; after a
@@ -209,6 +212,7 @@ remove the logout step). Kept for later: rich-text clips, restoring clips after 
   `drag.h/.cpp`, `keyboard.h/.cpp`, `alttab.h/.cpp`,
   `focusring.h/.cpp`, `previews.h/.cpp` (hover previews),
   `wheel.h/.cpp` (Meta+wheel), `declutter.h/.cpp`, `clips.h/.cpp`,
+  `mipmaps.h/.cpp` (small windows drawn from mipmaps),
   `kde.h/.cpp` (KDE settings switched while loaded, the Meta tap). Don't
   name a file input.h: it would shadow KWin's `<input.h>`.
   `kwin/clip/main.cpp`: glance-clip, the

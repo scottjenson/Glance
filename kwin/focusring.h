@@ -14,6 +14,7 @@
 
 namespace KWin
 {
+class Item;
 class OutlinedBorderItem;
 class WindowPaintData;
 class WindowPrePaintData;
@@ -42,6 +43,9 @@ public:
     void frameChanged(Window *window);
     void fullScreenChanged(Window *window);
     void closed(Window *window);
+
+    // The ring's scene item, if it is shown (a child of its window's).
+    KWin::Item *ring() const;
 
     // Painting a bouncing window.
     bool bouncing() const;

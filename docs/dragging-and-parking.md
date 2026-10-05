@@ -57,11 +57,10 @@ reflowed but didn't look smaller (clips: same text size); the first try
 that day (no reflow down to half size, then 2x the shown size) reflowed
 pages at every drop below half size, which the user found disruptive.
 Text quality: KWin's bilinear sampling reads 4 source pixels per screen
-pixel, so below 1/2 thin strokes break up and shimmer. Planned next:
-mipmaps for scaled windows (`GLTexture::generateMipmaps`, an
-`OffscreenEffect`-like redirect); later maybe a lower render scale for
-the app (`Window::setNextTargetScale`, fractional-scale-v1) for sharp
-text at the stash's sizes. Trade-off: a stashed window is drawn below
+pixel, so below 1/2 thin strokes break up and shimmer: such windows are
+drawn from mipmaps (see Drawing small windows below). Later maybe a
+lower render scale for the app (`Window::setNextTargetScale`,
+fractional-scale-v1) for sharp text at the stash's sizes. Trade-off: a stashed window is drawn below
 1:1 and so has no resize edges (see Resizing parked windows below);
 Meta+wheel resizes it. Logs one
 `glance:` line per resize. Dropped in main: `moveResize` to the
@@ -90,6 +89,33 @@ cancelled logout the windows stay parked at their full layout size
 (smaller text until they are moved). Headless check: `setState` on
 KWin's /Session over D-Bus brings a parked Konsole from 540x374 back to
 1800x1246.
+
+## Drawing small windows
+`Mipmaps` (kwin/mipmaps.cpp), 2026-10-05, from the effect's `drawWindow`:
+KWin draws a scaled window by blending the 4 window pixels nearest each
+screen pixel (bilinear), so drawn below half size most pixels are
+skipped: text and thin lines break up, and shimmer as the window moves.
+A window whose draw transform is below `mipmapBelow` (0.5) is instead
+drawn from an image of itself at full size (`ItemRenderer::renderItem`
+into a texture, with paint data that is the inverse of the item's
+transform: KWin applies the paint data's matrix just before the item's
+transform) plus that texture's mipmaps (`GLTexture::allocate` with all
+levels, `generateMipmaps`, `GL_LINEAR_MIPMAP_LINEAR`); the GPU blends
+the two levels nearest the drawn size. The image is redrawn only when
+the window's content changes (`EffectWindow::windowDamaged`: surfaces
+and title bar) or its full-size bounds do; drags and glides only redraw
+the quad. The full-size bounds are the window item's own
+`boundingRect()` at the frame's top-left corner, not
+`EffectWindow::expandedGeometry()`, which is where the window is drawn
+(transform included: the first version sized the image from it and got
+only the top-left part of the window). The focus ring is left out of
+the image and drawn over it as usual (`renderItem` with a filter), so it
+stays sharp. At 1/2 and larger KWin's own drawing is clean and mipmaps
+would only soften it. Cost: GPU memory for a full-size image per small
+window (an 1800x1146 window at 150%: about 25 MB with its mipmaps),
+freed when it is drawn large again or closed. Blur behind such windows
+(KWin's blur effect, later in the chain) is skipped. Headless check: a
+parked Konsole at 45% loses its broken-up glyphs (the "@" in the prompt).
 
 ## Input to parked windows
 `ParkedInput` (kwin/parkedinput.cpp): `route`, `reanchor`, and

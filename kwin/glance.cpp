@@ -20,6 +20,7 @@
 //   selection.
 // - AltTab (alttab.h): Alt+Tab hunt and return, the desktop map.
 // - FocusRing (focusring.h): the outline on the active window, its bounce.
+// - Mipmaps (mipmaps.h): windows drawn small are drawn from mipmaps.
 // - HoverPreviews (previews.h): parking icons grow in place on hover.
 // - MetaWheel (wheel.h): Meta+wheel resizes in place.
 // - Declutter (declutter.h): Meta+double-click.
@@ -49,6 +50,7 @@
 #include "focusring.h"
 #include "kde.h"
 #include "keyboard.h"
+#include "mipmaps.h"
 #include "parked.h"
 #include "parkedinput.h"
 #include "previews.h"
@@ -149,6 +151,15 @@ public:
             return;
         }
         Effect::paintWindow(renderTarget, viewport, w, mask, deviceRegion, data);
+    }
+
+    // Windows drawn small: from their mipmaps (see Mipmaps).
+    void drawWindow(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask,
+                    const Region &deviceRegion, WindowPaintData &data) override
+    {
+        if (!m_mipmaps.drawWindow(renderTarget, viewport, w, mask, deviceRegion, data)) {
+            Effect::drawWindow(renderTarget, viewport, w, mask, deviceRegion, data);
+        }
     }
 
     // The Alt+Tab label, over everything.
@@ -307,6 +318,7 @@ private:
     HoverPreviews m_previews{m_parking};
     MetaWheel m_wheel{m_parking, m_previews};
     FocusRing m_focusRing{m_parking, m_altTab};
+    Mipmaps m_mipmaps{m_focusRing};
     Keyboard m_keyboard{m_parking, m_focusRing};
     WindowDrag m_drag{m_parking};
     ParkedInput m_input{m_parking};

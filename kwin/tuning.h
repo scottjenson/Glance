@@ -43,6 +43,10 @@ inline constexpr qreal parkBelow = 0.99;
 // at least the app's minimum), so web pages switch to their phone
 // layout and the icon shows the app's compact form.
 inline constexpr qreal parkingLayoutWidth = 600.0;
+// Windows drawn smaller than this are drawn from mipmaps (see mipmaps.h):
+// at 1/2 and larger KWin's own drawing is clean, and mipmaps would only
+// blur it.
+inline constexpr qreal mipmapBelow = 0.5;
 
 // A window counts as being in a half of main when its horizontal
 // extent and the half's share at least this much (intersection over

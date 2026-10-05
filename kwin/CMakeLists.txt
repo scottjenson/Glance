@@ -49,7 +49,7 @@ set_target_properties(glance-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # glance.cpp is the effect (the coordinator); the rest are its components.
 kcoreaddons_add_plugin(glance
     SOURCES glance.cpp parked.cpp parkedinput.cpp drag.cpp keyboard.cpp alttab.cpp focusring.cpp
-            previews.cpp wheel.cpp declutter.cpp clips.cpp kde.cpp
+            previews.cpp wheel.cpp declutter.cpp clips.cpp kde.cpp mipmaps.cpp
     INSTALL_NAMESPACE "kwin/effects/plugins")
 target_link_libraries(glance PRIVATE glance-core KWin::kwin KF6::GlobalAccel Qt6::Concurrent)
 # KWin headers missing from kwin-devel (see the note in each).

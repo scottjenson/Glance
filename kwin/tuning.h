@@ -39,6 +39,13 @@ inline constexpr qreal parkBelow = 0.99;
 // On parking, the app is resized no narrower than this (keeping its
 // shape), so web pages switch to their phone layout.
 inline constexpr qreal minLayoutWidth = 400.0;
+// Zoom first, reflow after (2026-10-05, user: shrinking should be seen,
+// not only an app getting narrower with full-size text): a parked window
+// drawn at this scale or larger keeps its app's full size, drawn zoomed
+// out; drawn smaller, its app is laid out at shown / minZoom (2x: text
+// stays sharp), so its content is never drawn smaller than this unless
+// the app can't get that narrow (minLayoutWidth, the app's minimum).
+inline constexpr qreal minZoom = 0.5;
 
 // A window counts as being in a half of main when its horizontal
 // extent and the half's share at least this much (intersection over

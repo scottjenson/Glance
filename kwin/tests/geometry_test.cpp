@@ -87,8 +87,10 @@ private Q_SLOTS:
         QTest::addColumn<QSizeF>("original");
         QTest::addColumn<QSizeF>("appMin");
         QTest::addColumn<QSizeF>("expected");
-        QTest::newRow("1:1 when wide enough") << QSizeF(600, 400) << QSizeF(1600, 1000) << QSizeF() << QSizeF(600, 400);
-        QTest::newRow("2:1 when 1:1 is too narrow") << QSizeF(300, 200) << QSizeF(1600, 1000) << QSizeF() << QSizeF(600, 400);
+        QTest::newRow("zoomed, not reflowed, down to minZoom") << QSizeF(800, 500) << QSizeF(1600, 1000) << QSizeF() << QSizeF(1600, 1000);
+        QTest::newRow("keeps the shown shape") << QSizeF(1200, 600) << QSizeF(1600, 1000) << QSizeF() << QSizeF(1600, 800);
+        QTest::newRow("2:1 below minZoom") << QSizeF(600, 400) << QSizeF(1600, 1000) << QSizeF() << QSizeF(1200, 800);
+        QTest::newRow("2:1 when small") << QSizeF(300, 200) << QSizeF(1600, 1000) << QSizeF() << QSizeF(600, 400);
         QTest::newRow("minLayoutWidth, same shape") << QSizeF(150, 100) << QSizeF(1600, 1000) << QSizeF() << QSizeF(400, 267);
         QTest::newRow("the app's minimum") << QSizeF(300, 200) << QSizeF(1600, 1000) << QSizeF(800, 0) << QSizeF(800, 533);
         QTest::newRow("never more than the original") << QSizeF(300, 200) << QSizeF(350, 250) << QSizeF() << QSizeF(350, 250);

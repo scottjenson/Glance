@@ -37,9 +37,11 @@ qreal parkingScale(const QSizeF &original);
 
 // The app's real size for a window parked at `shown` (drawn size) whose
 // full size is `original` and whose app needs at least `appMin` (frame
-// size): exactly 1:1 or 2:1 of the drawn size if that fits (text stays
-// sharp), else the smallest size keeping the shape that is at least
-// minLayoutWidth wide and `appMin`; never more than `original`.
+// size): zoom first, then reflow (see minZoom): drawn at minZoom or
+// larger, its full width (the shown shape); smaller, shown / minZoom (2:1,
+// text stays sharp). If that is too small, the smallest size keeping the
+// shape that is at least minLayoutWidth wide and `appMin`; never more
+// than `original`.
 QSizeF layoutSize(const QSizeF &shown, const QSizeF &original, const QSizeF &appMin);
 
 // --- Places ---

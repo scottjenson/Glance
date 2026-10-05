@@ -213,14 +213,10 @@ void ParkedWindows::park(Window *window, const QRectF &shown, const QSizeF &orig
     m_parked[window] = Parked{.shown = shown, .original = original};
     const RectF frame = window->frameGeometry();
     const QSizeF layout = layoutSize(window, shown.size(), original);
-    if (isClipInParking(window, shown.width(), original)) {
-        // Drawn at 1/2: half as tall as its new layout (columns go by
-        // `shown`).
-        m_parked[window].shown.setHeight(layout.height() / 2);
-    } else if (isClip(window)) {
-        // In a stash: drawn 1:1, like a window whose app fits (and so
-        // resizable from its edges).
-        m_parked[window].shown.setSize(layout);
+    if (isClip(window)) {
+        // Drawn at its zoom (in parking 1/2): as tall as its new layout
+        // at that zoom (columns go by `shown`).
+        m_parked[window].shown.setHeight(layout.height() * shown.width() / layout.width());
     }
     if (layout != QSizeF(frame.width(), frame.height())) {
         qInfo("glance: %s: original %.0fx%.0f, app minimum %.0fx%.0f, shown %.0fx%.0f -> resize to %.0fx%.0f",
@@ -242,7 +238,8 @@ QSizeF ParkedWindows::layoutSize(Window *window, const QSizeF &shown, const QSiz
         // made one-word clips square; the clip picks its own height (see
         // Clips::frameChanged).
         const QSizeF appMin = window->clientSizeToFrameSize(window->minSize());
-        return QSizeF(std::max(std::round(shown.width()), appMin.width()), std::round(shown.height()));
+        const qreal zoom = std::clamp(shown.width() / original.width(), minZoom, 1.0);
+        return QSizeF(std::max(std::round(shown.width() / zoom), appMin.width()), std::round(shown.height() / zoom));
     }
     return glance::layoutSize(shown, original, window->clientSizeToFrameSize(window->minSize()));
 }

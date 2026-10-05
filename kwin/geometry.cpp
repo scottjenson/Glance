@@ -33,20 +33,16 @@ qreal parkingScale(const QSizeF &original)
 
 QSizeF layoutSize(const QSizeF &shown, const QSizeF &original, const QSizeF &appMin)
 {
-    auto fits = [&](const QSizeF &size) {
-        return size.width() >= minLayoutWidth && size.width() >= appMin.width()
-            && size.height() >= appMin.height() && size.width() <= original.width();
-    };
-    for (const qreal ratio : {1.0, 2.0}) {
-        const QSizeF size = (shown * ratio).toSize();
-        if (fits(size)) {
-            return size;
-        }
+    const qreal zoom = std::clamp(shown.width() / original.width(), minZoom, 1.0);
+    const QSizeF size = (shown / zoom).toSize();
+    if (size.width() >= minLayoutWidth && size.width() >= appMin.width()
+        && size.height() >= appMin.height() && size.width() <= original.width()) {
+        return size;
     }
     const qreal k = std::max({minLayoutWidth / shown.width(), appMin.width() / shown.width(),
                               appMin.height() / shown.height()});
-    const QSizeF size = (shown * k).toSize();
-    return size.width() > original.width() ? original : size;
+    const QSizeF smallest = (shown * k).toSize();
+    return smallest.width() > original.width() ? original : smallest;
 }
 
 int placeIndex(Place place)

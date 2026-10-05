@@ -36,11 +36,24 @@ window in `ParkedWindows::m_parked` (kwin/parked.cpp) (`shown` rect in global co
 `restoring`). `applyParked` (also on every `frameGeometryChanged`) fits the
 *current* frame into `shown` by width (scale = shown.width / frame.width),
 so nothing jumps while the app catches up with a resize. Real resize via
-`layoutSize`: exactly 1x or 2x the shown size if that is ≥ `minLayoutWidth`
-(400), ≥ the app's minimum (`clientSizeToFrameSize(minSize())`) and
-≤ original; else the smallest size keeping the shape that meets both
-minimums, capped at the original (Firefox: 500 px wide). 1x/2x are for
-text quality (drawn at 1/2, bilinear averages exact 2x2 blocks). Logs one
+`layoutSize`, **zoom first, then reflow** (2026-10-05): a window drawn
+at `minZoom` (0.5) of its original size or larger keeps its app's full
+size and is only drawn smaller (zoomed out), so it looks as it did while
+dragged; drawn smaller, the app is laid out at 2x the shown size, so its
+content stays at half size and reformats under the hood (web pages reach
+their phone layout). That needs 2x to be ≥ `minLayoutWidth` (400), ≥ the
+app's minimum (`clientSizeToFrameSize(minSize())`) and ≤ original; else
+the smallest size keeping the shape that meets both minimums, capped at
+the original (Firefox: 500 px wide), drawn below half size. 2x is also
+for text quality (drawn at 1/2, bilinear averages exact 2x2 blocks);
+zooms between 1/2 and 1 are a little soft. Why (user): with the old rule
+(1x the shown size whenever ≥ 400 px) stashed windows reflowed but didn't
+look smaller, clips least of all (same text size). Possible next step:
+sharp text at any zoom by telling the app a lower render scale
+(`Window::setNextTargetScale`, fractional-scale-v1; 1.5 x zoom at 150%);
+not tried. Trade-off: a window drawn below 1:1 has no resize edges (see
+Resizing parked windows below), so stashed windows now resize only with
+Meta+wheel. Logs one
 `glance:` line per resize. Dropped in main: `moveResize` to the
 original size (grabbed spot under the cursor), `restoring` until it has it.
 

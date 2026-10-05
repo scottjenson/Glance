@@ -127,12 +127,14 @@ transformed, with finite regions per window (the clipQuads gotcha, see
   parked as 180x384, hardly smaller, and since parking then started at
   85% of its size, a drop anywhere in the edge zone made it a parking
   icon (hover previews in what looked like the stash).
-- Clips in a stash (2026-10-04, the user: treat all windows the same in
-  stash and parking): laid out at their drawn size, whatever
-  minLayoutWidth, so drawn 1:1 with full-size text that rewraps, like
-  Firefox in a stash, and resizable from their edges. Before, drawn at
-  1/2 (the app couldn't go below 400 px wide or its minimum height), so
-  KDE's resize borders sat around the invisible full-size frame.
+- Clips in a stash zoom first like any window (2026-10-05, see
+  [dragging-and-parking.md](dragging-and-parking.md), `minZoom`): drawn
+  at half size or larger they keep their full width, drawn smaller;
+  smaller still, laid out at 2x (whatever minLayoutWidth). From
+  2026-10-04 they were laid out at their drawn size, drawn 1:1 with
+  full-size text and resizable from their edges, but the user found
+  they didn't look smaller (same text size). Before that, drawn at 1/2
+  (the app couldn't go below 400 px wide or its minimum height).
 - Clips in parking are laid out at twice their drawn width and drawn at
   1/2 (user: the 1:1 version was too big next to the stash; the 400-px
   layout before that made 3-px text). This once matched the stash's

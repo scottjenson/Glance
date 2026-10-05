@@ -96,6 +96,12 @@ from their edges; stashed clips are really resized (full-size text);
 Meta+Left/Right never resize (stops centered in each half of main,
 [docs/keyboard.md](docs/keyboard.md)); stash at least 270 px and
 parking at least 180 px on a window's longer side.
+2026-10-05: zoom first, then reflow: parked windows drawn at half size
+or larger keep their app's full size, drawn smaller; below that the app
+is laid out at 2x (`minZoom`,
+[docs/dragging-and-parking.md](docs/dragging-and-parking.md)); replaces
+the 1:1 stash rule (stashed windows lose edge resizing). Waiting for the
+user's check.
 
 ### 2026-10-03, end of day
 Running in the user's real Plasma session (via use-in-session.sh; after a

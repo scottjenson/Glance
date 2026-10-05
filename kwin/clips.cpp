@@ -396,8 +396,8 @@ QString Clips::clipApp()
 }
 
 // A parked clip resizes itself to the height its text needs (see
-// resizeEvent in kwin/clip/main.cpp): take it (in parking drawn at 1/2,
-// in a stash 1:1, see layoutSize) and re-form its column (parking only,
+// resizeEvent in kwin/clip/main.cpp): take it (drawn at its zoom, see
+// layoutSize) and re-form its column (parking only,
 // see arrange).
 void Clips::frameChanged(Window *window)
 {

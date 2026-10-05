@@ -34,7 +34,8 @@ drag; target is `pick` (the window drawn there). Factor
 signal calls off a pending `settle`).
 
 A stash size set this way survives the next drag: the drag starts at that
-size (see `holdScale` in [dragging-and-parking.md](dragging-and-parking.md)).
+size and shrinks or grows from there (see `holdScale` in
+[dragging-and-parking.md](dragging-and-parking.md)).
 
 ## To check by feel
 Scroll speed and direction (natural scrolling in the VM from the Mac

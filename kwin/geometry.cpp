@@ -16,6 +16,17 @@ qreal edgeScale(qreal cursorToScreenEdge, qreal cursorToWindowEdge, qreal zoneWi
     return (minScale + k * cursorToScreenEdge) / (1.0 + k * cursorToWindowEdge);
 }
 
+qreal heldScale(qreal rule, qreal from, qreal hold, qreal floor)
+{
+    if (from >= 1.0 - 1e-3 || from <= floor + 1e-3) {
+        return rule; // nothing to remap
+    }
+    if (rule >= from) {
+        return hold + (1.0 - hold) * (rule - from) / (1.0 - from);
+    }
+    return floor + (hold - floor) * (rule - floor) / (from - floor);
+}
+
 qreal shiftOntoScreen(qreal x, qreal width, const QRectF &screen)
 {
     const qreal minShift = screen.x() - x;
@@ -31,18 +42,19 @@ qreal parkingScale(const QSizeF &original)
     return std::clamp(parkingMinSize / std::max(original.width(), original.height()), minScale, 1.0);
 }
 
+bool atParkingSize(qreal shownWidth, const QSizeF &original)
+{
+    return shownWidth / original.width() < parkingScale(original) + 0.02;
+}
+
 QSizeF layoutSize(const QSizeF &shown, const QSizeF &original, const QSizeF &appMin)
 {
-    const qreal zoom = std::clamp(shown.width() / original.width(), minZoom, 1.0);
-    const QSizeF size = (shown / zoom).toSize();
-    if (size.width() >= minLayoutWidth && size.width() >= appMin.width()
-        && size.height() >= appMin.height() && size.width() <= original.width()) {
-        return size;
+    if (!atParkingSize(shown.width(), original)) {
+        return original;
     }
-    const qreal k = std::max({minLayoutWidth / shown.width(), appMin.width() / shown.width(),
-                              appMin.height() / shown.height()});
-    const QSizeF smallest = (shown * k).toSize();
-    return smallest.width() > original.width() ? original : smallest;
+    const qreal k = std::max({parkingLayoutWidth / original.width(), appMin.width() / original.width(),
+                              appMin.height() / original.height()});
+    return k >= 1.0 ? original : (original * k).toSize();
 }
 
 int placeIndex(Place place)
@@ -116,8 +128,7 @@ QRectF mainStopRect(Side half, const QSizeF &size, qreal centerY, const QRectF &
 Place parkedPlace(const QRectF &shown, const QSizeF &original, const QRectF &screen)
 {
     const bool left = shown.center().x() < screen.x() + screen.width() / 2;
-    const bool tiny = shown.width() / original.width() < parkingScale(original) + 0.02;
-    if (tiny) {
+    if (atParkingSize(shown.width(), original)) {
         return left ? Place::ParkingLeft : Place::ParkingRight;
     }
     return left ? Place::StashLeft : Place::StashRight;

@@ -27,6 +27,12 @@ namespace glance
 // and s = minScale + (1 - minScale) * d / zoneWidth; solved for s.
 qreal edgeScale(qreal cursorToScreenEdge, qreal cursorToWindowEdge, qreal zoneWidth);
 
+// The edge rule's scale `rule` remapped for a window dragged out of a
+// stash at scale `hold`, when the rule gave `from` at the drag's start:
+// `from` gives `hold`, 1 gives 1 and `floor` (parking size) gives `floor`,
+// linear in between (see WindowDrag::holdScale).
+qreal heldScale(qreal rule, qreal from, qreal hold, qreal floor);
+
 // How far a box spanning [x, x + width) must move horizontally to lie
 // inside `screen`. A box wider than the screen keeps its left edge visible.
 qreal shiftOntoScreen(qreal x, qreal width, const QRectF &screen);
@@ -35,13 +41,15 @@ qreal shiftOntoScreen(qreal x, qreal width, const QRectF &screen);
 // or more if its longer side would be shorter than parkingMinSize.
 qreal parkingScale(const QSizeF &original);
 
+// Whether a window drawn `shownWidth` wide is at parking size (see
+// parkingScale), which makes it a parking icon (see parkedPlace).
+bool atParkingSize(qreal shownWidth, const QSizeF &original);
+
 // The app's real size for a window parked at `shown` (drawn size) whose
 // full size is `original` and whose app needs at least `appMin` (frame
-// size): zoom first, then reflow (see minZoom): drawn at minZoom or
-// larger, its full width (the shown shape); smaller, shown / minZoom (2:1,
-// text stays sharp). If that is too small, the smallest size keeping the
-// shape that is at least minLayoutWidth wide and `appMin`; never more
-// than `original`.
+// size): in a stash its full size (only drawn smaller); in parking (drawn
+// at parking size, see parkedPlace) its shape parkingLayoutWidth wide, or
+// wider for `appMin`; never more than `original`.
 QSizeF layoutSize(const QSizeF &shown, const QSizeF &original, const QSizeF &appMin);
 
 // --- Places ---

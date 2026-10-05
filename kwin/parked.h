@@ -3,13 +3,14 @@
 // places, animation and making room, and how every window is drawn.
 //
 // A parked window has a real frame (what the app and KWin's input know,
-// resized to a small layout size, see layoutSize) and a drawn rectangle
-// (`shown`); a transform on its scene item fits the one into the other
+// in parking resized to a small layout size, see layoutSize) and a drawn
+// rectangle (`shown`); a transform on its scene item fits the one into the other
 // (applyParked). Keeping the two in step is most of Glance.
 //
 // Dropped while shrunk, a window stays exactly where and as large as it was
-// drawn. The app is really resized, down to a phone-like width, so web
-// pages reflow; the rest of the shrink is the transform, which fits the
+// drawn. In parking the app is really resized, to a phone-like width, so
+// web pages reflow; in a stash it keeps its full size. The rest of the
+// shrink is the transform, which fits the
 // window's current frame into `shown` also while the app is still catching
 // up with the new size. Back in main, a window gets its original size.
 //
@@ -144,14 +145,12 @@ public:
     qreal fittingScale(LogicalOutput *output, const std::vector<Window *> &windows) const;
     // The size to really resize a parked window to (see
     // glance::layoutSize). Clips in parking are laid out at twice the
-    // shown size, whatever minLayoutWidth: drawn at 1/2, the text is small
+    // shown size, whatever parkingLayoutWidth: drawn at 1/2, the text is small
     // but readable and reflows into a narrow note, and the hover preview
-    // (at most 1:1) doubles it. Clips in a stash zoom first like any
-    // window (see minZoom), whatever minLayoutWidth: their full width
-    // drawn smaller, below minZoom laid out at 2:1 (2026-10-05; from
-    // 2026-10-04 drawn 1:1 with full-size text, which didn't look
-    // smaller). The clip app then picks the height its text needs (see
-    // Clips::frameChanged).
+    // (at most 1:1) doubles it. Clips in a stash keep their full width,
+    // only drawn smaller, like any window (2026-10-05; from 2026-10-04
+    // drawn 1:1 with full-size text, which didn't look smaller). The clip
+    // app then picks the height its text needs (see Clips::frameChanged).
     static QSizeF layoutSize(Window *window, const QSizeF &shown, const QSizeF &original);
 
     // --- Drawing ---

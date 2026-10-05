@@ -93,7 +93,7 @@ void WindowDrag::step(Window *window)
         m_dragOriginal = it ? it->original : QSizeF(frame.width(), frame.height());
         m_dragDisplayed = m_parking.currentlyDrawn(window);
         m_dragHold.reset();
-        m_dragHoldSide = 0;
+        m_dragHoldRule.reset();
         if (parked && !m_parking.isParkingArea(m_parking.areaOf(window))) {
             m_dragHold = it->shown.width() / it->original.width();
         }
@@ -164,7 +164,7 @@ QRectF WindowDrag::followRect(Window *window, const RectF &frame, const QPointF 
                             edgeScale(screen.x() + screen.width() - cursor.x(), (right - cursor.x()) * grow, zoneWidth)});
     total = std::max(total, parkingScale(m_dragOriginal));
     if (m_dragHold) {
-        total = holdScale(frame, cursor, total, screen);
+        total = holdScale(total);
     }
     m_dragScale = total;
     // The scale to draw the current frame at.
@@ -179,34 +179,22 @@ QRectF WindowDrag::followRect(Window *window, const RectF &frame, const QPointF 
 }
 
 // A window dragged out of a stash keeps the size it had there (set by
-// the drop or by Meta+wheel), so the drag doesn't start with a jump:
-// the edge rule (`rule`) takes over once it reaches that size (no jump
-// then), or with a glide once the window's center leaves the stash.
-qreal WindowDrag::holdScale(const RectF &frame, const QPointF &cursor, qreal rule, const RectF &screen)
+// the drop or by Meta+wheel), so the drag doesn't start with a jump: the
+// edge rule (`rule`) is remapped so that its value when the drag started
+// gives that size, full size still gives full size and parking size still
+// gives parking size (linear in between). So the window shrinks or grows
+// at once whichever way it moves, and ends at the same size as any window
+// at the screen edge. (Until 2026-10-05 it held its size until the rule
+// reached it, or glided once its center left the stash: moved outward
+// when grabbed farther from its outer edge than at the drop, it stayed
+// large across the stash, then snapped small.)
+qreal WindowDrag::holdScale(qreal rule)
 {
     const qreal hold = *m_dragHold;
-    const qreal side = rule - hold;
-    if (m_dragHoldSide == 0) {
-        m_dragHoldSide = side < 0 ? -1 : 1;
+    if (!m_dragHoldRule) {
+        m_dragHoldRule = rule;
     }
-    if (side * m_dragHoldSide <= 0) {
-        m_dragHold.reset();
-        return rule;
-    }
-    const qreal scale = hold * m_dragOriginal.width() / frame.width();
-    const qreal centerX = cursor.x() + (frame.x() + frame.width() / 2 - cursor.x()) * scale - screen.x();
-    const qreal zoneWidth = screen.width() * zoneFraction;
-    const qreal band = zoneWidth * parkingBand;
-    const bool inStash = (centerX >= band && centerX < zoneWidth)
-        || (centerX <= screen.width() - band && centerX > screen.width() - zoneWidth);
-    if (!inStash) {
-        m_dragHold.reset();
-        m_dragAnimFrom = m_dragDisplayed;
-        m_dragAnimStart = std::chrono::steady_clock::now();
-        m_dragAnimating = true;
-        return rule;
-    }
-    return hold;
+    return heldScale(rule, *m_dragHoldRule, hold, parkingScale(m_dragOriginal));
 }
 
 // Acceleration and snapping, on every drag step: updates the window's

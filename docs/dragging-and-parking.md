@@ -7,9 +7,10 @@
   that edge's depth into the zone, reaching `minScale` (0.15) exactly when
   the edge meets the screen edge.
 - Dropped while shrunk: it stays exactly where and as large as drawn
-  ("parked"), stays fully usable, and the app is really resized to a
-  phone-like width so web pages reflow. Dropped in main (scale
-  ≥ 0.99): back to its original size.
+  ("parked") and stays fully usable. In a stash it is only drawn
+  smaller (zoom: the app keeps its full size); in parking the app is
+  really resized to a phone-like width so web pages reflow (2026-10-05,
+  see below). Dropped in main (scale ≥ 0.99): back to its original size.
 - Scales are always relative to the window's original size.
 - Tiny parked windows act like icons (decided with the user 2026-09-29),
   see below.
@@ -22,11 +23,16 @@ the drawn edge is at d = cursorToScreenEdge − cursorToWindowEdge·s, and
 s = minScale + (1 − minScale)·d/zoneWidth. Distances are converted to
 original-size units (`grow` = original width / current width). If even
 minScale doesn't fit, `shiftOntoScreen` slides it back on screen.
-A window dragged out of a stash keeps its size at first (2026-10-03, user:
-a Meta+wheel size snapped back on the next drag; the grab spot also changed
-the edge rule's size): `holdScale` holds it until the edge rule reaches
-that size (then follows it, no jump) or the window's center leaves the
-stash (then glides to the edge rule).
+A window dragged out of a stash starts at the size it had there
+(2026-10-03, user: a Meta+wheel size snapped back on the next drag; the
+grab spot also changed the edge rule's size): `holdScale` remaps the edge
+rule (`heldScale`, 2026-10-05) so its value at the drag's start gives that
+size, full size gives full size and parking size parking size, linear in
+between. Until 2026-10-05 it held the size until the edge rule reached it
+or the window's center left the stash (then glided): moved outward after
+being grabbed farther from its outer edge than at the drop, a window
+stayed large across the stash and then snapped small (user: dragged in
+small steps it didn't get smaller).
 KWin's own move logic (window.cpp `nextInteractiveMoveGeometry`) also snaps
 to edges (`adjustWindowPosition`) and keeps ≥100 px visible.
 
@@ -36,24 +42,28 @@ window in `ParkedWindows::m_parked` (kwin/parked.cpp) (`shown` rect in global co
 `restoring`). `applyParked` (also on every `frameGeometryChanged`) fits the
 *current* frame into `shown` by width (scale = shown.width / frame.width),
 so nothing jumps while the app catches up with a resize. Real resize via
-`layoutSize`, **zoom first, then reflow** (2026-10-05): a window drawn
-at `minZoom` (0.5) of its original size or larger keeps its app's full
-size and is only drawn smaller (zoomed out), so it looks as it did while
-dragged; drawn smaller, the app is laid out at 2x the shown size, so its
-content stays at half size and reformats under the hood (web pages reach
-their phone layout). That needs 2x to be ≥ `minLayoutWidth` (400), ≥ the
-app's minimum (`clientSizeToFrameSize(minSize())`) and ≤ original; else
-the smallest size keeping the shape that meets both minimums, capped at
-the original (Firefox: 500 px wide), drawn below half size. 2x is also
-for text quality (drawn at 1/2, bilinear averages exact 2x2 blocks);
-zooms between 1/2 and 1 are a little soft. Why (user): with the old rule
-(1x the shown size whenever ≥ 400 px) stashed windows reflowed but didn't
-look smaller, clips least of all (same text size). Possible next step:
-sharp text at any zoom by telling the app a lower render scale
-(`Window::setNextTargetScale`, fractional-scale-v1; 1.5 x zoom at 150%);
-not tried. Trade-off: a window drawn below 1:1 has no resize edges (see
-Resizing parked windows below), so stashed windows now resize only with
-Meta+wheel. Logs one
+`layoutSize`, **zoom in the stash, reflow in parking** (2026-10-05,
+talked through with the user): a stashed window keeps its app's full
+size and is only drawn smaller, so it looks as it did while dragged
+(the shrinking gives depth) and never reflows; a parking icon's app is
+laid out `parkingLayoutWidth` (600) wide, keeping its shape, at least
+the app's minimum (`clientSizeToFrameSize(minSize())`, Firefox 500),
+capped at the original: web pages switch to their phone layout and the
+icon shows the app's compact form (hover previews are for reading).
+The reflow happens as the window joins the parking column, which moves
+it anyway. Parking is decided by the drawn size (`atParkingSize`, as
+`parkedPlace`). Why: with 1x the shown size (≥ 400 px) stashed windows
+reflowed but didn't look smaller (clips: same text size); the first try
+that day (no reflow down to half size, then 2x the shown size) reflowed
+pages at every drop below half size, which the user found disruptive.
+Text quality: KWin's bilinear sampling reads 4 source pixels per screen
+pixel, so below 1/2 thin strokes break up and shimmer. Planned next:
+mipmaps for scaled windows (`GLTexture::generateMipmaps`, an
+`OffscreenEffect`-like redirect); later maybe a lower render scale for
+the app (`Window::setNextTargetScale`, fractional-scale-v1) for sharp
+text at the stash's sizes. Trade-off: a stashed window is drawn below
+1:1 and so has no resize edges (see Resizing parked windows below);
+Meta+wheel resizes it. Logs one
 `glance:` line per resize. Dropped in main: `moveResize` to the
 original size (grabbed spot under the cursor), `restoring` until it has it.
 
@@ -116,7 +126,8 @@ next step, if needed: move the frame only on enter, pause and press, and
 over the title bar (the "hybrid", talked through with the user).
 
 Resizing parked windows (2026-10-04): a parked window drawn exactly over
-its frame (scale 1, e.g. a stashed Konsole whose app was resized to fit)
+its frame (scale 1; since 2026-10-05 stashed windows are drawn smaller,
+so this is rare)
 is picked by KWin's own `hitTest`, which includes the decoration's
 invisible resize borders outside the frame. Before, `pick` used only the
 drawn rectangle, so a press in the resize border went to the window
@@ -125,7 +136,7 @@ behind and the resize never started. While KWin resizes a parked window
 `interactiveMoveResizeStarted`), `shown` follows the frame at the
 window's scale; it stays parked at its new size (`original` unchanged).
 Windows drawn smaller than their app (scale < 1: small windows that
-can't shrink, e.g. clips in a stash, and parking icons) still have no
+since 2026-10-05 all stashed windows, and parking icons) have no
 resize edges: KWin's borders sit around the invisible full-size frame.
 
 ## Tiny parked windows act like icons

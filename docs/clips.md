@@ -127,10 +127,9 @@ transformed, with finite regions per window (the clipQuads gotcha, see
   parked as 180x384, hardly smaller, and since parking then started at
   85% of its size, a drop anywhere in the edge zone made it a parking
   icon (hover previews in what looked like the stash).
-- Clips in a stash zoom first like any window (2026-10-05, see
-  [dragging-and-parking.md](dragging-and-parking.md), `minZoom`): drawn
-  at half size or larger they keep their full width, drawn smaller;
-  smaller still, laid out at 2x (whatever minLayoutWidth). From
+- Clips in a stash keep their full width, only drawn smaller, like any
+  window (2026-10-05, see
+  [dragging-and-parking.md](dragging-and-parking.md)). From
   2026-10-04 they were laid out at their drawn size, drawn 1:1 with
   full-size text and resizable from their edges, but the user found
   they didn't look smaller (same text size). Before that, drawn at 1/2

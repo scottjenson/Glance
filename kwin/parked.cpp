@@ -27,7 +27,7 @@ bool isClip(Window *window)
 
 bool isClipInParking(Window *window, qreal shownWidth, const QSizeF &original)
 {
-    return isClip(window) && shownWidth / original.width() < parkingScale(original) + 0.02;
+    return isClip(window) && atParkingSize(shownWidth, original);
 }
 
 void releaseKdeState(Window *window)
@@ -234,12 +234,12 @@ QSizeF ParkedWindows::layoutSize(Window *window, const QSizeF &shown, const QSiz
         return QSizeF(2 * std::round(shown.width()), 2 * std::round(shown.height()));
     }
     if (isClip(window)) {
-        // Not the app's minimum height: KWin reports 150 for clips, which
-        // made one-word clips square; the clip picks its own height (see
-        // Clips::frameChanged).
-        const QSizeF appMin = window->clientSizeToFrameSize(window->minSize());
-        const qreal zoom = std::clamp(shown.width() / original.width(), minZoom, 1.0);
-        return QSizeF(std::max(std::round(shown.width() / zoom), appMin.width()), std::round(shown.height() / zoom));
+        // In a stash: its full width, only drawn smaller. The height its
+        // text needs, not the app's minimum: KWin reports 150 for clips,
+        // which made one-word clips square; the clip picks its own height
+        // (see Clips::frameChanged).
+        const qreal zoom = shown.width() / original.width();
+        return QSizeF(std::round(original.width()), std::round(shown.height() / zoom));
     }
     return glance::layoutSize(shown, original, window->clientSizeToFrameSize(window->minSize()));
 }

@@ -107,7 +107,7 @@ void MetaWheel::resizeInStash(Window *window, qreal factor, const QPointF &pos)
     m_settle.start();
 }
 
-// The scrolling stopped: a stashed window's app is resized to fit (see
+// The scrolling stopped: a stashed window is parked at its new size (see
 // park); a preview grown past its app's size gets the app resized to
 // it, so it stays sharp (until the preview closes, see HoverPreviews).
 void MetaWheel::settle()

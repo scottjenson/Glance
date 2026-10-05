@@ -68,7 +68,7 @@ private:
     };
 
     QRectF followRect(Window *window, const RectF &frame, const QPointF &cursor);
-    qreal holdScale(const RectF &frame, const QPointF &cursor, qreal rule, const RectF &screen);
+    qreal holdScale(qreal rule);
     std::optional<Gesture> leadStep(Window *window, const QPointF &cursor);
     void updateLead(Window *window, const QPointF &cursor, qreal dx, std::chrono::steady_clock::time_point now);
     std::optional<Gesture> snapTargetAt(Window *window, const QPointF &point) const;
@@ -80,11 +80,11 @@ private:
     QPointer<Window> m_dragged;
     QSizeF m_dragOriginal;
     qreal m_dragScale = 1.0;
-    // A stashed window keeps its size when a drag starts (see followRect):
-    // the held scale, and which side of it the edge rule was on (0: not
-    // known yet).
+    // A stashed window keeps its size when a drag starts (see holdScale):
+    // the held scale, and the edge rule's scale at the start (not known
+    // until the first step).
     std::optional<qreal> m_dragHold;
-    qreal m_dragHoldSide = 0;
+    std::optional<qreal> m_dragHoldRule;
     // Where the dragged window is drawn now, the current gesture target,
     // and the glide between them.
     QRectF m_dragDisplayed;

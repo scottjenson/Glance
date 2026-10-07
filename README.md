@@ -15,7 +15,8 @@ The screen has three kinds of areas:
 
 - **Main** (the center half): windows here are full size.
 - **Stash**: between main and the edge. Windows here are shown smaller.
-- **Parking**: the very edge. Windows here are icon-sized.
+- **Parking**: the very edge. Windows here are small tiles, turned slightly
+  away like icons on a shelf.
 
 Key mechanics:
 
@@ -23,9 +24,9 @@ Key mechanics:
   lies in main, then shrinks as its edge moves into the stash, reaching its
   smallest size at the screen edge.
 - **Dropping it keeps it there**, exactly as large as it was drawn.
-- **Small windows stay usable.** You can click, type and scroll in them. The
-  app is really resized to a narrow width, so web pages switch to their
-  mobile layout.
+- **Small windows stay usable.** You can click, type and scroll in them.
+  In parking the app is really resized to a phone-like size, so web pages
+  switch to their mobile layout.
 - **Hover over an icon-sized window to read it:** it grows in place, over
   its neighbours. Move up and down the column to flip through them; you can
   still drag it or click into it.
@@ -36,8 +37,8 @@ Key mechanics:
   you drop them (overlapping is fine).
 - **Minimizing a window parks it** (title-bar button, taskbar or shortcut):
   parking is Glance's minimize.
-- **Dragging a stashed window keeps its size** until it reaches main or
-  parking.
+- **Dragging a stashed window starts from its stashed size** and grows or
+  shrinks from there.
 - **Dragging a window back into main** restores its original size.
 - **Text dropped on the desktop becomes a clip:** drag text out of an app
   onto empty desktop, and it is saved as a file in `~/Clips` and shown

@@ -1,146 +1,86 @@
 # Glance: a window-management effect for KDE Plasma (KWin)
 
 This file holds what every session needs. Details live in `docs/` (built
-features: design + how it works) and `plans/` (not built yet); read the one
-for the feature you're working on. Keep this file short: put feature detail
-in those files and only a line here.
+features: design and how it works) and `plans/` (not built yet); read the
+one for the feature you're working on. Keep this file short, and keep the
+docs about the feature as it is now, not the history of how it got there
+(git has that).
 
 ## Goal
 A window-management experiment for wide (ultrawide) monitors: as the user
 drags a window toward the left or right edge of the screen, the window
-shrinks, and windows parked at the edge should feel like icons, using the
-peripheral areas of the screen. Prototyped first in HTML/JavaScript on a
-Mac, then as a Wayfire plugin (now in `wayfire/`, reference only).
+shrinks, and windows parked at the edge feel like icons, using the
+peripheral areas of the screen. Prototyped in HTML/JavaScript, then as a
+Wayfire plugin (`wayfire/`, reference only).
 
 **Goal: ship something people can try on KDE Plasma.** The product is the
 KWin effect in `kwin/`. Target: desktops with ultrawide monitors, not
-laptops (don't suggest testing on a laptop). The project is a demo for
-exploring fairly radical ideas, not a conservative KDE add-on.
+laptops (don't suggest testing on a laptop). A demo for exploring fairly
+radical ideas, not a conservative KDE add-on.
 
-**Name:** Glance (chosen 2026-09-30: you glance at the windows on the
-sides). Formerly WideMonitorUX (project/repo) and edge-shrink (the effect).
-Renamed everywhere: code, scripts, docs, the project folder (~/Glance) and
-the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
-"Overview" was ruled out: KDE's own Meta+W effect.
+**Name:** Glance (you glance at the windows on the sides). Formerly
+WideMonitorUX (repo) and edge-shrink (the effect, still the name in
+`wayfire/`). "Overview" is KDE's own Meta+W effect.
 
 ## Core design rules (agreed with the user)
-- Regions (user's terms, settled 2026-09-30; use them everywhere: docs,
-  comments, identifiers): **main** (center half), **stash** (everything
-  between main and parking; its width depends on the monitor) and
-  **parking** (the very edge, icon-sized windows, ~15%). The left and right
-  quarters are the edge zones (`zoneFraction = 0.25`). Formerly called
-  middle, staging and parking lot. "Parked" (verb/state) = dropped while
-  shrunk, in a stash or a parking area (`m_parked` holds both).
+- Regions (use these terms everywhere: docs, comments, identifiers):
+  **main** (center half), **stash** (between main and parking; its width
+  depends on the monitor) and **parking** (the very edge, icon-sized
+  windows). The left and right quarters are the edge zones
+  (`zoneFraction = 0.25`). "Parked" (verb/state) = dropped while shrunk,
+  in a stash or parking (`m_parked` holds both).
 - Windows shrink as their edge enters an edge zone, down to `minScale`
   (0.15) at the screen edge; dropped while shrunk they stay where and as
-  large as drawn, fully usable, and the app really resizes
+  large as drawn, fully usable
   ([docs/dragging-and-parking.md](docs/dragging-and-parking.md)).
-- Stashed and parked windows are meant to be used in place, not faded.
-  Parking is Glance's minimize.
-- **Respect mouse drags** (user's principle, 2026-09-30): a plain mouse
-  drop (a window, or a clip dropped on the desktop) should land where and
-  as large as the user put it, changed as little as possible. Snapping to
-  places is for the keyboard (Meta+arrows) and Meta+drag. Stashes have
-  no column (drops stay put, overlap is fine); parking columns still
-  re-form when a window is dropped into them, which moves it. Prefer the
-  least movement when designing crowding.
+- Stashed and parked windows are used in place, not faded. Parking is
+  Glance's minimize.
+- **Respect mouse drags:** a plain mouse drop (a window, or a clip
+  dropped on the desktop) lands where and as large as the user put it,
+  changed as little as possible. Snapping to places is for the keyboard
+  (Meta+arrows) and Meta+drag. Stashes are free placement (overlap is
+  fine); parking columns re-form when a window is dropped into them.
+  Prefer the least movement when designing crowding.
 - Modifier: Meta (Super; Command on the Mac keyboard) is the window
-  system's key; Ctrl/Shift/Alt belong to apps (Alt+Tab is the universal
-  exception). The user is fine being aggressive with Meta ("opinionated
-  window manager"), as long as what KDE users rely on keeps working or gets
-  a better replacement. Meta moves, Meta+Alt selects. Meta+mouse:
-  Meta+drag moves (with acceleration and snapping), Meta+double-click
-  declutters, Meta+wheel resizes in place; Meta+click is free for future
-  features.
-  Meta+keyboard shortcuts other than the arrows, Meta+C and Meta+Tab are
-  left to KDE.
+  system's key; Ctrl/Shift/Alt belong to apps (Alt+Tab is the exception).
+  Being aggressive with Meta is fine ("opinionated window manager"), as
+  long as what KDE users rely on keeps working or gets a better
+  replacement. Meta moves, Meta+Alt selects. Meta+drag moves (with
+  acceleration and snapping), Meta+double-click declutters, Meta+wheel
+  resizes in place; Meta+click is free for future features. Meta+keyboard
+  shortcuts other than the arrows, Meta+C and Meta+Tab are left to KDE.
 
 ## Features (built) and plans
 | | |
 |---|---|
-| [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking (zoom in the stash, phone layout in parking), parking tiles (square, tilted), drawing small windows (mipmaps), input to parked windows, icon-like tiny windows, minimize = park |
-| [docs/stacks.md](docs/stacks.md) | Parking columns; stashes are free placement |
+| [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking, parking columns and free stashes, parking tiles, mipmaps, input to parked windows, icons, minimize = park, logging out |
 | [docs/meta-wheel.md](docs/meta-wheel.md) | Meta+wheel resizes in place; over parking icons it sizes the preview |
-| [docs/keyboard.md](docs/keyboard.md) | Meta+arrows ladder, Meta+Up/Down views, Meta+Alt+arrows selection, Meta alone and KDE's launcher |
-| [docs/meta-drag.md](docs/meta-drag.md) | Meta+drag acceleration, pause to snap, activates the window |
-| [docs/focus-ring.md](docs/focus-ring.md) | Focus ring; bounce on keyboard focus moves only |
+| [docs/keyboard.md](docs/keyboard.md) | Meta+arrows, Meta+Up/Down views, Meta+Alt+arrows selection, the Meta tap and KDE's launcher |
+| [docs/meta-drag.md](docs/meta-drag.md) | Meta+drag acceleration, pause to snap |
+| [docs/focus-ring.md](docs/focus-ring.md) | Focus ring; bounce on keyboard focus moves |
 | [docs/declutter.md](docs/declutter.md) | Meta+double-click declutter and undo |
 | [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
-| [docs/clips.md](docs/clips.md) | Text and image drops and Meta+C become clip windows (glance-clip sticky notes) that drag back into documents |
-| [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map; hover selects, click chooses |
-| [docs/version-check.md](docs/version-check.md) | A dialog at login when KWin didn't load Glance (Plasma update); build stops on another Plasma release |
-| [docs/logout-hang.md](docs/logout-hang.md) | Plasmashell hangs at logout: a KDE clipboard deadlock (root cause known, harmless, left alone) |
-| [docs/wayfire.md](docs/wayfire.md) | The Wayfire prototype (reference) |
-| [plans/backlog.md](plans/backlog.md) | The agreed order of work, polish, packaging, ideas |
-| [plans/remembered-places.md](plans/remembered-places.md) | Windows reopen where they were (main, stash, parking), per app, matched by title |
-| [plans/clips-back.md](plans/clips-back.md) | Clips phase 2: rich text |
-| [plans/code-review.md](plans/code-review.md) | Architecture/performance review (2026-10-03): 5 fixes to make, what to keep; read before touching painting, input routing or clips |
-| [plans/refactor.md](plans/refactor.md) | Splitting main.cpp into components (review finding 5; done through stage 4); the smoke test to run after changes |
+| [docs/clips.md](docs/clips.md) | Text/image drops and Meta+C become clip windows (glance-clip) that drag back into documents |
+| [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map |
+| [docs/version-check.md](docs/version-check.md) | Login dialog when KWin didn't load Glance; build stops on another Plasma release |
+| [docs/testing.md](docs/testing.md) | Headless checks the agent can run, KWin scripts, crash stacks, the user's smoke test |
+| [plans/remembered-places.md](plans/remembered-places.md) | Next: windows reopen where they were, per app |
+| [plans/backlog.md](plans/backlog.md) | Later, polish, packaging, ideas |
 
-When a plan is built, move its design into a `docs/` file and update the
-table and Status.
+When a plan is built, move its design into a `docs/` file, delete the
+plan, and update the table and Status.
 
-## Status (2026-10-04)
-The refactor ([plans/refactor.md](plans/refactor.md)) is done through
-stage 4: kwin/glance.cpp is a small coordinator, the rest are components
-(see Files), all checked by the user, as is code review finding 4
-(clip limits). Also
-2026-10-04: every window in parking is an icon, whatever its scale
-(Firefox at its 500 px minimum got no hover preview). Code review: all
-five findings built and checked by the user (2: direct scanout only
-blocked while something moves; 3: animations repaint only what moves,
-one animation clock per frame); finding 1's hybrid is paused until
-needed.
-Later 2026-10-04 (checked by the user): parked windows drawn 1:1 resize
-from their edges; stashed clips are really resized (full-size text);
-Meta+Left/Right never resize (stops centered in each half of main,
-[docs/keyboard.md](docs/keyboard.md)); stash at least 270 px and
-parking at least 180 px on a window's longer side.
-2026-10-05: stashed windows are only zoomed (the app keeps its full
-size), parking icons are laid out 600 px wide (phone layout); a window
-dragged out of a stash shrinks at once (the old hold made it stay large,
-then snap small) ([docs/dragging-and-parking.md](docs/dragging-and-parking.md));
-replaces the 1:1 stash rule (stashed windows lose edge resizing).
-Checked by the user ("the scaling feels much better"). Then: windows
-drawn below half size are drawn from mipmaps (no broken-up, shimmering
-text; [docs/dragging-and-parking.md](docs/dragging-and-parking.md),
-Drawing small windows). Waiting for the user's check (the user has
-screenshots of parking from before).
-2026-10-06: parking icons are tiles: apps laid out 600x600, drawn 140 px
-(about 10 per edge), turned 40° away around their outer edge; a hover
-preview turns flat and grows to 2.5x (3x hid its neighbours; 2.5x checked by the user); clicks go through the tilt
-([docs/dragging-and-parking.md](docs/dragging-and-parking.md), Parking
-tiles). Then each column made one plane seen from one eye (user: the
-gaps formed Vs). Checked by the user ("looks good for now").
+## Status (2026-10-06)
+Everything in the docs table is built, committed and checked by the user
+in the real session, except two things waiting for the user's check:
+parked windows staying drawn in place at logout
+([docs/dragging-and-parking.md](docs/dragging-and-parking.md), Logging
+out), and mipmaps compared with the user's earlier parking screenshots.
 
-### 2026-10-03, end of day
-Running in the user's real Plasma session (via use-in-session.sh; after a
-rebuild the user logs out and back in). Built, tested by the user and
-committed: everything in the docs table. Latest (all 2026-10-03): a
-stashed window keeps its size when dragged; Meta+wheel over a parking
-icon sizes its hover preview; the bounce only on keyboard focus moves;
-KDE's launcher only on a real Meta tap (the user keeps an eye on it);
-Meta+drag activates and raises; image clips (Firefox drops tested by the
-user; Dolphin file drops and dragging an image clip into apps not yet
-confirmed). README.md is up to date.
+Next: remembered places ([plans/remembered-places.md](plans/remembered-places.md));
+first open question there: keep or remove the logout step.
 
-Next (agreed 2026-10-04, in this order): Alt+Tab phase 2, the pointer
-in the map (built 2026-10-04: hover selects, click chooses; checked by
-the user, Meta+Tab untested as macOS takes Command+Tab,
-[docs/alt-tab.md](docs/alt-tab.md)); then packaging's first steps: the
-MIT LICENSE file (added 2026-10-04) and the version check (built
-2026-10-04, [docs/version-check.md](docs/version-check.md); checked by
-the user). That order is done. Then (2026-10-04): parked windows get
-their full size back when a logout starts, so Firefox no longer reopens
-at its parked size ([docs/dragging-and-parking.md](docs/dragging-and-parking.md),
-Logging out); checked by the user; then changed so they stay drawn in
-place (they visibly grew before closing): waiting for the user's check.
-Next: remembered places ([plans/remembered-places.md](plans/remembered-places.md)),
-planned with the user 2026-10-04, open questions there (first: keep or
-remove the logout step). Kept for later: rich-text clips, restoring clips after login. The rest of the list was dropped for now
-([plans/backlog.md](plans/backlog.md)).
-
-## How the effect works (kwin/glance.cpp and its components, the basics)
+## How the effect works (the basics)
 - It is a KWin **effect**, not a plain `KWin::Plugin`, so `prePaintWindow`
   can call `data.setTransformed()` for scaled windows. Without that, KWin
   clips drawing in unscaled coordinates (`clipQuads` in
@@ -156,193 +96,119 @@ remove the logout step). Kept for later: rich-text clips, restoring clips after 
   early, before KWin's own shortcuts, tab box and DnD). `Effect` has its own
   `pointerMotion` etc. virtuals, so the filter is a separate member object
   (`Filter`) that calls back.
-- KDE features we replace or change are switched while loaded and
-  restored on unload (quick tiling off, some KGlobalAccel actions off,
-  [docs/keyboard.md](docs/keyboard.md); Meta+left-drag's mouse command
-  "Move" becomes "Activate, Raise and Move", [docs/meta-drag.md](docs/meta-drag.md)).
-
-## Environment
-- Fedora 44 KDE (aarch64) in a VMware Fusion VM on an Apple Silicon Mac,
-  VMware SVGA3D virtual GPU. The user has VM snapshots to roll back to.
-- User: scottjenson. Project at ~/Glance (was ~/WideMonitorUX). The user edits in VS Code,
-  connected into the VM.
-- KWin **6.7.5** (Plasma 6.7). Its source is unpacked at ~/src/kwin-6.7.5
-  for checking internals (`dnf download --source kwin`, then
-  `rpm2cpio kwin-*.src.rpm | cpio -idm` and untar).
-- Build packages (installed): `kwin-devel`, `extra-cmake-modules`,
-  `libepoxy-devel` (kwin-devel doesn't pull it in),
-  `kf6-kglobalaccel-devel` (for the Meta+C shortcut; installed 2026-10-01).
-- Display: VMware "Use full resolution for Retina display" is on; the VM
-  screen is about 6000x2450 px (it follows the VM window size). KDE scale
-  changes: 200% earlier, **150%** since 2026-09-29 evening (4004x1630
-  logical). Check with `kscreen-doctor -o` (desktop env, see below).
-- One desktop (no virtual desktops in use).
-
-## Git / GitHub
-- Repo: https://github.com/scottjenson/Glance (**public**; renamed from
-  WideMonitorUX on 2026-09-30), branch
-  `main`, remote `origin` over HTTPS. `gh` is logged in and is the git
-  credential helper, so `git push` works without prompts.
-  If a push says the token is invalid (happened twice on 2026-10-03,
-  suspected: the keyring loses it at logout), the user runs
-  `gh auth login -h github.com -p https -w --insecure-storage` (the agent
-  may not; give it as a tiny script, the VM clipboard is broken). It
-  shows an 8-character code: the user types it at
-  github.com/login/device on the Mac and clicks Authorize (no
-  checkboxes; a hand-made token needs repo, read:org and workflow). On
-  2026-10-03 it still landed in the keyring: watch after the next logout.
-  On 2026-10-04 it went invalid again with no logout in between (a push
-  worked, one ~30 min later failed): not only logouts. Script: ~/gh-login.sh.
-  Until then the token had always landed in the keyring; that evening the
-  user logged in entirely inside the VM and `gh auth status` showed it in
-  ~/.config/gh/hosts.yml (the file) for the first time. Watch whether it
-  lasts.
-- Local git identity (repo-only config): Scott Jenson <scott@jenson.org>.
-- The user wants work committed and pushed so nothing is lost. Commit when a
-  change is done and working; ask before pushing anything unusual.
-- Ignored: `build/` (any), `kwin.log*`, `wayfire.log`. `.vscode/` is the
-  user's (untracked).
+- KDE features Glance replaces are switched off while loaded and restored
+  on unload, in memory only (quick tiling, some KGlobalAccel actions,
+  [docs/keyboard.md](docs/keyboard.md); Meta+left-drag becomes "Activate,
+  Raise and Move", [docs/meta-drag.md](docs/meta-drag.md)).
 
 ## Files
 - `kwin/glance.cpp`: the effect, a coordinator: owns the components,
   hands them window events and painting, and decides in one place which
   gets an input event first (its header comment maps the components).
-  `kwin/tuning.h`: all tuning constants and the Place enum (namespace
-  `glance`). `kwin/geometry.h/.cpp`: pure geometry (no KWin), built as
-  the `glance-core` library; `kwin/tests/`: its Qt Test unit tests.
-  `kwin/parked.h/.cpp`: ParkedWindows, the parked-window model (places,
-  animation, making room, draw transforms, and window queries such as
-  `pick`, and minimize = park); features use it through `m_parking`.
-  Components (each gets references to the parts it needs):
-  `parkedinput.h/.cpp` (input to parked windows, icon presses),
-  `drag.h/.cpp`, `keyboard.h/.cpp`, `alttab.h/.cpp`,
-  `focusring.h/.cpp`, `previews.h/.cpp` (hover previews),
-  `wheel.h/.cpp` (Meta+wheel), `declutter.h/.cpp`, `clips.h/.cpp`,
-  `mipmaps.h/.cpp` (small windows drawn from mipmaps),
-  `kde.h/.cpp` (KDE settings switched while loaded, the Meta tap). Don't
-  name a file input.h: it would shadow KWin's `<input.h>`.
-  `kwin/clip/main.cpp`: glance-clip, the
-  clip app (a second target in the same CMake project, built to
-  `kwin/build/bin/glance-clip`; [docs/clips.md](docs/clips.md)). `kwin/metadata.json`:
-  plugin metadata (id `glance`, from the CMake target name; shown as
-  "Glance" in Desktop Effects).
+- `kwin/tuning.h`: all tuning constants and the Place enum (namespace
+  `glance`). `kwin/geometry.h/.cpp`: pure geometry (no KWin), built as the
+  `glance-core` library; `kwin/tests/`: its Qt Test unit tests.
+- `kwin/parked.h/.cpp`: ParkedWindows, the parked-window model (places,
+  animation, making room, draw transforms, tilt, queries such as `pick`,
+  minimize = park); features use it through `m_parking`.
+- Components (each gets references to the parts it needs):
+  `parkedinput` (input to parked windows, icon presses), `drag`,
+  `keyboard`, `alttab`, `focusring`, `previews` (hover previews), `wheel`
+  (Meta+wheel), `declutter`, `clips`, `mipmaps`, `kde` (KDE settings
+  switched while loaded, the Meta tap). Don't name a file input.h: it
+  would shadow KWin's `<input.h>`.
+- `kwin/clip/main.cpp`: glance-clip, the clip app (a second target, built
+  to `kwin/build/bin/glance-clip`; [docs/clips.md](docs/clips.md)).
+- `kwin/check/`: glance-check, the login dialog, and its autostart entry
+  ([docs/version-check.md](docs/version-check.md)).
+- `kwin/metadata.json`: plugin metadata (id `glance`, from the CMake
+  target name; "Glance" in Desktop Effects).
 - `kwin/CMakeLists.txt`: builds `kwin/build/bin/kwin/effects/plugins/glance.so`.
   Needs `find_package(ECM <version>)` (else no output folder), Qt
-  Widgets/DBus/Quick (KWin's CMake target needs them), Concurrent (clips save off the main thread), C++23, and
-  `AUTOMOC_MACRO_NAMES KWIN_EFFECT_FACTORY`. `sudo cmake --install
-  kwin/build` installs it (`kcoreaddons_add_plugin` with
-  `INSTALL_NAMESPACE`; README's install steps); not installed on this VM,
-  which loads it from the build folder instead.
-- `kwin/kwin-private/`: KWin headers that Fedora's kwin-devel doesn't
-  install but that we need (see [docs/clips.md](docs/clips.md)). Keep in
-  step with the installed KWin (`GLANCE_KWIN_PRIVATE_VERSION`,
-  [docs/version-check.md](docs/version-check.md)).
-- `kwin/check/`: glance-check, the login dialog when KWin didn't load
-  Glance, and its autostart entry ([docs/version-check.md](docs/version-check.md)).
-- `kwin/setup-kwrite.sh`: KWrite font for the old KWrite clips (unused).
-- `kwin/run-nested.sh`: starts a nested KWin (a window in the desktop,
-  2982x1090 logical at scale 2, override with WIDTH/HEIGHT) with
-  QT_PLUGIN_PATH at the build folder and a Konsole inside. Must be run from
-  Konsole in the VM window (not SSH). Log: `~/Glance/kwin.log`,
-  previous one `kwin.log.1`.
+  Widgets/DBus/Quick (KWin's CMake target needs them), Concurrent, C++23,
+  and `AUTOMOC_MACRO_NAMES KWIN_EFFECT_FACTORY`. `sudo cmake --install
+  kwin/build` installs it (README); not installed on this VM, which loads
+  it from the build folder.
+- `kwin/kwin-private/`: KWin headers Fedora's kwin-devel doesn't install
+  but Glance needs. Keep in step with the installed KWin
+  (`GLANCE_KWIN_PRIVATE_VERSION`, [docs/version-check.md](docs/version-check.md)).
 - `kwin/use-in-session.sh on|off`: loads the effect into the real Plasma
   session from kwin/build (a systemd drop-in,
-  ~/.config/systemd/user/plasma-kwin_wayland.service.d/glance.conf (the old
-  edge-shrink.conf is removed by the script),
-  setting QT_PLUGIN_PATH for KWin only; plus glance-check's autostart
+  ~/.config/systemd/user/plasma-kwin_wayland.service.d/glance.conf,
+  setting QT_PLUGIN_PATH for KWin only, plus glance-check's autostart
   entry in ~/.config/autostart); takes effect at the next login.
   **Currently on.** The user runs it (auto mode blocks the agent from
   changing what loads at login). After a rebuild: log out and back in.
-  In the real session, KWin's log is in the journal:
-  `journalctl --user -b -o cat | grep glance:`.
-- `kwin/nested-firefox.sh`: run inside the nested session; opens
-  `test/breakpoints.html` in a separate Firefox (`--no-remote`, own profile),
-  since plain `firefox` would open in the desktop's instance.
-- `test/breakpoints.html`: color/label change at widths 1200/800/600/500 px,
-  shows its inner size.
-- `wayfire/`: the Wayfire 0.10.1 prototype ([docs/wayfire.md](docs/wayfire.md)).
-- `docs/`, `plans/`: see the table above.
+  KWin's log is in the journal: `journalctl --user -b -o cat | grep glance:`.
+- `kwin/run-nested.sh`: a nested KWin (a window in the desktop, 2982x1090
+  logical at scale 2, override with WIDTH/HEIGHT) with a Konsole inside.
+  Run from Konsole in the VM window (not SSH). Log: `~/Glance/kwin.log`.
+  `kwin/nested-firefox.sh` opens `test/breakpoints.html` (shows its inner
+  size, changes at 1200/800/600/500 px) in a separate Firefox there.
+- `kwin/setup-kwrite.sh`: unused (from when clips were KWrite windows).
+- `wayfire/`: the Wayfire 0.10.1 prototype, reference only (build:
+  `meson setup wayfire/build && meson compile -C wayfire/build`).
 
 ## Build and run
     cmake -S kwin -B kwin/build        # once
     cmake --build kwin/build
     ctest --test-dir kwin/build        # unit tests, no KWin needed
-    ~/Glance/kwin/run-nested.sh        # user runs it, from Konsole in the VM window
 
-Success check: log has `glance: effect loaded`. KWin loads effects at
-startup: restart the nested session after rebuilding. Headless load check
-the agent can run itself:
-`XDG_RUNTIME_DIR=/run/user/1000 QT_PLUGIN_PATH=$PWD/kwin/build/bin
-QT_FORCE_STDERR_LOGGING=1 kwin_wayland --virtual --socket es-check
---exit-with-session "sleep 3"`.
+Success check: the log has `glance: effect loaded`. KWin loads effects at
+startup, so the user logs out and in after a rebuild. The agent can check
+loading and drawing itself in a headless KWin
+([docs/testing.md](docs/testing.md)); input can't be injected, so drags,
+hover and keys need the user.
 
-Headless screenshot loop (the agent can check drawing itself, no logout):
-a virtual KWin on its own D-Bus, with windows, `GLANCE_TEST_MAP=1` (opens
-the Alt+Tab map 3 s after loading; `=N`: after N s, as Konsole can take
-longer to start) and Spectacle; then measure the PNG:
-`GLANCE_TEST_MAP=1 XDG_RUNTIME_DIR=/run/user/1000
-QT_PLUGIN_PATH=$PWD/kwin/build/bin dbus-run-session -- kwin_wayland
---virtual --width 4004 --height 1630 --scale 1.5 --socket glance-test
---exit-with-session "sh -c 'konsole -qwindowgeometry 3900x1500+50+50 &
-sleep 3.6; spectacle -b -n -f -o <file>.png'"`. Use big windows: small
-ones near the centre hide clipping bugs.
-More tricks for that session (used 2026-10-03; put the steps in a script
-run by `--exit-with-session "sh script.sh"`):
-- KWin scripts over the session's private D-Bus: write a .js file, then
-  `id=$(qdbus-qt6 org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript
-  file.js name)` and `qdbus-qt6 org.kde.KWin /Scripting/Script$id
-  org.kde.kwin.Script.run`. E.g. `w.minimized = true` parks windows
-  (minimize = park), `console.info(...)` prints window info (resourceClass,
-  desktopFileName, frameGeometry) to the log. Works on the real session
-  too (with its DBUS_SESSION_BUS_ADDRESS), read-only scripts only.
-- glance-clip needs `QT_QPA_PLATFORMTHEME=kde` there for its yellow title
-  bar (the real session has it).
-- Input can't be injected (no fake-input tool): drags, hover and keys
-  need the user.
-Crash stacks: `DEBUGINFOD_URLS=https://debuginfod.fedoraproject.org/
-coredumpctl debug <pid> --debugger-arguments="-batch -ex 'thread apply all
-bt 20'"` (symbols download on demand; `coredumpctl list` first).
+## Environment
+- Fedora 44 KDE (aarch64) in a VMware Fusion VM on an Apple Silicon Mac,
+  VMware SVGA3D virtual GPU. The user has VM snapshots to roll back to.
+- User: scottjenson. Project at ~/Glance. The user edits in VS Code,
+  connected into the VM.
+- KWin **6.7.5** (Plasma 6.7). Source unpacked at ~/src/kwin-6.7.5 for
+  checking internals (`dnf download --source kwin`, `rpm2cpio ... | cpio
+  -idm`, untar).
+- Build packages (installed): `kwin-devel`, `extra-cmake-modules`,
+  `libepoxy-devel`, `kf6-kglobalaccel-devel`.
+- Display: about 6000x2450 px (VMware "full resolution for Retina"; it
+  follows the VM window size), KDE scale **150%** (4004x1630 logical).
+  Check with `kscreen-doctor -o` (desktop env, below). One desktop.
+
+## Git / GitHub
+- Repo: https://github.com/scottjenson/Glance (**public**), branch `main`,
+  remote `origin` over HTTPS; `gh` is the git credential helper. Local
+  identity: Scott Jenson <scott@jenson.org>.
+- If a push says the token is invalid (happens now and then, cause
+  unknown), the user runs `~/gh-login.sh` (the agent may not): it shows
+  an 8-character code to type at github.com/login/device on the Mac. Since
+  2026-10-04 the token is stored in ~/.config/gh/hosts.yml.
+- Commit when a change is done and working, and push so nothing is lost;
+  ask before pushing anything unusual.
+- Ignored: `build/`, `kwin.log*`, `wayfire.log`. `.vscode/` is the user's.
 
 ## Notes for the agent
-- The user is new to Linux/Wayland development: explain Linux-specific steps
-  (sudo, dnf, -devel packages, etc.) and give exact commands.
-- The user prefers simple options (e.g. HTTPS over SSH) and likes design
-  choices talked through before big changes.
-- The user runs the nested session and reports how it feels; the agent can
-  build but can't interact with it. It *can* see it: screenshot the whole
-  VM desktop with `spectacle -b -n -f -o <file>` using the desktop's env
-  (DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000
-  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus), and query the
-  nested screen with `WAYLAND_DISPLAY=wayland-1 wayland-info`. `sudo` needs
-  the user's password, so the user runs installs.
-- On the Mac keyboard in the VM: Option = Alt, Command = Meta/Super.
-  VMware Fusion's Mac shortcut mappings turned Command+click into
-  Ctrl+click (Firefox opened new tabs, KDE's Meta+drag did nothing); the
-  user turned that mapping off in Fusion's Keyboard & Mouse settings
-  (2026-09-30). If Meta+click stops working, check there first. Same for
-  keys: Fusion's Key Mappings turned Command+C into Ctrl+C, so Meta+C never
-  reached KWin; the user turned that mapping off (2026-10-01) and copies
-  with Ctrl+C in the VM. If a Meta+letter shortcut does nothing (no
-  `glance:` log line), check Fusion's Key Mappings. Command+Tab may be
-  taken by macOS itself before the VM sees it; check when building Meta+Tab.
-  Fusion sometimes holds Command back (2026-10-03, seen in a key log): the
-  Meta press reaches KWin only at release, as an instant press+release,
-  unless a click comes first. Then Meta+wheel arrives as a plain scroll
-  (Meta+drag still works, the click lets Command through). Workaround:
-  Command+click on the empty desktop once; it works again. Trigger not
-  pinned down (around switching to the Mac / making a clip).
-  Those instant taps also opened KDE's launcher at random; Glance now
-  ignores taps under 10 ms ([docs/keyboard.md](docs/keyboard.md)).
-- plasma-keyboard (KDE's on-screen keyboard, started by KWin) sometimes
-  crashes at login inside Mesa's VMware `svga` driver (context creation;
-  checked 2026-10-03 with `coredumpctl debug`): a VM GPU issue, not Glance.
-  KWin restarts it. Off switch: System Settings → Keyboard → Virtual
-  Keyboard → None. It comes from the VM's GPU state wearing down after
-  many logouts without a reboot (~20 over 4-5 days, 2026-10-03); then
-  Xwayland and ksplashqml crash the same way at login, KWin gives up on
-  Xwayland, and the Mac→VM clipboard dies (vmtoolsd's helper is X11).
-  Fix: reboot the VM. The crashes started before glance-clip ever ran.
-- Mac→VM clipboard (VMware Tools, `vmtoolsd -n vmusr`) is unreliable and
-  adds a trailing NUL byte; keep commands for the user short or put them
-  in scripts.
+- The user is new to Linux/Wayland development: explain Linux-specific
+  steps (sudo, dnf, -devel packages) and give exact commands. `sudo`
+  needs the user's password, so the user runs installs.
+- The user prefers simple options and likes design choices talked
+  through before big changes.
+- Seeing the desktop: `spectacle -b -n -f -o <file>` with the desktop's
+  env (DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus).
+- Mac keyboard in the VM: Option = Alt, Command = Meta. Fusion's
+  "Mac shortcut" mappings are turned off (they turned Command+click into
+  Ctrl+click and Command+C into Ctrl+C); if a Meta shortcut does nothing
+  (no `glance:` log line), check Fusion's Keyboard & Mouse settings first.
+  macOS takes Command+Tab itself. Fusion sometimes holds Command back,
+  sending it as an instant press+release; then Meta+wheel arrives as a
+  plain scroll. Workaround: Command+click the empty desktop once.
+- The Mac→VM clipboard is unreliable and adds a trailing NUL byte: keep
+  commands for the user short or put them in scripts.
+- VM GPU wear: after many logouts without a reboot, plasma-keyboard,
+  Xwayland and ksplashqml crash at login in Mesa's `svga` driver and the
+  Mac→VM clipboard dies. Not Glance. Fix: reboot the VM.
+- Plasmashell sometimes hangs ~40 s at logout and abrt reports a crash:
+  a deadlock in KDE's kguiaddons (`WaylandClipboard::~WaylandClipboard`,
+  the clipboard changing while plasmashell quits). Not Glance, harmless,
+  left alone.
 - Linux paths are case-sensitive.

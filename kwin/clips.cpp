@@ -125,12 +125,8 @@ void Clips::follow(const QPointF &pos)
 
 // --- Text dropped on the desktop ---
 
-// Rather than letting Plasma make a sticky-note widget of it, ask the
-// dragging app for the data and hold the release back. Once it is in
-// (finishClip), the drag is cancelled, so nothing is dropped anywhere, and
-// the release passed on. Dragged files: a single image file becomes a clip,
-// anything else is dropped on Plasma after all; links without image data
-// are left to Plasma.
+// Ask the dragging app for the data and hold the release back; once it is
+// in (finishClip), the drag is cancelled and the release passed on.
 bool Clips::drop(PointerButtonEvent *event)
 {
     auto seat = waylandServer()->seat();
@@ -169,10 +165,8 @@ bool Clips::drop(PointerButtonEvent *event)
                               .timestamp = event->timestamp});
 }
 
-// Meta+C: clip the text selected in the active window (the primary
-// selection, if that window's app owns it: the primary selection outlives
-// the highlight and may belong to another app) into parking on the side
-// nearer the window.
+// Meta+C: clip the primary selection, if the active window's app owns it
+// (it outlives the highlight and may belong to another app).
 void Clips::clipSelection()
 {
     Window *window = workspace()->activeWindow();
@@ -333,12 +327,9 @@ void Clips::finishClip()
 // the parking column `place` (see placeClip).
 void Clips::openClip(const QString &path, const QPointF &position, std::optional<Place> place)
 {
-    // KWin's own environment for the apps it starts, without the plugin
-    // path that loads this effect from the build folder. Started in its own
-    // systemd scope in app.slice, like apps Plasma starts: otherwise it
-    // would belong to KWin's service, be stopped in an odd order at logout
-    // and die with KWin. systemd-run --scope execs the app in its own
-    // process, so the pid is the app's (see placeClip).
+    // KWin's startup environment minus the plugin path, in its own systemd
+    // scope in app.slice like apps Plasma starts (not part of KWin's
+    // service); --scope execs the app, so the pid is the app's.
     QProcessEnvironment env = kwinApp()->processStartupEnvironment();
     env.remove(QStringLiteral("QT_PLUGIN_PATH"));
     const QString unit = QStringLiteral("app-%1-%2.scope").arg(QLatin1String(clipAppId)).arg(QDateTime::currentMSecsSinceEpoch());
@@ -396,9 +387,7 @@ QString Clips::clipApp()
 }
 
 // A parked clip resizes itself to the height its text needs (see
-// resizeEvent in kwin/clip/main.cpp): take it (drawn at its zoom, see
-// layoutSize) and re-form its column (parking only,
-// see arrange).
+// resizeEvent in kwin/clip/main.cpp): take it, drawn at its zoom.
 void Clips::frameChanged(Window *window)
 {
     auto *it = m_parking.find(window);
@@ -429,9 +418,7 @@ Window *Clips::clipWindowOf(AbstractDataSource *source)
 }
 
 // The clip's window appeared: put it where the text was dropped, as if it
-// had been dragged there held at its center and dropped: full size in
-// main, shrunk by the edge rule (see edgeScale) and parked if an edge went
-// into an edge zone.
+// had been dragged there held at its center and dropped.
 void Clips::placeClip(Window *window)
 {
     if (!m_clipPid || window->pid() != m_clipPid || !window->isNormalWindow() || !window->windowItem()) {
@@ -505,9 +492,7 @@ void Clips::dragStarted()
 }
 
 // Where a dragged clip is drawn with the pointer at `cursor`: held at the
-// spot it was grabbed, scaled by the edge rule like a moved window (full
-// size in main, down to parking size at the edges), in the shape it had
-// when the drag started.
+// spot it was grabbed, scaled by the edge rule, in its starting shape.
 QRectF Clips::ghostRect(const QPointF &cursor) const
 {
     const ClipDrag &drag = *m_drag;
@@ -524,11 +509,9 @@ QRectF Clips::ghostRect(const QPointF &cursor) const
     return QRectF(QPointF(topLeft.x() + shiftOntoScreen(topLeft.x(), size.width(), screen), topLeft.y()), size);
 }
 
-// A dragged clip dropped at `pos` on the desktop (or nothing, or the
-// parking band). In the parking band it joins that parking column, against
-// the screen edge (as text dropped there does, see parkingSide); elsewhere
-// it stays where and as large as it is drawn, like a moved window dropped
-// there (parked if shrunk).
+// A dragged clip dropped at `pos` on the desktop (or nothing): it joins
+// a parking column in the parking band, else stays where it is drawn,
+// like a moved window.
 void Clips::placeDroppedClip(const QPointF &pos)
 {
     const ClipDrag drag = *m_drag;

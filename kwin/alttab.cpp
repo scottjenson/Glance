@@ -469,11 +469,9 @@ void AltTab::paintScreen(const RenderTarget &renderTarget, const RenderViewport 
 
 // --- The label ---
 
-// The selected window's icon and title on one line, on a rounded
-// translucent card, centred on the window where the map draws it, its
-// bottom on the window's bottom edge: always in the same spot, inside the
-// window (wider than the window if need be). Fades with the map. Redrawn
-// when the selection (or its title) changes.
+// The label at the bottom of the selected window where the map draws it
+// (docs/alt-tab.md). Fades with the map; the texture is redone when the
+// selection or its title changes.
 void AltTab::paintLabel(const RenderTarget &renderTarget, const RenderViewport &viewport, LogicalOutput *screen)
 {
     Window *window = mapSelected();

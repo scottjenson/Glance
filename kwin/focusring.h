@@ -1,10 +1,6 @@
-// Focus ring (docs/focus-ring.md): the highlighted window (the active one,
-// or the Alt+Tab selection, see AltTab::highlighted) gets an outline in the
-// accent color, as wide on screen at any scale, so it stands out also when
-// tiny. Whenever the ring goes to a window by keyboard (Meta+Alt+arrows,
-// Alt+Tab; not clicks, drags or apps taking the focus), the window dips
-// like a pressed button: it steps through bounceFrames (100% down to 98%
-// and back), bounceStep apart (see bounce).
+// Focus ring: an accent-colored outline on the highlighted window (the
+// active one, or the Alt+Tab selection), as wide on screen at any scale;
+// a small bounce when it moves by keyboard (docs/focus-ring.md).
 #pragma once
 
 #include "parked.h"

@@ -1,25 +1,7 @@
-// Clips (docs/clips.md): text or an image dropped on the desktop, or
-// clipped with Meta+C, becomes a clip window (glance-clip, kwin/clip)
-// instead of Plasma's sticky-note widget; dragging a clip's body drags its
-// text back out into apps.
-//
-// A drop: the release over the desktop is held back while the dragging app
-// hands over the data (see drop); then the drag is cancelled, the data
-// saved as a file in ~/Clips and opened in glance-clip, whose window is
-// put where it was dropped (see placeClip), as if it had been dragged
-// there held at its center. Dropped in the parking band (the outer
-// parkingBand of an edge zone, also onto parking icons), it becomes a
-// parking icon in that column instead. Meta+C (a KDE global shortcut,
-// changeable in System Settings) clips the text selected in the active
-// window the same way, into parking on the side nearer that window.
-//
-// Dragging a clip's body is a real drag and drop of its text (only then
-// can an app say it takes text), but it looks like moving the note: the
-// clip is drawn under the pointer, by the edge rule like a moved window,
-// and the app shows no drag picture. Where it lands decides: an app that
-// takes it gets it pasted, and the clip is gone (the app closes itself;
-// with Shift it is copied and the clip comes back); the desktop or
-// nothing, the clip moves there; anything else, it slides back.
+// Clips: text or an image dropped on the desktop, or clipped with Meta+C,
+// becomes a glance-clip window (kwin/clip) instead of Plasma's sticky-note
+// widget; dragging a clip's body drags its data back out into apps, drawn
+// as if the note moved (docs/clips.md).
 #pragma once
 
 #include "parked.h"

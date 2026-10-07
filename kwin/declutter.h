@@ -1,10 +1,6 @@
-// Declutter (Meta+double-click, docs/declutter.md): on a window, it takes
-// the half of main nearest to it at full height, and every other window in
-// main goes to the stashes, split so both end up holding about as many
-// (keeping their left-to-right order); on the desktop, everything in main
-// goes to the sides. Each stash then shows all its windows at one scale,
-// as large as fits the screen height, so its column lines up. The same
-// Meta+double-click again undoes it.
+// Declutter, Meta+double-click: the target fills the nearer half of main
+// and every other window in main goes to the stashes; again undoes it
+// (docs/declutter.md).
 #pragma once
 
 #include "parked.h"

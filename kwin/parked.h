@@ -1,39 +1,12 @@
 // Parked windows: the windows Glance draws somewhere other than their real
 // frame (in a stash, in parking, or gliding back to full size), their
-// places, animation and making room, and how every window is drawn.
+// places, animation, parking columns and tilt, and how every window is
+// drawn. See docs/dragging-and-parking.md.
 //
-// A parked window has a real frame (what the app and KWin's input know,
-// in parking resized to a small layout size, see layoutSize) and a drawn
-// rectangle (`shown`); a transform on its scene item fits the one into the other
-// (applyParked). Keeping the two in step is most of Glance.
-//
-// Dropped while shrunk, a window stays exactly where and as large as it was
-// drawn. In parking the app is really resized, to a phone-like width, so
-// web pages reflow; in a stash it keeps its full size. The rest of the
-// shrink is the transform, which fits the
-// window's current frame into `shown` also while the app is still catching
-// up with the new size. Back in main, a window gets its original size.
-//
-// Columns: the windows in each parking area form one column, centered
-// vertically, in the order of their vertical position (see arrangeArea).
-// Whenever a window arrives (keyboard or drop) or leaves (keyboard, dragged
-// out, closed), the column re-forms, animated. Stashes have no column:
-// windows stay where they were put and may overlap (a keyboard move keeps
-// the window's height); only declutter lines a stash up. Crowding of
-// parking (a column taller than the screen) comes later.
-//
-// Parking icons are tiles (2026-10-06): square apps (see layoutSize),
-// all drawn parkingTile large against the screen edge, and turned away
-// from the viewer around their outer edge ("tilt", see updateTilt). The
-// tilt is drawn only where the window is drawn from mipmaps (see
-// Mipmaps; tilted windows always are) and is taken into account by input
-// (pick, untilt); the draw transform stays a plain scale and move, which
-// all of Glance relies on. A column is one turned plane seen from one eye
-// (see glance::tiltTransform), so a tile can reach a little past its flat
-// rectangle (towards the eye's level): what it covers turned is
-// repainted along with it (see repaintTilted).
-//
-// Minimize = park: parking is Glance's minimize (see minimizeToParking).
+// A parked window has a real frame (what the app and KWin's input know)
+// and a drawn rectangle (`shown`); a transform on its scene item fits the
+// one into the other (applyParked). The draw transform is always a plain
+// scale and move; the tilt of parking tiles is drawn only by Mipmaps.
 #pragma once
 
 #include "tuning.h"
@@ -151,19 +124,16 @@ public:
     // instead, centered where `shown` is: callers animate from `shown`.
     void park(Window *window, const QRectF &shown, const QSizeF &original);
     // Minimize = park: a window being minimized is shown again and goes to
-    // the parking area on the side nearer to it (see the .cpp).
+    // the parking area on the side nearer to it.
     void minimizeToParking(Window *window);
     // The scale at which `windows`, at their full sizes, fit in one column
     // (see glance::fittingScale).
     qreal fittingScale(LogicalOutput *output, const std::vector<Window *> &windows) const;
     // The size to really resize a parked window to (see
-    // glance::layoutSize). Clips in parking are laid out at twice the
-    // shown size, whatever parkingLayoutWidth: drawn at 1/2, the text is small
-    // but readable and reflows into a narrow note, and the hover preview
-    // (at most 1:1) doubles it. Clips in a stash keep their full width,
-    // only drawn smaller, like any window (2026-10-05; from 2026-10-04
-    // drawn 1:1 with full-size text, which didn't look smaller). The clip
-    // app then picks the height its text needs (see Clips::frameChanged).
+    // glance::layoutSize). Clips in parking are laid out at twice the shown
+    // size (drawn at 1/2, so a hover preview doubles them); in a stash
+    // they keep their full width. The clip app picks its height (see
+    // Clips::frameChanged).
     static QSizeF layoutSize(Window *window, const QSizeF &shown, const QSizeF &original);
 
     // --- Drawing ---
@@ -224,9 +194,7 @@ public:
     // the decoration's resize borders outside the frame).
     Window *pick(const QPointF &pos, Window *ignore = nullptr) const;
     // A parked window that acts like an icon: anything in parking, and a
-    // stashed one shown small enough (see iconBelow). Narrow windows (clips,
-    // Firefox at its 500 px minimum) are drawn above iconBelow in parking
-    // (see parkingScale) but are icons there all the same.
+    // stashed one drawn below iconBelow.
     bool isIcon(Window *window) const;
     // A window one can select (Meta+Alt+arrows, Alt+Tab): one that is shown
     // on the screen (not e.g. KDE's hidden Xwayland Video Bridge, which then
@@ -239,14 +207,11 @@ public:
     // left, 1 stash left, 2 parking right, 3 stash right.
     int areaOf(Window *window) const;
     static bool isParkingArea(int area);
-    // Re-form the column of windows in one area on `output`: stacked with
-    // arrangeGap between them, centered vertically in the usable screen
-    // area, ordered by vertical center (an `arriving` window that lands on
-    // another goes below it). Moved windows animate.
+    // Re-form the column of windows in one area on `output`, animated (an
+    // `arriving` window that lands on another goes below it).
     void arrangeArea(int area, LogicalOutput *output, Window *arriving);
-    // `window` has just arrived in a stash or parking area. Only parking
-    // columns re-form: a stash keeps windows where they were put (they may
-    // overlap); only declutter lines one up.
+    // `window` has just arrived in a stash or parking area: re-form the
+    // column if it is parking (stashes have none).
     void arrange(Window *window);
     // Before a parked window leaves its area: returns a function that, once
     // it has left, re-forms the area it left (parking only, see arrange).
@@ -258,10 +223,8 @@ public:
     void closed(Window *window);
     // Unloading: every parked window back to full size, where it is drawn.
     void restoreAll();
-    // Logging out: apps remember their window size when they are closed at
-    // logout (Firefox reopens at it), so every parked window really gets its
-    // original size back first. They stay parked, drawn where they are, so
-    // nothing changes on the screen.
+    // Logging out: every parked app really gets its original size back
+    // before apps are closed (they save it), still drawn where it is.
     void fullSizeForLogout();
 
 Q_SIGNALS:

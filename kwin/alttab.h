@@ -1,17 +1,7 @@
-// Alt+Tab (and Meta+Tab; replaces KDE's window switcher): hunt and return
-// (docs/alt-tab.md). Windows in the order they were last used; a quick
-// Alt+Tab goes back to the previous one, so two windows toggle with a tap.
-// Holding Alt shows the map: the whole desktop drawn at mapScale in the
-// middle of the screen, same layout, dimmed except the selected window,
-// overlapping windows spread into rows above and below their pile; a label
-// at the bottom of the selected window names it (icon and title). Tab /
-// Shift+Tab move the selection, releasing Alt focuses it where it is, Esc
-// cancels. The pointer selects too: moving over a window in the map selects
-// it, clicking one chooses it at once. Nothing moves: only the drawing
-// changes.
-//
-// The focus ring (kept by the effect) follows the selection: see
-// highlighted, mapZoom and the signals.
+// Alt+Tab and Meta+Tab, replacing KDE's window switcher: hunt and return
+// in recency order, and the desktop map while Alt is held
+// (docs/alt-tab.md). Only the drawing changes; nothing moves. The focus
+// ring follows the selection: see highlighted, mapZoom and the signals.
 #pragma once
 
 #include "parked.h"

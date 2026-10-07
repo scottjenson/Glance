@@ -40,10 +40,8 @@ FocusRing::~FocusRing()
     remove();
 }
 
-// Outline the highlighted window: a line in the accent color just outside
-// its frame, ringWidth wide on screen whatever the window's scale (also
-// in the Alt+Tab map). It is a child of the window's scene item (whose
-// coordinates start at the frame's top-left corner), so it moves, scales
+// Outline the highlighted window, ringWidth wide on screen (also in the
+// Alt+Tab map). A child of the window's scene item, so it moves, scales
 // and stacks with it.
 void FocusRing::update()
 {
@@ -76,10 +74,7 @@ KWin::Item *FocusRing::ring() const
     return m_ring;
 }
 
-// The ring moved by keyboard (Alt+Tab, Meta+Alt+arrows): it bounces
-// there. Clicks, drags and apps taking the focus don't bounce: the
-// user's eyes are already on the window (user, 2026-10-03: bouncing
-// on every focus change, e.g. during text drags, felt busy).
+// The ring moved by keyboard (Alt+Tab, Meta+Alt+arrows): it bounces there.
 void FocusRing::bounce(Window *window)
 {
     update();
@@ -97,8 +92,7 @@ void FocusRing::remove()
     m_window = nullptr;
 }
 
-// Bounce `window` like a pressed button: through bounceFrames, one every
-// bounceStep (see paintWindow). Stepped, not animated in between.
+// Step through bounceFrames, one every bounceStep (see paintWindow).
 void FocusRing::startBounce(Window *window)
 {
     const int count = ++m_bounceCount;

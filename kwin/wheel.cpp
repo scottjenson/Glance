@@ -34,13 +34,8 @@ MetaWheel::MetaWheel(ParkedWindows &parking, HoverPreviews &previews)
     });
 }
 
-// Meta+wheel (vertical) over a window grows it (scrolling up) or shrinks
-// it, anchored at the pointer: the point under it stays put. In main the
-// app is really resized at once. In a stash it is drawn larger or
-// smaller (between just above parking size and full size), and the app
-// gets the new size once the scrolling stops (wheelSettle). Over a
-// parking icon it sizes the icon's preview (see resizePreview). Returns
-// whether the event was taken.
+// Meta+wheel (vertical) over a window: scrolling up grows it, anchored at
+// the pointer. Returns whether the event was taken.
 bool MetaWheel::axis(PointerAxisEvent *event)
 {
     if (event->modifiers != Qt::MetaModifier || event->orientation != Qt::Vertical || event->delta == 0
@@ -98,7 +93,7 @@ void MetaWheel::resizeInStash(Window *window, qreal factor, const QPointF &pos)
     const QRectF from = m_parking.displayRect(parked);
     parked.shown = keptIn(QRectF(scaledTopLeft(parked.shown.topLeft(), pos, parked.shown.size(), size), size),
                           window->output()->geometryF());
-    if (parked.preview) { // a small stashed window can be previewed
+    if (parked.preview) {
         parked.preview.reset();
         m_previews.suppress(window);
     }
@@ -124,15 +119,10 @@ void MetaWheel::settle()
     m_window = nullptr;
 }
 
-// Over a parking icon: its hover preview grows or shrinks (opening at
-// once if it isn't open), anchored at its screen edge and vertically at
-// the pointer, from icon size up to the width of the edge zone (so it
-// covers the stash but never main), the screen height, and the
-// original size; clips (whose layout is their own) up to 1:1. It is
-// still a preview: it closes when the pointer leaves, so nothing stays
-// in the way. Shrunk back to icon size it closes, and doesn't open
-// again until the pointer leaves the icon. Grown past the app's size,
-// the app follows once the scrolling stops (settle).
+// Over a parking icon: its hover preview grows or shrinks, anchored at its
+// screen edge and vertically at the pointer, within the limits in
+// docs/meta-wheel.md. Shrunk back to icon size it closes until the pointer
+// leaves the icon.
 void MetaWheel::resizePreview(Window *window, qreal factor, const QPointF &pos)
 {
     Parked &parked = m_parking.at(window);

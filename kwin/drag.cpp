@@ -178,16 +178,9 @@ QRectF WindowDrag::followRect(Window *window, const RectF &frame, const QPointF 
                   frame.width() * scale, frame.height() * scale);
 }
 
-// A window dragged out of a stash keeps the size it had there (set by
-// the drop or by Meta+wheel), so the drag doesn't start with a jump: the
-// edge rule (`rule`) is remapped so that its value when the drag started
-// gives that size, full size still gives full size and parking size still
-// gives parking size (linear in between). So the window shrinks or grows
-// at once whichever way it moves, and ends at the same size as any window
-// at the screen edge. (Until 2026-10-05 it held its size until the rule
-// reached it, or glided once its center left the stash: moved outward
-// when grabbed farther from its outer edge than at the drop, it stayed
-// large across the stash, then snapped small.)
+// A window dragged out of a stash starts at its stashed size: the edge
+// rule (`rule`) is remapped so that its value when the drag started gives
+// that size (see glance::heldScale).
 qreal WindowDrag::holdScale(qreal rule)
 {
     const qreal hold = *m_dragHold;
@@ -237,10 +230,8 @@ std::optional<WindowDrag::Gesture> WindowDrag::leadStep(Window *window, const QP
 }
 
 // Acceleration: each horizontal pointer movement moves the window that
-// much times the gain, which grows from 1 to leadMaxGain over the run
-// (movement in one direction); a reversal (reversalJitter the other way)
-// or moving slower than leadSlow starts a new run at 1. The lead keeps
-// the window between the screen edges, so overshoot isn't stored.
+// much times the gain (docs/meta-drag.md). The lead keeps the window
+// between the screen edges, so overshoot isn't stored.
 void WindowDrag::updateLead(Window *window, const QPointF &cursor, qreal dx, std::chrono::steady_clock::time_point now)
 {
     // Slow: 1:1 (precise).
@@ -275,10 +266,8 @@ void WindowDrag::updateLead(Window *window, const QPointF &cursor, qreal dx, std
     m_leadX = x - cursor.x();
 }
 
-// The snap target for a window centered at `point`, by region: in the
-// parking band parking, elsewhere in an edge zone the stash, in main a
-// half, or all of main in the middle band (snapFullBand); halves and all
-// of main at full height.
+// The snap target for a window centered at `point`, by region
+// (docs/meta-drag.md).
 std::optional<WindowDrag::Gesture> WindowDrag::snapTargetAt(Window *window, const QPointF &point) const
 {
     const RectF screen = window->moveResizeOutput()->geometryF();

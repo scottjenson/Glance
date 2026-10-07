@@ -245,10 +245,8 @@ QSizeF ParkedWindows::layoutSize(Window *window, const QSizeF &shown, const QSiz
         return QSizeF(2 * std::round(shown.width()), 2 * std::round(shown.height()));
     }
     if (isClip(window)) {
-        // In a stash: its full width, only drawn smaller. The height its
-        // text needs, not the app's minimum: KWin reports 150 for clips,
-        // which made one-word clips square; the clip picks its own height
-        // (see Clips::frameChanged).
+        // In a stash: its full width, only drawn smaller, and the height
+        // its text needs, not the app's minimum (see Clips::frameChanged).
         const qreal zoom = shown.width() / original.width();
         return QSizeF(std::round(original.width()), std::round(shown.height() / zoom));
     }
@@ -265,13 +263,8 @@ qreal ParkedWindows::fittingScale(LogicalOutput *output, const std::vector<Windo
     return glance::fittingScale(heights, workspace()->clientArea(MaximizeArea, output).height());
 }
 
-// Minimize = park: show a minimized window again and put it in the
-// parking area on the side nearer to where it is drawn (one already
-// there stays). Called while the minimize is under way: KWin has moved
-// focus on (wanted: minimize means out of the way) and minimized its
-// dialogs, which come back with it. KDE's minimize animation (Squash)
-// is reversed before it starts, so nothing flashes. Windows Meta+arrows
-// can't move (full screen, fixed size, not normal) minimize as usual.
+// Called while the minimize is under way (KWin has already moved focus
+// on). See docs/dragging-and-parking.md, Minimize = park.
 void ParkedWindows::minimizeToParking(Window *window)
 {
     if (!window->isNormalWindow() || window->isFullScreen() || !window->isMovable() || !window->isResizable()

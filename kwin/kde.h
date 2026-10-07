@@ -1,10 +1,7 @@
-// What Glance changes in KDE while it is loaded, all restored when it is
-// unloaded and nothing saved to the user's settings (docs/keyboard.md,
-// docs/meta-drag.md): KWin's actions for keys Glance takes over are
-// disabled, quick tiling by dragging to the side is off (it uses the same
-// edges), and Meta+drag also activates and raises the window. And KDE's
-// launcher, which opens when Meta is pressed alone and released, opens
-// only on a real tap (see metaKey).
+// What Glance changes in KDE while loaded, restored on unload and never
+// saved to the user's settings: KWin actions for keys Glance takes over,
+// quick tiling by dragging, Meta+drag's mouse command, and the Meta tap
+// that opens KDE's launcher (docs/keyboard.md, docs/meta-drag.md).
 #pragma once
 
 #include <options.h>

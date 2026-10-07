@@ -1,23 +1,8 @@
-// glance-clip: a clip window for Glance. Glance starts it with a clip file
-// (text dropped on the desktop, or Meta+C) and places the window.
-//
-// The window shows the text large and read-only, without menus. The whole
-// window is the text: press anywhere in it and drag, and the text goes along
-// as a normal drag and drop, no selecting first. Accepted by the app it is
-// dropped on, it is pasted there and the clip is gone, like a physical
-// object moved; with Shift held at the drop it is copied and the clip stays.
-// Glance draws the note following the pointer meanwhile, so it looks like
-// moving it; dropped on the desktop it moves there, refused it slides back
-// (Glance's side). Closing the window deletes the clip. The window moves by its title bar or
-// with Meta+drag (Glance). Ctrl+C copies the text.
-//
-// It looks like a sticky note: yellow, title bar included (a KDE color
-// scheme of its own, which KWin's title bar follows), and no title (the
-// text is right below it).
-//
-// An image clip (an image file: dropped image data or an image file, see
-// Glance) shows the image filling the window, in its proportions, and drags
-// out as PNG data and as the file (for file managers and upload forms).
+// glance-clip: a clip window for Glance, a sticky note showing a clip
+// file's text (large, read-only) or image. Glance starts it and places the
+// window. Pressing anywhere and dragging starts a drag and drop of the
+// clip; accepted, the clip closes (moved) unless Shift is held (copied).
+// Closing the window deletes the clip file. See docs/clips.md.
 
 #include <QApplication>
 #include <QBuffer>
@@ -231,12 +216,9 @@ protected:
         return QWidget::eventFilter(watched, event);
     }
 
-    // Made narrower than it started (Glance does that in parking): as tall
-    // as the text needs at the new width, up to startMaxHeight, so a short
-    // clip is a short note. Glance takes the height it chooses.
-    // An image clip made wider or narrower (by Glance, or by hand) takes
-    // the image's proportions again; one made only taller or shorter by
-    // hand keeps the change.
+    // Text made narrower than it started (Glance does that in parking): as
+    // tall as the text needs, up to startMaxHeight; Glance takes the height.
+    // An image made wider or narrower takes the image's proportions again.
     void resizeEvent(QResizeEvent *event) override
     {
         QWidget::resizeEvent(event);
@@ -296,13 +278,11 @@ private:
         return mime;
     }
 
-    // The whole clip as a drag. Only copying is offered to the target (any
-    // app that takes text accepts a copy); whether the clip then goes is
-    // ours to decide: it does unless Shift is held at the drop.
-    // Glance draws the note itself under the pointer, so the drag picture
-    // is invisible. Meanwhile the window takes no pointer input (a 1-pixel
-    // input mask), so drops near where it was fall through to what is
-    // below, rather than onto the clip itself.
+    // The whole clip as a drag. Only copying is offered (any app that takes
+    // text accepts a copy); the clip goes unless Shift is held at the drop.
+    // Glance draws the note under the pointer, so the drag picture is
+    // invisible, and a 1-pixel input mask lets drops near its old place
+    // fall through.
     void drag()
     {
         auto drag = new QDrag(this);

@@ -1,18 +1,8 @@
-// Mipmaps for small windows (docs/dragging-and-parking.md, Drawing small
-// windows). KWin draws a scaled window by blending the 4 window pixels
-// nearest each screen pixel, so drawn below half size it skips most of
-// them: text and thin lines break up, and shimmer as the window moves.
-// A window drawn smaller than mipmapBelow is drawn instead from an image
-// of itself at full size and that image's mipmaps (copies at 1/2, 1/4,
-// ..., each averaging 2x2 pixels of the one before), which the GPU blends
-// at the drawn size. The image is redrawn only when the window's content
-// changes (KWin's window damage). The focus ring isn't in it: it is drawn
-// over it as usual, so it stays sharp.
-//
-// Tilted parking icons (ParkedWindows::tiltOf) are always drawn from
-// here, whatever their size: KWin's own drawing can't turn them (paint
-// data has no perspective, and the draw transform stays flat). Their
-// image includes the focus ring, so it turns with them.
+// Mipmaps for small windows: a window drawn below mipmapBelow, or a tilted
+// parking tile, is drawn from a full-size image of itself and its mipmaps,
+// redrawn only when its content changes (docs/dragging-and-parking.md,
+// Drawing small windows). The focus ring is drawn over it, except on
+// tilted windows, whose image includes it so it turns with them.
 #pragma once
 
 #include <QObject>

@@ -6,10 +6,9 @@
 #   kwin/use-in-session.sh off   # back to normal
 #
 # It adds (or removes) a systemd drop-in for KWin's user service, which sets
-# QT_PLUGIN_PATH for KWin only, and an autostart entry for glance-check (a
-# dialog at login if KWin didn't load Glance, e.g. after a Plasma update).
-# No sudo needed. After rebuilding, log out and
-# back in to load the new version. If the desktop doesn't come up, run
+# QT_PLUGIN_PATH for KWin only, and an autostart entry for glance-check.
+# No sudo needed. After rebuilding, log out and back in to load the new
+# version. If the desktop doesn't come up, run
 # "off" from an SSH session (or VS Code) and log in again.
 
 DROPIN_DIR="$HOME/.config/systemd/user/plasma-kwin_wayland.service.d"

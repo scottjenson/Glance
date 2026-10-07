@@ -140,16 +140,9 @@ bool ParkedInput::releasePending(PointerButtonEvent *event)
 // Move a parked window's frame so that the point of the window drawn at
 // `pos` is also at `pos` in the frame. The drawing stays in place.
 // Returns whether they line up; if not, the caller forwards events with
-// transformFor, which is exact without moving anything.
-// Each move is a real geometry change in KWin (window rules, the
-// window's monitor, the app is told), so pointer motion moves the frame
-// at most once per refresh; `now` (buttons) moves it at once. When
-// motion skips a move, anchorLate lines the frame up a refresh later, so
-// where the pointer stops (tooltips, menus) the frame is right.
-// The frame swings far past the drawing: never so far that its centre
-// leaves the window's monitor, or KWin would give it to the next one.
-// A tilted icon: the point under the pointer is found by turning the
-// pointer back flat (see ParkedWindows::untilt).
+// transformFor. Motion moves the frame at most once per refresh (then
+// anchorLate), `now` (buttons) at once, and never so its centre leaves
+// the window's monitor.
 bool ParkedInput::reanchor(Window *window, const QPointF &pos, bool now)
 {
     if (workspace()->moveResizeWindow() == window) {
@@ -216,11 +209,9 @@ QMatrix4x4 ParkedInput::transformFor(Window *window) const
     return m * QMatrix4x4(m_parking.globalTiltOf(window).inverted());
 }
 
-// When we forward events ourselves, we point the seat at another surface
-// than KWin's focus window, and KWin doesn't notice: it only re-points
-// the seat when its own focus changes. Before leaving events to KWin
-// again, point the seat back at KWin's focus window, or KWin would
-// deliver them to whatever surface we last chose (e.g. the desktop).
+// KWin doesn't notice when we point the seat at another surface (it only
+// re-points it when its own focus changes): point it back at KWin's focus
+// window before leaving events to KWin again.
 void ParkedInput::syncSeatFocus(const QPointF &pos)
 {
     auto seat = waylandServer()->seat();

@@ -72,10 +72,10 @@ plan, and update the table and Status.
 
 ## Status (2026-10-06)
 Everything in the docs table is built, committed and checked by the user
-in the real session, except two things waiting for the user's check:
+in the real session, except one thing waiting for the user's check:
 parked windows staying drawn in place at logout
 ([docs/dragging-and-parking.md](docs/dragging-and-parking.md), Logging
-out), and mipmaps compared with the user's earlier parking screenshots.
+out).
 
 Next: remembered places ([plans/remembered-places.md](plans/remembered-places.md));
 first open question there: keep or remove the logout step.
@@ -145,7 +145,6 @@ first open question there: keep or remove the logout step.
   Run from Konsole in the VM window (not SSH). Log: `~/Glance/kwin.log`.
   `kwin/nested-firefox.sh` opens `test/breakpoints.html` (shows its inner
   size, changes at 1200/800/600/500 px) in a separate Firefox there.
-- `kwin/setup-kwrite.sh`: unused (from when clips were KWrite windows).
 - `wayfire/`: the Wayfire 0.10.1 prototype, reference only (build:
   `meson setup wayfire/build && meson compile -C wayfire/build`).
 

@@ -67,10 +67,7 @@ bool Keyboard::key(KeyboardKeyEvent *event)
     return false;
 }
 
-// One step towards `side` along: parking L, stash L, left half of main,
-// right half of main, stash R, parking R. Never resizes in main (only
-// Meta+Up/Down do): a window keeps its size, centered in a half (see
-// nextMainStop), and comes back from a stash at the size it had before.
+// One step towards `side` along the ladder (docs/keyboard.md).
 void Keyboard::stepSideways(Window *window, Side side)
 {
     const bool left = side == Side::Left;

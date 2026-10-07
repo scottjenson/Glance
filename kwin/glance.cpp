@@ -1,9 +1,6 @@
 // Glance, a KWin effect: windows shrink as they are dragged toward the left or
-// right screen edge, and stay shrunk ("parked") where they are dropped.
-//
-// Regions: main (the middle half of the screen, full size), stash (between
-// main and the edge, smaller) and parking (the very edge, icon-sized).
-// "Parked" means dropped while shrunk, in a stash or a parking area.
+// right screen edge, and stay shrunk ("parked") where they are dropped. The
+// regions and design rules are in CLAUDE.md, each feature in docs/.
 //
 // This file is the coordinator: the effect KWin loads. It owns the
 // components, hands them window events and painting, and decides in one
@@ -27,10 +24,8 @@
 // - Clips (clips.h): drops and Meta+C become clip windows.
 // - KdeIntegration (kde.h): what Glance switches off in KDE while loaded.
 //
-// It is a KWin effect (not a plain plugin) so that it can mark scaled windows
-// as transformed in prePaintWindow: otherwise KWin clips a window's drawing
-// as if it weren't scaled, and it also treats the window as still covering
-// its full-size area.
+// It is an effect (not a plain plugin) so that prePaintWindow can mark
+// scaled windows as transformed (CLAUDE.md, How the effect works).
 //
 // Known gaps: touch and tablets aren't handled.
 
@@ -75,10 +70,8 @@ public:
         }
         connect(workspace(), &Workspace::windowAdded, this, &Glance::watch);
         connect(workspace(), &Workspace::windowAdded, &m_clips, &Clips::placeClip);
-        // A logout starts: Plasma's ksmserver moves KWin out of the Normal
-        // session state before any app is asked to close (and its numbers
-        // for the states are off by one from KWin's, so any other state
-        // counts). Parked apps get their full size back first.
+        // A logout starts (any state but Normal: ksmserver's numbers are off
+        // by one from KWin's; docs/dragging-and-parking.md, Logging out).
         connect(effects, &EffectsHandler::sessionStateChanged, this, [this]() {
             if (effects->sessionState() != SessionState::Normal) {
                 m_parking.fullSizeForLogout();
@@ -134,20 +127,16 @@ public:
     {
         m_focusRing.paintWindow(w->window(), data);
         if (m_altTab.paintWindow(w->window(), data)) {
-            // The map paints the whole screen as transformed, and KWin then
-            // gives each window an unlimited region. With that, its renderer
-            // cuts windows off at the screen's edge as if they weren't
-            // scaled (clipQuads in scene/itemrenderer_opengl.cpp uses only
-            // the translation), so shrunk windows lose their right and
-            // bottom parts. A finite region makes it clip on the GPU instead,
-            // which is right.
+            // The map paints the screen as transformed, which gives windows
+            // an unlimited region and makes KWin's clipQuads cut shrunk
+            // windows off; a finite region clips on the GPU instead
+            // (docs/alt-tab.md, Clipping gotcha).
             Effect::paintWindow(renderTarget, viewport, w, mask, Region(viewport.deviceRect()), data);
             return;
         }
         if (m_clips.paintWindow(w->window(), data)) {
-            // A clip being dragged is drawn under the pointer. The whole
-            // screen is painted as transformed meanwhile, so every window
-            // needs a finite region (see above).
+            // A clip being dragged is drawn under the pointer; same finite
+            // region as above.
             Effect::paintWindow(renderTarget, viewport, w, mask, Region(viewport.deviceRect()), data);
             return;
         }
@@ -193,12 +182,12 @@ public:
     }
 
     // Input, in the order the components get it. While Alt+Tab is on, keys
-    // go to it and the pointer only selects or chooses in its map. A dragged clip follows the
-    // pointer. A held icon press decides between click and drag before
-    // anything else sees motion. Meta+double-click, then drops (clips),
-    // then icon presses get buttons; Meta+wheel gets the wheel. Whatever
-    // is left goes to ParkedInput, which delivers it to the window drawn
-    // under the pointer (or leaves it to KWin when nothing parked is
+    // go to it and the pointer only selects or chooses in its map. A dragged
+    // clip follows the pointer. A held icon press decides between click and
+    // drag before anything else sees motion. Meta+double-click, then drops
+    // (clips), then icon presses get buttons; Meta+wheel gets the wheel.
+    // Whatever is left goes to ParkedInput, which delivers it to the window
+    // drawn under the pointer (or leaves it to KWin when nothing parked is
     // involved). Returning true means we took the event.
     bool onKey(KeyboardKeyEvent *event)
     {
@@ -282,9 +271,8 @@ private:
         }
         bool keyboardKey(KeyboardKeyEvent *event) override { return m_effect->onKey(event); }
         bool pointerMotion(PointerMotionEvent *event) override { return m_effect->onMotion(event); }
-        // KDE's "Meta alone opens the launcher" is called off by a click or
-        // scroll during the Meta press, but only in a later filter: one we
-        // take must call it off here (see cancelMetaTap).
+        // A click or scroll we take with Meta held must call off KDE's Meta
+        // tap here (docs/keyboard.md).
         bool pointerButton(PointerButtonEvent *event) override
         {
             const bool taken = m_effect->onButton(event);

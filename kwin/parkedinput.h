@@ -1,24 +1,9 @@
-// Input to parked windows (docs/dragging-and-parking.md).
-//
-// Whenever the pointer is over a parked window, its frame is moved
-// ("re-anchored") so that the point under the pointer is the same point of
-// the window as in the shrunk drawing; the drawing is adjusted so it
-// doesn't move. KWin then finds the right spot on its own, at the pointer:
-// clicks, hover, the title bar (so it can be dragged out again), popups.
-// Where KWin still picks another window (the invisible full-size frame of
-// a different window lies above), we point the seat at the window really
-// visible under the pointer and forward the events ourselves (see route).
-// Known gaps: in the forwarding case the title bar doesn't respond and the
+// Input to parked windows: re-anchoring a parked window's frame under the
+// pointer, forwarding events where KWin picks the wrong window, and icon
+// presses (click or drag). See docs/dragging-and-parking.md, Input to
+// parked windows and Icons.
+// Known gaps: when forwarding, the title bar doesn't respond and the
 // cursor shape may be wrong.
-//
-// Icons (ParkedWindows::isIcon: windows in parking, and stashed ones shown
-// small): a plain left-button press on one is held back. Dragging it more
-// than a few pixels moves the window (KWin's own move, so it grows back
-// out of the edge zone); releasing it without dragging passes the press
-// and release to the app as a click. So small parked windows can be
-// dragged from anywhere and still work as widgets (buttons, scrolling).
-// Not for KDE title bars (KWin handles those), clips (dragging a clip
-// drags its text) or presses with modifiers.
 #pragma once
 
 #include "parked.h"

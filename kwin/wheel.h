@@ -1,9 +1,5 @@
-// Meta+wheel (docs/meta-wheel.md) resizes the window under the pointer in
-// place, anchored at the pointer: in main a real resize, in a stash a
-// scaled one (the app follows when the scrolling stops). Over a parking
-// icon it sizes the icon's hover preview, up to the width of the edge
-// zone; the preview still closes when the pointer leaves (see
-// resizePreview).
+// Meta+wheel resizes the window under the pointer in place; over a
+// parking icon it sizes the icon's hover preview (docs/meta-wheel.md).
 #pragma once
 
 #include "parked.h"

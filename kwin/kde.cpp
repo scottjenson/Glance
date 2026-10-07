@@ -27,8 +27,7 @@ KdeIntegration::KdeIntegration()
         }
     });
 
-    // Meta+drag activates the window, as a title-bar drag does: KDE's
-    // default for it is "Move", which leaves another window active.
+    // Meta+drag activates the window, as a title-bar drag does.
     m_savedCommandAll1 = options->commandAll1();
     activatingMetaDrag();
     connect(options, &Options::commandAll1Changed, this, &KdeIntegration::activatingMetaDrag);
@@ -46,11 +45,8 @@ KdeIntegration::~KdeIntegration()
     }
 }
 
-// Meta pressed alone and released opens KDE's launcher. Glance uses Meta a
-// lot (drag, wheel, double-click), so only a real tap does: a press held
-// longer than metaTapMax (the user meant something else and let go)
-// doesn't, nor one shorter than metaTapMin (no hand is that fast: VMware
-// Fusion sends such taps when it held Command back).
+// Only a real tap opens KDE's launcher: not one held longer than
+// metaTapMax, nor one shorter than metaTapMin (VMware Fusion's instant taps).
 void KdeIntegration::metaKey(const KeyboardKeyEvent *event)
 {
     if (event->state == KeyboardKeyState::Pressed) {
@@ -63,10 +59,8 @@ void KdeIntegration::metaKey(const KeyboardKeyEvent *event)
     }
 }
 
-// Call off the launcher for the current Meta press. KWin doesn't export
-// its own call for it (GlobalShortcutsManager::cancelModiferOnlySequence),
-// but the slot it uses is on KWin's kglobalaccel plugin, a static Qt
-// plugin, whose instance Qt hands out.
+// KWin doesn't export its call for this, but the slot is on its
+// kglobalaccel plugin, a static Qt plugin whose instance Qt hands out.
 void KdeIntegration::cancelMetaTap()
 {
     if (QObject *accel = globalAccel()) {
@@ -87,14 +81,9 @@ QObject *KdeIntegration::globalAccel()
     return m_globalAccel;
 }
 
-// Our Meta+arrows replace KDE's quick tiling on the same keys, and our
-// Meta+Alt+arrows its "Switch to Window" ones. Rather than hiding the
-// keys from KDE's shortcut system (which then opens the launcher when
-// Meta is released), disable KWin's actions for them: the shortcut still
-// matches, and a disabled action does nothing. Only while the effect is
-// loaded; nothing is saved to the user's settings.
-// Our Alt+Tab replaces KDE's window switcher (all its "Walk Through
-// Windows" actions, also those for the current app's windows).
+// KWin's actions for keys Glance takes over (Meta+arrows, Meta+Alt+arrows,
+// Alt+Tab) are disabled rather than the keys hidden from KDE's shortcut
+// system, which would then take releasing Meta as a tap.
 void KdeIntegration::disableKdeShortcuts()
 {
     for (const char *name : {"Window Quick Tile Left", "Window Quick Tile Right",

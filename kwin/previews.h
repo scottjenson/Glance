@@ -1,12 +1,6 @@
-// Hover previews (docs/hover-previews.md): hovering a parking icon (not a
-// small stashed window) makes it grow in place to previewGrow times its
-// size (at most 1:1 with the app's resized layout, so it stays sharp),
-// anchored at its screen edge and centered on its spot, over its
-// neighbours, which stay put and partly visible. The pointer stays over
-// it, so it can still be dragged, and clicks pass through as for any icon.
-// The first waits previewDelay; moving into a neighbour's spot then
-// switches at once (both animate); leaving closes it after previewGrace
-// (see update). Meta+wheel sizes a preview (see MetaWheel::resizePreview).
+// Hover previews: hovering a parking icon grows it in place, over its
+// neighbours, still an icon (drag anywhere, clicks pass through)
+// (docs/hover-previews.md). Meta+wheel sizes a preview (MetaWheel).
 #pragma once
 
 #include "parked.h"

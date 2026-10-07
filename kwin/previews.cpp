@@ -56,19 +56,14 @@ Window *HoverPreviews::iconAt(const QPointF &pos) const
     return nullptr;
 }
 
-// Previews are for parking icons only: a stashed window can be as small
-// as an icon (dropped near the edge) but isn't one to preview.
+// Parking icons only, not icon-sized stashed windows.
 bool HoverPreviews::isPreviewable(Window *window) const
 {
     return m_parking.isIcon(window) && m_parking.isParkingArea(m_parking.areaOf(window));
 }
 
-// On every pointer motion: the icon whose home spot is under the pointer
-// grows after previewDelay, or at once if another is grown already (that
-// one shrinks at the same time), also where the grown one covers that
-// spot. Elsewhere over the grown one it stays; anywhere else it shrinks
-// after previewGrace. Nothing changes while a button is held, a window is
-// moved, or something is dragged.
+// On every pointer motion: open, switch or close previews by home spots
+// (docs/hover-previews.md). Over the grown window but no spot, it stays.
 void HoverPreviews::update(const QPointF &pos, Qt::MouseButtons buttons)
 {
     if (buttons != Qt::NoButton || workspace()->moveResizeWindow() || waylandServer()->seat()->isDrag()) {
@@ -110,9 +105,8 @@ void HoverPreviews::update(const QPointF &pos, Qt::MouseButtons buttons)
     }
 }
 
-// In place: previewGrow times its home spot (at most 1:1 with the app's
-// current layout, and the screen height), at its screen edge, centered
-// vertically on its spot.
+// previewGrow times its home spot (at most 1:1 and the screen height), at
+// its screen edge, centered vertically on its spot.
 QRectF HoverPreviews::previewRect(Window *window) const
 {
     const Parked &parked = m_parking.at(window);

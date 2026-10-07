@@ -1,22 +1,7 @@
-// Dragging (docs/dragging-and-parking.md, docs/meta-drag.md): while KWin
-// moves a window interactively (title bar or Meta+drag), the window is
-// drawn shrunk around the cursor once its left or right edge goes into the
-// outer quarter of the screen (main stays full size), reaching minScale at
-// the screen edge (but no smaller than parkingMinSize). Dropped while
-// shrunk, it is parked where it is drawn; dropped in main, it gets its
-// original size back.
-//
-// Meta+drag moves the window like a title-bar drag, with two additions.
-// Acceleration: horizontally the window gets ahead of the pointer, more
-// the longer you keep moving fast in one direction (gain up to
-// leadMaxGain); reversing or slowing down goes back to 1:1, so corrections
-// are precise. The screen edges stop it, and overshoot isn't stored. Pause
-// to snap: holding still for snapDwell snaps the window to the region it
-// is in (see snapTargetAt: a half of main or, in a middle band, all of
-// main, both at full height; a stash; parking at the very edge). From then
-// on the drag is in snapping mode: moving into another region snaps there
-// (no sizes in between); releasing the mouse keeps it, releasing Meta lets
-// it follow the pointer again (see leadStep).
+// Dragging: while KWin moves a window interactively (title bar or
+// Meta+drag), draw it shrunk around the cursor by the edge rule, and park
+// or restore it on the drop (docs/dragging-and-parking.md). Meta+drag adds
+// acceleration and pause to snap (docs/meta-drag.md).
 #pragma once
 
 #include "parked.h"

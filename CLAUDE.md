@@ -108,7 +108,7 @@ Drawing small windows). Waiting for the user's check (the user has
 screenshots of parking from before).
 2026-10-06: parking icons are tiles: apps laid out 600x600, drawn 140 px
 (about 10 per edge), turned 40° away around their outer edge; a hover
-preview turns flat and grows to 2.5x (3x hid its neighbours); clicks go through the tilt
+preview turns flat and grows to 2.5x (3x hid its neighbours; 2.5x checked by the user); clicks go through the tilt
 ([docs/dragging-and-parking.md](docs/dragging-and-parking.md), Parking
 tiles). Then each column made one plane seen from one eye (user: the
 gaps formed Vs). Checked by the user ("looks good for now").

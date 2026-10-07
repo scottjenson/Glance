@@ -72,8 +72,9 @@ inline constexpr qreal halfMatch = 0.8;
 // Hover previews: how much a hovered icon grows, the wait before the
 // first one opens, and the grace before one closes after the pointer
 // left.
-// 3x since tiles (2026-10-06): about 420 px, a phone layout at 70%.
-inline constexpr qreal previewGrow = 3.0;
+// 2.5x since tiles (2026-10-06): about 350 px, a phone layout at 58%,
+// covering about 3/4 of each neighbour (3x hid them completely).
+inline constexpr qreal previewGrow = 2.5;
 inline constexpr std::chrono::milliseconds previewDelay{300};
 inline constexpr std::chrono::milliseconds previewGrace{300};
 

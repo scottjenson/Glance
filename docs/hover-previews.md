@@ -1,10 +1,11 @@
 # Hover previews (built 2026-09-30; redesigned 2026-10-01)
 
 ## Design
-Hovering a parking icon turns it flat and grows it **in place** to 3x
+Hovering a parking icon turns it flat and grows it **in place** to 2.5x
 (`previewGrow`; 2x until 2026-10-06, when icons became 140 px tiles,
-[dragging-and-parking.md](dragging-and-parking.md), Parking tiles: 3x
-is about 420 px, a 600 px phone layout at 70%), both in one animation,
+[dragging-and-parking.md](dragging-and-parking.md), Parking tiles: 2.5x
+is about 350 px, a 600 px phone layout at 58%; 3x, tried first, hid the
+neighbours above and below completely), both in one animation,
 anchored at its edge and centered on its spot, over its
 neighbours, which stay put and about half visible (user's idea). The first
 fly-out version moved the window beside the column, away from the pointer,

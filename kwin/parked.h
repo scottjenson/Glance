@@ -28,8 +28,10 @@
 // tilt is drawn only where the window is drawn from mipmaps (see
 // Mipmaps; tilted windows always are) and is taken into account by input
 // (pick, untilt); the draw transform stays a plain scale and move, which
-// all of Glance and KWin's repainting rely on (the tilted tile lies inside
-// the flat one).
+// all of Glance relies on. A column is one turned plane seen from one eye
+// (see glance::tiltTransform), so a tile can reach a little past its flat
+// rectangle (towards the eye's level): what it covers turned is
+// repainted along with it (see repaintTilted).
 //
 // Minimize = park: parking is Glance's minimize (see minimizeToParking).
 #pragma once
@@ -212,6 +214,10 @@ public:
     QTransform globalTiltOf(Window *window) const;
     // Where a point drawn at global `pos` would be drawn flat.
     QPointF untilt(Window *window, const QPointF &pos) const;
+    // Repaint all a tilted window covers, flat and turned: KWin only
+    // repaints what a window covers flat (its draw transform), when it
+    // moves or its content changes.
+    void repaintTilted(Window *window) const;
     // The window really visible at `pos`, like InputRedirection::findToplevel
     // but using the drawn rectangle for parked windows (unless drawn
     // exactly over the frame: then KWin's own hit test, which includes
@@ -280,10 +286,13 @@ private:
     };
     std::optional<Resizing> m_resizing;
     // Windows turned or turning (see updateTilt): `amount` now, 0 flat to
-    // 1 tiltAngle, animating from `from` to `to` since `start`.
+    // 1 tiltAngle, animating from `from` to `to` since `start`; seen from
+    // `eyeY` (the middle of the usable area), `distance` away.
     struct Tilt
     {
         Side side = Side::Left;
+        qreal eyeY = 0;
+        qreal distance = 0;
         qreal amount = 0;
         qreal from = 0;
         qreal to = 0;

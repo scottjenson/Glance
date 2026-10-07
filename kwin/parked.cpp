@@ -437,16 +437,15 @@ void ParkedWindows::advance()
         applyParked(window);
     }
     // Turning windows: only the tilt changes (it isn't in the draw
-    // transform), so repaint what they cover.
+    // transform), so repaint what they covered and cover now.
     for (auto it = m_tilts.begin(); it != m_tilts.end();) {
         auto &[window, tilt] = *it;
         if (tilt.turning) {
             const qreal t = progress(tilt.start);
+            repaintTilted(window);
             tilt.turning = t < 1.0;
             tilt.amount = tilt.turning ? tilt.from + (tilt.to - tilt.from) * (1.0 - std::pow(1.0 - t, 3)) : tilt.to;
-            if (WindowItem *item = window->windowItem()) {
-                item->scheduleRepaint(item->boundingRect());
-            }
+            repaintTilted(window);
         }
         if (!tilt.turning && tilt.amount <= 0) {
             it = m_tilts.erase(it);
@@ -481,8 +480,10 @@ bool ParkedWindows::anyAnimating() const
 
 void ParkedWindows::setDrawTransform(Window *window, const QTransform &transform)
 {
+    repaintTilted(window);
     window->windowItem()->setTransform(transform);
     updateTilt(window);
+    repaintTilted(window);
     Q_EMIT transformChanged(window);
 }
 
@@ -502,7 +503,10 @@ void ParkedWindows::updateTilt(Window *window)
     }
     Tilt &tilt = it->second;
     if (turned) {
+        const RectF area = workspace()->clientArea(MaximizeArea, window);
         tilt.side = areaOf(window) == 0 ? Side::Left : Side::Right;
+        tilt.eyeY = area.y() + area.height() / 2;
+        tilt.distance = tiltDistance * area.height();
     }
     const qreal to = turned ? 1.0 : 0.0;
     if (tilt.to == to) {
@@ -537,7 +541,9 @@ QTransform ParkedWindows::tiltOf(Window *window) const
     // Around where it is drawn flat (also while dragged).
     const RectF frame = window->frameGeometry();
     const QRectF drawn = window->windowItem()->transform().mapRect(QRectF(0, 0, frame.width(), frame.height()));
-    return tiltTransform(drawn, it->second.side, it->second.amount);
+    const Tilt &tilt = it->second;
+    // The eye is global: in item coordinates, relative to the frame.
+    return tiltTransform(drawn, tilt.side, tilt.amount, tilt.eyeY - frame.y(), tilt.distance);
 }
 
 QTransform ParkedWindows::globalTiltOf(Window *window) const
@@ -549,6 +555,20 @@ QTransform ParkedWindows::globalTiltOf(Window *window) const
 QPointF ParkedWindows::untilt(Window *window, const QPointF &pos) const
 {
     return globalTiltOf(window).inverted().map(pos);
+}
+
+void ParkedWindows::repaintTilted(Window *window) const
+{
+    WindowItem *item = window->windowItem();
+    if (!item || !isTilted(window)) {
+        return;
+    }
+    // Everything it draws (shadow and focus ring included), in item
+    // coordinates, then global.
+    const QRectF flat = item->transform().mapRect(QRectF(item->boundingRect()));
+    const QRectF turned = tiltOf(window).mapRect(flat);
+    const QPointF frame = window->frameGeometry().topLeft();
+    effects->addRepaint(RectF((flat | turned).translated(frame).adjusted(-1, -1, 1, 1)));
 }
 
 Window *ParkedWindows::pick(const QPointF &pos, Window *ignore) const
@@ -677,6 +697,7 @@ std::function<void()> ParkedWindows::leaving(Window *window)
 void ParkedWindows::closed(Window *window)
 {
     const auto closeRanks = leaving(window);
+    repaintTilted(window);
     m_parked.erase(window);
     m_tilts.erase(window);
     resizeFinished(window);
@@ -692,6 +713,7 @@ void ParkedWindows::restoreAll()
         window->moveResize(RectF(parked.shown.topLeft(), parked.original));
     }
     m_tilts.clear();
+    effects->addRepaintFull();
 }
 
 void ParkedWindows::fullSizeForLogout()

@@ -69,22 +69,21 @@ QRectF parkingTileRect(Side side, const QSizeF &shape, const QSizeF &original, q
     return QRectF(QPointF(x, y), size);
 }
 
-QTransform tiltTransform(const QRectF &rect, Side outer, qreal amount)
+QTransform tiltTransform(const QRectF &rect, Side outer, qreal amount, qreal eyeY, qreal distance)
 {
-    if (amount <= 0 || rect.isEmpty()) {
+    if (amount <= 0 || rect.isEmpty() || distance <= 0) {
         return QTransform();
     }
-    // With u the distance from the outer edge and v from the vertical
-    // middle, a point turned by a around the outer edge is u cos a across
-    // and u sin a deep; seen from tiltDistance tile widths away, it is
-    // drawn at (u cos a, v) / w with w = 1 + u sin a / distance.
+    // With u the distance from the outer edge and v from the eye's level,
+    // a point turned by a around the outer edge is u cos a across and
+    // u sin a deep; seen from `distance` away, it is drawn at
+    // (u cos a, v) / w with w = 1 + u sin a / distance.
     const qreal angle = qDegreesToRadians(tiltAngle * std::min(amount, 1.0));
-    const qreal distance = tiltDistance * rect.width();
     const QTransform turn(std::cos(angle), 0, std::sin(angle) / distance, 0, 1, 0, 0, 0, 1);
     const qreal edge = outer == Side::Left ? rect.left() : rect.right();
     const qreal mirror = outer == Side::Left ? 1 : -1;
-    return QTransform::fromTranslate(-edge, -rect.center().y()) * QTransform::fromScale(mirror, 1) * turn
-        * QTransform::fromScale(mirror, 1) * QTransform::fromTranslate(edge, rect.center().y());
+    return QTransform::fromTranslate(-edge, -eyeY) * QTransform::fromScale(mirror, 1) * turn
+        * QTransform::fromScale(mirror, 1) * QTransform::fromTranslate(edge, eyeY);
 }
 
 int placeIndex(Place place)

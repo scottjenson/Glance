@@ -63,11 +63,14 @@ QRectF parkingTileRect(Side side, const QSizeF &shape, const QSizeF &original, q
                        const QRectF &area);
 
 // A parking icon drawn at `rect`, turned away from the viewer by
-// `amount` (0: flat, 1: tiltAngle) around its edge on `outer` (the screen
-// edge it is against), in perspective: that edge stays where it is, the
-// rest recedes towards the vertical middle of `rect`. Maps where a point
-// is drawn flat to where it is drawn turned.
-QTransform tiltTransform(const QRectF &rect, Side outer, qreal amount);
+// `amount` (0: flat, 1: tiltAngle) around the vertical line through its
+// edge on `outer` (the screen edge it is against), seen in perspective
+// from an eye level with `eyeY`, `distance` away: that edge stays where
+// it is, the rest recedes towards the eye's level. Every icon of a
+// column turned with the same eye lies on one plane (their edges all run
+// to one vanishing point). Maps where a point is drawn flat to where it
+// is drawn turned.
+QTransform tiltTransform(const QRectF &rect, Side outer, qreal amount, qreal eyeY, qreal distance);
 
 // --- Places ---
 

@@ -145,33 +145,58 @@ private Q_SLOTS:
 
     void tiltTransform()
     {
-        const QRectF tile(0, 500, 140, 140);
+        const qreal eyeY = area.center().y();
+        const qreal distance = tiltDistance * area.height();
+        const QRectF tile(0, 200, 140, 140);
         // Flat: nothing changes.
-        QVERIFY(glance::tiltTransform(tile, Side::Left, 0).isIdentity());
+        QVERIFY(glance::tiltTransform(tile, Side::Left, 0, eyeY, distance).isIdentity());
         for (const Side side : {Side::Left, Side::Right}) {
-            const QRectF rect = side == Side::Left ? tile : tile.translated(4004 - 140, 0);
-            const QTransform t = glance::tiltTransform(rect, side, 1);
             const bool left = side == Side::Left;
-            // The outer edge stays where it is, at full height.
-            const QPointF outerTop = left ? rect.topLeft() : rect.topRight();
-            const QPointF outerBottom = left ? rect.bottomLeft() : rect.bottomRight();
-            QVERIFY(near(t.map(outerTop).x(), outerTop.x(), 1e-9) && near(t.map(outerTop).y(), outerTop.y(), 1e-9));
-            QVERIFY(near(t.map(outerBottom).y(), outerBottom.y(), 1e-9));
-            // The inner edge recedes: shorter, nearer the outer edge, still
-            // centered vertically.
+            const QRectF rect = left ? tile : tile.translated(4004 - 140, 0);
+            const QTransform t = glance::tiltTransform(rect, side, 1, eyeY, distance);
+            // The outer edge stays where it is.
+            for (const QPointF &corner : {left ? rect.topLeft() : rect.topRight(), left ? rect.bottomLeft() : rect.bottomRight()}) {
+                QVERIFY(near(t.map(corner).x(), corner.x(), 1e-9) && near(t.map(corner).y(), corner.y(), 1e-9));
+            }
+            // The inner edge recedes: shorter, nearer the outer edge.
             const QPointF innerTop = t.map(left ? rect.topRight() : rect.topLeft());
             const QPointF innerBottom = t.map(left ? rect.bottomRight() : rect.bottomLeft());
-            QVERIFY(innerBottom.y() - innerTop.y() < rect.height() * 0.9);
-            QVERIFY(near(innerTop.y() + innerBottom.y(), 2 * rect.center().y(), 1e-9));
-            QVERIFY(std::abs(innerTop.x() - outerTop.x()) < rect.width() * std::cos(qDegreesToRadians(tiltAngle)));
-            // All of it stays inside the flat rectangle (what KWin repaints).
-            for (const QPointF &corner : {innerTop, innerBottom}) {
-                QVERIFY(rect.adjusted(-1e-9, -1e-9, 1e-9, 1e-9).contains(corner));
-            }
+            QVERIFY(innerBottom.y() - innerTop.y() < rect.height());
+            QVERIFY(std::abs(innerTop.x() - rect.left() - (left ? 0 : rect.width())) < rect.width() * std::cos(qDegreesToRadians(tiltAngle)));
             // Input maps back exactly.
             const QPointF inside(rect.x() + 100, rect.y() + 30);
             const QPointF back = t.inverted().map(t.map(inside));
             QVERIFY(near(back.x(), inside.x(), 1e-6) && near(back.y(), inside.y(), 1e-6));
+        }
+    }
+
+    // A column is one plane: the edges of all its tiles (above and below
+    // the eye) run to one vanishing point, so the gaps between tiles stay
+    // gaps (nearly parallel), not Vs.
+    void tiltedColumnIsOnePlane()
+    {
+        const qreal eyeY = area.center().y();
+        const qreal distance = tiltDistance * area.height();
+        std::optional<QPointF> vanishing;
+        qreal previousInnerBottom = -1;
+        for (qreal top = 100; top < 1500; top += parkingTile + arrangeGap) {
+            const QRectF rect(0, top, parkingTile, parkingTile);
+            const QTransform t = glance::tiltTransform(rect, Side::Left, 1, eyeY, distance);
+            const QPointF innerTop = t.map(rect.topRight());
+            const QPointF innerBottom = t.map(rect.bottomRight());
+            // The gap above this tile is still open at the inner side.
+            QVERIFY(innerTop.y() > previousInnerBottom);
+            previousInnerBottom = innerBottom.y();
+            // Where the top edge's line reaches the eye's level.
+            const QPointF outer = rect.topLeft();
+            if (std::abs(outer.y() - eyeY) < 1) {
+                continue;
+            }
+            const qreal x = outer.x() + (innerTop.x() - outer.x()) * (eyeY - outer.y()) / (innerTop.y() - outer.y());
+            if (!vanishing) {
+                vanishing = QPointF(x, eyeY);
+            }
+            QVERIFY(near(x, vanishing->x(), 1e-6));
         }
     }
 

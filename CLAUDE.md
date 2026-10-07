@@ -110,8 +110,9 @@ screenshots of parking from before).
 (about 10 per edge), turned 40° away around their outer edge; a hover
 preview turns flat and grows to 3x; clicks go through the tilt
 ([docs/dragging-and-parking.md](docs/dragging-and-parking.md), Parking
-tiles). Headless screenshot checked; waiting for the user's check
-(hover, clicks, drags).
+tiles). Then each column made one plane seen from one eye (user: the
+gaps formed Vs). Headless screenshot checked; waiting for the user's
+check (hover, clicks, drags).
 
 ### 2026-10-03, end of day
 Running in the user's real Plasma session (via use-in-session.sh; after a

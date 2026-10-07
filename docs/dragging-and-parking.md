@@ -103,9 +103,17 @@ height) but get the same size and tilt. More icons than fit: not
 designed yet (they run past the column's ends).
 
 Tiles are **turned away from the viewer** (`tiltAngle`, 40°) around a
-vertical axis at their outer edge, in perspective (`tiltDistance`, the
-eye 2.5 tile widths away): in left parking the left edge stays in front
-at full height and the right edge recedes, mirrored on the right. A hover
+vertical axis at the screen edge: in left parking the left edge stays in
+front and the right edge recedes, mirrored on the right. Each column is
+**one plane**, seen in perspective from one eye level with the middle of
+the usable area (where columns are centered), `tiltDistance` (1) usable
+screen heights away: every tile's edges run to the same vanishing point,
+so the gaps between tiles stay nearly parallel (tilted down above the
+eye, up below it, level at it). The first version had an eye per tile
+(each tile a symmetric trapezoid): the user saw the gaps open into Vs,
+not one plane (2026-10-06). Tiles near the eye now look mostly narrower;
+the slant shows towards the column's ends (a smaller `tiltDistance`
+makes it stronger). A hover
 preview turns flat as it grows (one animation); dropped or sent into
 parking a window turns as it glides in; dragged out, it turns flat
 during the drag's first moments. `ParkedWindows::updateTilt` (on every
@@ -114,8 +122,13 @@ previewed and not restoring; `advance` animates it (`animationTime`).
 
 How it's drawn: the draw transform (a `QTransform` on the window item)
 stays a plain scale and move, which Glance's other parts (focus ring
-width, mipmaps, Alt+Tab, input) and KWin's repainting rely on; the
-turned tile always lies inside that flat rectangle. The tilt
+width, mipmaps, Alt+Tab, input) rely on. A turned tile reaches a little
+past that flat rectangle towards the eye's level (up to about 40 px at
+the column's ends), and KWin repaints only what a window covers flat; it
+doesn't clip windows painted as transformed to it, though. So
+`repaintTilted` marks all a tilted window covers, flat and turned, on
+every draw transform change, turning step and content change (from
+Mipmaps' damage tracking). The tilt
 (`tiltTransform`, a perspective `QTransform`, `ParkedWindows::tiltOf`)
 is applied only where the window is drawn from mipmaps: tilted windows
 always are, at any size (KWin's paint data has no perspective, so its own

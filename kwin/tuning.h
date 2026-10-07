@@ -48,12 +48,17 @@ inline constexpr qreal parkingLayoutWidth = 600.0;
 // at, so about 10 fit along the edge of a 1630 px high screen.
 inline constexpr qreal parkingTile = 140.0;
 // And turned away from the viewer, so parking looks different from the
-// stash: around a vertical axis at their outer (screen-edge) side, which
-// stays in front at full height, by this angle (degrees), in perspective
-// with the eye this far away (in tile widths: the larger, the flatter).
-// A hover preview turns flat as it grows (see ParkedWindows::updateTilt).
+// stash: each column is one plane turned around a vertical axis at the
+// screen edge, which stays in front, by this angle (degrees), seen in
+// perspective from one eye level with the middle of the usable screen
+// area (where columns are centered), this far away (in usable screen
+// heights: the larger, the flatter). One eye for the whole column
+// (2026-10-06, user: the tiles must look like they are on one plane, the
+// gaps between them nearly parallel; with an eye per tile they formed
+// Vs). A hover preview turns flat as it grows (see
+// ParkedWindows::updateTilt).
 inline constexpr qreal tiltAngle = 40.0;
-inline constexpr qreal tiltDistance = 2.5;
+inline constexpr qreal tiltDistance = 1.0;
 // Windows drawn smaller than this are drawn from mipmaps (see mipmaps.h):
 // at 1/2 and larger KWin's own drawing is clean, and mipmaps would only
 // blur it.

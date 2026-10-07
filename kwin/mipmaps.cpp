@@ -74,6 +74,8 @@ bool Mipmaps::drawWindow(const RenderTarget &renderTarget, const RenderViewport 
             if (auto it = m_images.find(window); it != m_images.end()) {
                 it->second.dirty = true;
             }
+            // KWin repaints only what the window covers flat.
+            m_parking.repaintTilted(window->window());
         };
         image.damaged = connect(window, &EffectWindow::windowDamaged, this, dirty);
         // Its full-size bounds, not where it is drawn (which changes on

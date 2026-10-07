@@ -11,6 +11,7 @@
 #include <workspace.h>
 
 #include <QPointer>
+#include <QPolygonF>
 
 #include <algorithm>
 #include <cmath>
@@ -210,20 +211,30 @@ void ParkedWindows::resizeAnimated(Window *window, const RectF &target, const QR
 
 void ParkedWindows::park(Window *window, const QRectF &shown, const QSizeF &original)
 {
-    m_parked[window] = Parked{.shown = shown, .original = original};
+    QRectF place = shown;
+    if (atParkingSize(shown.width(), original)) {
+        // A tile in the app's new shape (a clip keeps its own, see
+        // layoutSize), against the screen edge.
+        const RectF screen = window->output()->geometryF();
+        const Side side = shown.center().x() < screen.x() + screen.width() / 2 ? Side::Left : Side::Right;
+        const QSizeF shape = isClip(window) ? original : layoutSize(window, shown.size(), original);
+        place = parkingTileRect(side, shape, original, shown.center().y(), screen,
+                                workspace()->clientArea(MaximizeArea, window));
+    }
+    m_parked[window] = Parked{.shown = place, .original = original};
     const RectF frame = window->frameGeometry();
-    const QSizeF layout = layoutSize(window, shown.size(), original);
+    const QSizeF layout = layoutSize(window, place.size(), original);
     if (isClip(window)) {
         // Drawn at its zoom (in parking 1/2): as tall as its new layout
         // at that zoom (columns go by `shown`).
-        m_parked[window].shown.setHeight(layout.height() * shown.width() / layout.width());
+        m_parked[window].shown.setHeight(layout.height() * place.width() / layout.width());
     }
     if (layout != QSizeF(frame.width(), frame.height())) {
         qInfo("glance: %s: original %.0fx%.0f, app minimum %.0fx%.0f, shown %.0fx%.0f -> resize to %.0fx%.0f",
               qPrintable(window->caption()), original.width(), original.height(),
               window->minSize().width(), window->minSize().height(),
-              shown.width(), shown.height(), layout.width(), layout.height());
-        window->moveResize(RectF(shown.topLeft(), layout));
+              place.width(), place.height(), layout.width(), layout.height());
+        window->moveResize(RectF(place.topLeft(), layout));
     }
     applyParked(window);
 }
@@ -284,9 +295,9 @@ void ParkedWindows::minimizeToParking(Window *window)
 
 // --- Drawing ---
 
-qreal ParkedWindows::progress(const Parked &parked)
+qreal ParkedWindows::progress(std::chrono::steady_clock::time_point start)
 {
-    const auto elapsed = std::chrono::steady_clock::now() - parked.start;
+    const auto elapsed = std::chrono::steady_clock::now() - start;
     return std::clamp(std::chrono::duration<qreal>(elapsed) / animationTime, 0.0, 1.0);
 }
 
@@ -307,6 +318,15 @@ QRectF ParkedWindows::drawnRect(Window *window) const
 {
     const auto frame = window->frameGeometry();
     return QRectF(displayRect(m_parked.at(window)).topLeft(), QSizeF(frame.width(), frame.height()) * scaleOf(window));
+}
+
+bool ParkedWindows::drawnContains(Window *window, const QPointF &pos) const
+{
+    const QRectF drawn = drawnRect(window);
+    if (!isTilted(window)) {
+        return drawn.contains(pos);
+    }
+    return globalTiltOf(window).map(QPolygonF(drawn)).containsPoint(pos, Qt::OddEvenFill);
 }
 
 QRectF ParkedWindows::currentlyDrawn(Window *window) const
@@ -403,7 +423,7 @@ void ParkedWindows::advance()
     std::vector<Window *> animating;
     for (auto &[window, parked] : m_parked) {
         if (parked.animating) {
-            const qreal t = progress(parked);
+            const qreal t = progress(parked.start);
             if (t >= 1.0) {
                 parked.animating = false;
             } else {
@@ -416,6 +436,24 @@ void ParkedWindows::advance()
     for (Window *window : animating) {
         applyParked(window);
     }
+    // Turning windows: only the tilt changes (it isn't in the draw
+    // transform), so repaint what they cover.
+    for (auto it = m_tilts.begin(); it != m_tilts.end();) {
+        auto &[window, tilt] = *it;
+        if (tilt.turning) {
+            const qreal t = progress(tilt.start);
+            tilt.turning = t < 1.0;
+            tilt.amount = tilt.turning ? tilt.from + (tilt.to - tilt.from) * (1.0 - std::pow(1.0 - t, 3)) : tilt.to;
+            if (WindowItem *item = window->windowItem()) {
+                item->scheduleRepaint(item->boundingRect());
+            }
+        }
+        if (!tilt.turning && tilt.amount <= 0) {
+            it = m_tilts.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void ParkedWindows::scheduleFrames()
@@ -425,19 +463,92 @@ void ParkedWindows::scheduleFrames()
             window->windowItem()->scheduleFrame();
         }
     }
+    for (const auto &[window, tilt] : m_tilts) {
+        if (tilt.turning && window->windowItem()) {
+            window->windowItem()->scheduleFrame();
+        }
+    }
 }
 
 bool ParkedWindows::anyAnimating() const
 {
     return std::ranges::any_of(m_parked, [](const auto &entry) {
         return entry.second.animating;
+    }) || std::ranges::any_of(m_tilts, [](const auto &entry) {
+        return entry.second.turning;
     });
 }
 
 void ParkedWindows::setDrawTransform(Window *window, const QTransform &transform)
 {
     window->windowItem()->setTransform(transform);
+    updateTilt(window);
     Q_EMIT transformChanged(window);
+}
+
+// --- Tilt ---
+
+void ParkedWindows::updateTilt(Window *window)
+{
+    const Parked *parked = find(window);
+    const bool turned = parked && !parked->restoring && !parked->preview && window->output()
+        && isParkingArea(areaOf(window));
+    auto it = m_tilts.find(window);
+    if (it == m_tilts.end()) {
+        if (!turned) {
+            return;
+        }
+        it = m_tilts.emplace(window, Tilt{}).first;
+    }
+    Tilt &tilt = it->second;
+    if (turned) {
+        tilt.side = areaOf(window) == 0 ? Side::Left : Side::Right;
+    }
+    const qreal to = turned ? 1.0 : 0.0;
+    if (tilt.to == to) {
+        return;
+    }
+    tilt.from = tilt.amount;
+    tilt.to = to;
+    tilt.start = std::chrono::steady_clock::now();
+    tilt.turning = true;
+    if (window->windowItem()) {
+        window->windowItem()->scheduleFrame();
+    }
+}
+
+bool ParkedWindows::isTilted(Window *window) const
+{
+    auto it = m_tilts.find(window);
+    return it != m_tilts.end() && it->second.amount > 0;
+}
+
+bool ParkedWindows::anyTilted() const
+{
+    return !m_tilts.empty();
+}
+
+QTransform ParkedWindows::tiltOf(Window *window) const
+{
+    auto it = m_tilts.find(window);
+    if (it == m_tilts.end() || it->second.amount <= 0 || !window->windowItem()) {
+        return QTransform();
+    }
+    // Around where it is drawn flat (also while dragged).
+    const RectF frame = window->frameGeometry();
+    const QRectF drawn = window->windowItem()->transform().mapRect(QRectF(0, 0, frame.width(), frame.height()));
+    return tiltTransform(drawn, it->second.side, it->second.amount);
+}
+
+QTransform ParkedWindows::globalTiltOf(Window *window) const
+{
+    const QPointF frame = window->frameGeometry().topLeft();
+    return QTransform::fromTranslate(-frame.x(), -frame.y()) * tiltOf(window) * QTransform::fromTranslate(frame.x(), frame.y());
+}
+
+QPointF ParkedWindows::untilt(Window *window, const QPointF &pos) const
+{
+    return globalTiltOf(window).inverted().map(pos);
 }
 
 Window *ParkedWindows::pick(const QPointF &pos, Window *ignore) const
@@ -451,7 +562,7 @@ Window *ParkedWindows::pick(const QPointF &pos, Window *ignore) const
             continue;
         }
         if (isParked(window) && !drawnAtFrame(window)) {
-            if (drawnRect(window).contains(pos)) {
+            if (drawnContains(window, pos)) {
                 return window;
             }
             continue;
@@ -567,6 +678,7 @@ void ParkedWindows::closed(Window *window)
 {
     const auto closeRanks = leaving(window);
     m_parked.erase(window);
+    m_tilts.erase(window);
     resizeFinished(window);
     closeRanks();
 }
@@ -579,6 +691,7 @@ void ParkedWindows::restoreAll()
         }
         window->moveResize(RectF(parked.shown.topLeft(), parked.original));
     }
+    m_tilts.clear();
 }
 
 void ParkedWindows::fullSizeForLogout()

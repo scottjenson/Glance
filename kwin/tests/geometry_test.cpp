@@ -6,6 +6,7 @@
 #include "geometry.h"
 
 #include <QTest>
+#include <QtMath>
 
 using namespace glance;
 
@@ -106,9 +107,9 @@ private Q_SLOTS:
         QTest::addColumn<QSizeF>("appMin");
         QTest::addColumn<QSizeF>("expected");
         QTest::newRow("stash: full size, only drawn smaller") << QSizeF(400, 250) << QSizeF(1600, 1000) << QSizeF() << QSizeF(1600, 1000);
-        QTest::newRow("parking: parkingLayoutWidth, same shape") << QSizeF(180, 113) << QSizeF(1600, 1000) << QSizeF() << QSizeF(600, 375);
-        QTest::newRow("parking: the app's minimum") << QSizeF(180, 113) << QSizeF(1600, 1000) << QSizeF(800, 0) << QSizeF(800, 500);
-        QTest::newRow("parking: never more than the original") << QSizeF(180, 129) << QSizeF(350, 250) << QSizeF() << QSizeF(350, 250);
+        QTest::newRow("parking: a parkingLayoutWidth square") << QSizeF(140, 140) << QSizeF(1600, 1000) << QSizeF() << QSizeF(600, 600);
+        QTest::newRow("parking: the app's minimum") << QSizeF(140, 140) << QSizeF(1600, 1000) << QSizeF(800, 0) << QSizeF(800, 600);
+        QTest::newRow("parking: no larger than the original's longer side") << QSizeF(140, 100) << QSizeF(350, 250) << QSizeF() << QSizeF(350, 350);
     }
     void layoutSize()
     {
@@ -117,6 +118,61 @@ private Q_SLOTS:
         QFETCH(QSizeF, appMin);
         QFETCH(QSizeF, expected);
         QCOMPARE(glance::layoutSize(shown, original, appMin), expected);
+    }
+
+    // --- Parking tiles ---
+
+    void parkingTileRect()
+    {
+        // parkingTile on the longer side, in the window's shape, against
+        // the screen edge, centered on centerY.
+        const QRectF square = glance::parkingTileRect(Side::Left, QSizeF(600, 600), QSizeF(1600, 1000), 800, screen, area);
+        QCOMPARE(square, QRectF(0, 800 - parkingTile / 2, parkingTile, parkingTile));
+        const QRectF tall = glance::parkingTileRect(Side::Right, QSizeF(600, 800), QSizeF(1600, 1000), 800, screen, area);
+        QCOMPARE(tall.height(), parkingTile);
+        QCOMPARE(tall.width(), parkingTile * 0.75);
+        QCOMPARE(tall.right(), 4004.0);
+        // Kept in the area.
+        QCOMPARE(glance::parkingTileRect(Side::Left, QSizeF(600, 600), QSizeF(1600, 1000), 1600, screen, area).bottom(), area.bottom());
+        // About 10 fit along the edge.
+        QVERIFY(10 * parkingTile + 9 * arrangeGap <= area.height());
+        // A window smaller than a tile at parking size is no larger than
+        // that (so it still counts as parked, not stashed).
+        const QSizeF tiny(130, 100);
+        const QRectF small = glance::parkingTileRect(Side::Left, tiny, tiny, 800, screen, area);
+        QCOMPARE(glance::parkedPlace(small, tiny, screen), Place::ParkingLeft);
+    }
+
+    void tiltTransform()
+    {
+        const QRectF tile(0, 500, 140, 140);
+        // Flat: nothing changes.
+        QVERIFY(glance::tiltTransform(tile, Side::Left, 0).isIdentity());
+        for (const Side side : {Side::Left, Side::Right}) {
+            const QRectF rect = side == Side::Left ? tile : tile.translated(4004 - 140, 0);
+            const QTransform t = glance::tiltTransform(rect, side, 1);
+            const bool left = side == Side::Left;
+            // The outer edge stays where it is, at full height.
+            const QPointF outerTop = left ? rect.topLeft() : rect.topRight();
+            const QPointF outerBottom = left ? rect.bottomLeft() : rect.bottomRight();
+            QVERIFY(near(t.map(outerTop).x(), outerTop.x(), 1e-9) && near(t.map(outerTop).y(), outerTop.y(), 1e-9));
+            QVERIFY(near(t.map(outerBottom).y(), outerBottom.y(), 1e-9));
+            // The inner edge recedes: shorter, nearer the outer edge, still
+            // centered vertically.
+            const QPointF innerTop = t.map(left ? rect.topRight() : rect.topLeft());
+            const QPointF innerBottom = t.map(left ? rect.bottomRight() : rect.bottomLeft());
+            QVERIFY(innerBottom.y() - innerTop.y() < rect.height() * 0.9);
+            QVERIFY(near(innerTop.y() + innerBottom.y(), 2 * rect.center().y(), 1e-9));
+            QVERIFY(std::abs(innerTop.x() - outerTop.x()) < rect.width() * std::cos(qDegreesToRadians(tiltAngle)));
+            // All of it stays inside the flat rectangle (what KWin repaints).
+            for (const QPointF &corner : {innerTop, innerBottom}) {
+                QVERIFY(rect.adjusted(-1e-9, -1e-9, 1e-9, 1e-9).contains(corner));
+            }
+            // Input maps back exactly.
+            const QPointF inside(rect.x() + 100, rect.y() + 30);
+            const QPointF back = t.inverted().map(t.map(inside));
+            QVERIFY(near(back.x(), inside.x(), 1e-6) && near(back.y(), inside.y(), 1e-6));
+        }
     }
 
     // --- Places ---

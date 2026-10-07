@@ -1,15 +1,18 @@
 # Hover previews (built 2026-09-30; redesigned 2026-10-01)
 
 ## Design
-Hovering a parking icon grows it **in place** to 2x
-(`previewGrow`), anchored at its edge and centered on its spot, over its
+Hovering a parking icon turns it flat and grows it **in place** to 3x
+(`previewGrow`; 2x until 2026-10-06, when icons became 140 px tiles,
+[dragging-and-parking.md](dragging-and-parking.md), Parking tiles: 3x
+is about 420 px, a 600 px phone layout at 70%), both in one animation,
+anchored at its edge and centered on its spot, over its
 neighbours, which stay put and about half visible (user's idea). The first
 fly-out version moved the window beside the column, away from the pointer,
 so it couldn't be grabbed, and big apps (1:1 layout) got huge. Grown icons
 keep icon behaviour (drag anywhere, clicks pass through). Scrubbing: first
 after 300 ms, then switching at once by home spots, both animating
-simultaneously (user's explicit wish). Leaving: shrinks after 300 ms. 2x may
-be too small to read; 2.5x is the fallback.
+simultaneously (user's explicit wish). Leaving: shrinks (and turns away
+again) after 300 ms.
 
 ## How it works
 The `HoverPreviews` component (`kwin/previews.h/.cpp`): `update`,

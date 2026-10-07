@@ -9,6 +9,7 @@
 
 #include <QRectF>
 #include <QSizeF>
+#include <QTransform>
 
 #include <optional>
 #include <vector>
@@ -48,9 +49,25 @@ bool atParkingSize(qreal shownWidth, const QSizeF &original);
 // The app's real size for a window parked at `shown` (drawn size) whose
 // full size is `original` and whose app needs at least `appMin` (frame
 // size): in a stash its full size (only drawn smaller); in parking (drawn
-// at parking size, see parkedPlace) its shape parkingLayoutWidth wide, or
-// wider for `appMin`; never more than `original`.
+// at parking size, see parkedPlace) a square parkingLayoutWidth wide (no
+// larger than the original's longer side), each side at least `appMin`'s.
 QSizeF layoutSize(const QSizeF &shown, const QSizeF &original, const QSizeF &appMin);
+
+// --- Parking tiles ---
+
+// A parking icon's tile: a window of shape `shape` (its layout size) drawn
+// parkingTile on its longer side (less for a window smaller than that at
+// parking size, see parkingScale; `original` is its full size), against
+// the screen edge on `side`, centered at `centerY` (kept in `area`).
+QRectF parkingTileRect(Side side, const QSizeF &shape, const QSizeF &original, qreal centerY, const QRectF &screen,
+                       const QRectF &area);
+
+// A parking icon drawn at `rect`, turned away from the viewer by
+// `amount` (0: flat, 1: tiltAngle) around its edge on `outer` (the screen
+// edge it is against), in perspective: that edge stays where it is, the
+// rest recedes towards the vertical middle of `rect`. Maps where a point
+// is drawn flat to where it is drawn turned.
+QTransform tiltTransform(const QRectF &rect, Side outer, qreal amount);
 
 // --- Places ---
 
@@ -81,7 +98,8 @@ Place parkedPlace(const QRectF &shown, const QSizeF &original, const QRectF &scr
 
 // Where a window of full size `size`, centered at `centerY`, goes in
 // `place`: for the halves and all of main its new frame, for a stash or
-// parking area where it is drawn (a stash at `stash` scale). Empty for
+// parking area where it is drawn (a stash at `stash` scale; parking as a
+// tile of the window's own shape, see parkingTileRect). Empty for
 // Place::Free.
 QRectF placeRect(Place place, const QSizeF &size, qreal centerY, const QRectF &screen, const QRectF &area,
                  qreal stash = stashScale);

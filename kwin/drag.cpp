@@ -367,7 +367,10 @@ void WindowDrag::finished(Window *window)
                              .translated(frame.topLeft());
 
     if (m_dragScale < parkBelow) {
+        // In parking it becomes a tile (see ParkedWindows::park): it
+        // glides there.
         m_parking.park(window, drawn, m_dragOriginal);
+        m_parking.animate(window, drawn);
         m_parking.arrange(window);
     } else if (m_dragOriginal != QSizeF(frame.width(), frame.height())) {
         // Back to the original size, keeping the grabbed spot under the

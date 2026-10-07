@@ -7,6 +7,8 @@
 #include <map>
 #include <numeric>
 
+#include <QtMath>
+
 namespace glance
 {
 
@@ -52,9 +54,37 @@ QSizeF layoutSize(const QSizeF &shown, const QSizeF &original, const QSizeF &app
     if (!atParkingSize(shown.width(), original)) {
         return original;
     }
-    const qreal k = std::max({parkingLayoutWidth / original.width(), appMin.width() / original.width(),
-                              appMin.height() / original.height()});
-    return k >= 1.0 ? original : (original * k).toSize();
+    const qreal side = std::round(std::min(parkingLayoutWidth, std::max(original.width(), original.height())));
+    return QSizeF(std::max(side, appMin.width()), std::max(side, appMin.height()));
+}
+
+QRectF parkingTileRect(Side side, const QSizeF &shape, const QSizeF &original, qreal centerY, const QRectF &screen,
+                       const QRectF &area)
+{
+    const qreal longer = std::max(original.width(), original.height());
+    const qreal tile = std::min(parkingTile, longer * parkingScale(original));
+    const QSizeF size = shape * (tile / std::max(shape.width(), shape.height()));
+    const qreal x = side == Side::Left ? screen.x() : screen.x() + screen.width() - size.width();
+    const qreal y = std::clamp(centerY - size.height() / 2, area.y(), std::max(area.y(), area.y() + area.height() - size.height()));
+    return QRectF(QPointF(x, y), size);
+}
+
+QTransform tiltTransform(const QRectF &rect, Side outer, qreal amount)
+{
+    if (amount <= 0 || rect.isEmpty()) {
+        return QTransform();
+    }
+    // With u the distance from the outer edge and v from the vertical
+    // middle, a point turned by a around the outer edge is u cos a across
+    // and u sin a deep; seen from tiltDistance tile widths away, it is
+    // drawn at (u cos a, v) / w with w = 1 + u sin a / distance.
+    const qreal angle = qDegreesToRadians(tiltAngle * std::min(amount, 1.0));
+    const qreal distance = tiltDistance * rect.width();
+    const QTransform turn(std::cos(angle), 0, std::sin(angle) / distance, 0, 1, 0, 0, 0, 1);
+    const qreal edge = outer == Side::Left ? rect.left() : rect.right();
+    const qreal mirror = outer == Side::Left ? 1 : -1;
+    return QTransform::fromTranslate(-edge, -rect.center().y()) * QTransform::fromScale(mirror, 1) * turn
+        * QTransform::fromScale(mirror, 1) * QTransform::fromTranslate(edge, rect.center().y());
 }
 
 int placeIndex(Place place)
@@ -151,31 +181,22 @@ QRectF placeRect(Place place, const QSizeF &size, qreal centerY, const QRectF &s
         const qreal height = std::min(size.height(), area.height());
         return QRectF(QPointF(screen.x() + zoneWidth, topFor(height)), QSizeF(2 * zoneWidth, height));
     }
-    case Place::StashLeft:
-    case Place::StashRight:
     case Place::ParkingLeft:
-    case Place::ParkingRight: {
-        // In a stash at most stashMaxWidth of the zone wide (wide windows,
-        // e.g. from all of main, shrink more), but still above parking size.
-        // At least stashMinSize, below parkBelow so it stays parked.
+    case Place::ParkingRight:
+        return parkingTileRect(place == Place::ParkingLeft ? Side::Left : Side::Right, size, size, centerY, screen, area);
+    case Place::StashLeft:
+    case Place::StashRight: {
+        // At most stashMaxWidth of the zone wide (wide windows, e.g. from
+        // all of main, shrink more), but still above parking size. At
+        // least stashMinSize, below parkBelow so it stays parked.
         const qreal stashFloor = std::max(parkingScale(size) + 0.03,
                                           std::min(stashMinSize / std::max(size.width(), size.height()), parkBelow - 0.01));
-        const qreal scale = place == Place::StashLeft || place == Place::StashRight
-            ? std::max(stashFloor, std::min(stash, zoneWidth * stashMaxWidth / size.width()))
-            : parkingScale(size);
+        const qreal scale = std::max(stashFloor, std::min(stash, zoneWidth * stashMaxWidth / size.width()));
         const QSizeF drawn = size * scale;
-        // A stash column is centered in its zone (whatever the windows'
-        // widths, it lines up, and both sides keep some room); parking
-        // is against the screen edge.
-        const bool left = place == Place::StashLeft || place == Place::ParkingLeft;
-        qreal x;
-        if (place == Place::StashLeft || place == Place::StashRight) {
-            const qreal center = left ? screen.x() + zoneWidth / 2 : screen.x() + screen.width() - zoneWidth / 2;
-            x = center - drawn.width() / 2;
-        } else {
-            x = left ? screen.x() : screen.x() + screen.width() - drawn.width();
-        }
-        return QRectF(QPointF(x, topFor(drawn.height())), drawn);
+        // Centered in its zone (whatever the windows' widths, they line
+        // up, and both sides keep some room).
+        const qreal center = place == Place::StashLeft ? screen.x() + zoneWidth / 2 : screen.x() + screen.width() - zoneWidth / 2;
+        return QRectF(QPointF(center - drawn.width() / 2, topFor(drawn.height())), drawn);
     }
     case Place::Free:
         break;

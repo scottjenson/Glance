@@ -101,7 +101,8 @@ public:
     // Only take part in painting while something is scaled.
     bool isActive() const override
     {
-        return !m_parking.empty() || m_drag.window() || m_focusRing.bouncing() || m_altTab.mapShown() || m_clips.dragging();
+        return !m_parking.empty() || m_parking.anyTilted() || m_drag.window() || m_focusRing.bouncing() || m_altTab.mapShown()
+            || m_clips.dragging();
     }
 
     // Direct scanout (a full-screen window, or a video on an overlay plane,
@@ -117,7 +118,7 @@ public:
 
     void prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data) override
     {
-        if (m_parking.isParked(w->window()) || w->window() == m_drag.window()) {
+        if (m_parking.isParked(w->window()) || w->window() == m_drag.window() || m_parking.isTilted(w->window())) {
             data.setTransformed();
         }
         m_focusRing.prePaintWindow(w->window(), data);
@@ -318,7 +319,7 @@ private:
     HoverPreviews m_previews{m_parking};
     MetaWheel m_wheel{m_parking, m_previews};
     FocusRing m_focusRing{m_parking, m_altTab};
-    Mipmaps m_mipmaps{m_focusRing};
+    Mipmaps m_mipmaps{m_parking, m_focusRing};
     Keyboard m_keyboard{m_parking, m_focusRing};
     WindowDrag m_drag{m_parking};
     ParkedInput m_input{m_parking};

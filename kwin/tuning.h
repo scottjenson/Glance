@@ -39,10 +39,21 @@ inline constexpr qreal parkBelow = 0.99;
 // Zoom in the stash, reflow in parking (2026-10-05, user: shrinking
 // should be seen, and it gives depth; pages reflowing at every drop was
 // disruptive): a stashed window keeps its app's full size, only drawn
-// smaller; a parking icon's app is laid out this wide (keeping its shape,
-// at least the app's minimum), so web pages switch to their phone
-// layout and the icon shows the app's compact form.
+// smaller; a parking icon's app is laid out this wide (since 2026-10-06
+// square: this wide and tall, at least the app's minimum), so web pages
+// switch to their phone layout and the icon shows the app's compact form.
 inline constexpr qreal parkingLayoutWidth = 600.0;
+// Parking icons are tiles (2026-10-06, the user's design): all this large
+// on their longer side (logical pixels), whatever size they were dropped
+// at, so about 10 fit along the edge of a 1630 px high screen.
+inline constexpr qreal parkingTile = 140.0;
+// And turned away from the viewer, so parking looks different from the
+// stash: around a vertical axis at their outer (screen-edge) side, which
+// stays in front at full height, by this angle (degrees), in perspective
+// with the eye this far away (in tile widths: the larger, the flatter).
+// A hover preview turns flat as it grows (see ParkedWindows::updateTilt).
+inline constexpr qreal tiltAngle = 40.0;
+inline constexpr qreal tiltDistance = 2.5;
 // Windows drawn smaller than this are drawn from mipmaps (see mipmaps.h):
 // at 1/2 and larger KWin's own drawing is clean, and mipmaps would only
 // blur it.
@@ -56,7 +67,8 @@ inline constexpr qreal halfMatch = 0.8;
 // Hover previews: how much a hovered icon grows, the wait before the
 // first one opens, and the grace before one closes after the pointer
 // left.
-inline constexpr qreal previewGrow = 2.0;
+// 3x since tiles (2026-10-06): about 420 px, a phone layout at 70%.
+inline constexpr qreal previewGrow = 3.0;
 inline constexpr std::chrono::milliseconds previewDelay{300};
 inline constexpr std::chrono::milliseconds previewGrace{300};
 

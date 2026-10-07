@@ -22,6 +22,15 @@
 // the window's height); only declutter lines a stash up. Crowding of
 // parking (a column taller than the screen) comes later.
 //
+// Parking icons are tiles (2026-10-06): square apps (see layoutSize),
+// all drawn parkingTile large against the screen edge, and turned away
+// from the viewer around their outer edge ("tilt", see updateTilt). The
+// tilt is drawn only where the window is drawn from mipmaps (see
+// Mipmaps; tilted windows always are) and is taken into account by input
+// (pick, untilt); the draw transform stays a plain scale and move, which
+// all of Glance and KWin's repainting rely on (the tilted tile lies inside
+// the flat one).
+//
 // Minimize = park: parking is Glance's minimize (see minimizeToParking).
 #pragma once
 
@@ -136,6 +145,8 @@ public:
     void resizeAnimated(Window *window, const RectF &target, const QRectF &from);
     // Park a window: draw it at `shown`, and really resize the app (see
     // layoutSize). `original` is its size before it was first parked.
+    // At parking size it becomes a tile (see glance::parkingTileRect)
+    // instead, centered where `shown` is: callers animate from `shown`.
     void park(Window *window, const QRectF &shown, const QSizeF &original);
     // Minimize = park: a window being minimized is shown again and goes to
     // the parking area on the side nearer to it (see the .cpp).
@@ -160,8 +171,10 @@ public:
     static QRectF displayRect(const Parked &parked);
     // The scale a managed window's current frame is drawn at.
     qreal scaleOf(Window *window) const;
-    // Where a parked window is drawn.
+    // Where a parked window is drawn (flat, see tiltOf).
     QRectF drawnRect(Window *window) const;
+    // Whether `pos` is on what is drawn of a parked window (tilt included).
+    bool drawnContains(Window *window, const QPointF &pos) const;
     // Where a window is drawn now (parked or not).
     QRectF currentlyDrawn(Window *window) const;
     // Draw a parked window at its place, whatever its frame's current
@@ -185,6 +198,20 @@ public:
     void scheduleFrames();
     // Set how any window is drawn (see applyParked; dragging uses it too).
     void setDrawTransform(Window *window, const QTransform &transform);
+
+    // --- Tilt ---
+
+    // Whether `window` is drawn turned (also while turning flat after it
+    // left parking, e.g. dragged out).
+    bool isTilted(Window *window) const;
+    bool anyTilted() const;
+    // How a window is turned, applied after its draw transform: in the
+    // item's coordinates (relative to the frame's top-left corner, for
+    // drawing), or global ones. Identity when flat.
+    QTransform tiltOf(Window *window) const;
+    QTransform globalTiltOf(Window *window) const;
+    // Where a point drawn at global `pos` would be drawn flat.
+    QPointF untilt(Window *window, const QPointF &pos) const;
     // The window really visible at `pos`, like InputRedirection::findToplevel
     // but using the drawn rectangle for parked windows (unless drawn
     // exactly over the frame: then KWin's own hit test, which includes
@@ -236,7 +263,10 @@ Q_SIGNALS:
     void transformChanged(KWin::Window *window);
 
 private:
-    static qreal progress(const Parked &parked);
+    static qreal progress(std::chrono::steady_clock::time_point start);
+    // Turn towards what the window's state wants (in parking, not
+    // previewed: turned; anything else: flat), animated.
+    void updateTilt(Window *window);
     // Drawn exactly over its frame (scale 1, lined up).
     bool drawnAtFrame(Window *window) const;
 
@@ -249,6 +279,18 @@ private:
         RectF frame;
     };
     std::optional<Resizing> m_resizing;
+    // Windows turned or turning (see updateTilt): `amount` now, 0 flat to
+    // 1 tiltAngle, animating from `from` to `to` since `start`.
+    struct Tilt
+    {
+        Side side = Side::Left;
+        qreal amount = 0;
+        qreal from = 0;
+        qreal to = 0;
+        bool turning = false;
+        std::chrono::steady_clock::time_point start = {};
+    };
+    std::map<Window *, Tilt> m_tilts;
 };
 
 } // namespace glance

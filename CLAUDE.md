@@ -58,7 +58,7 @@ the GitHub repo (scottjenson/Glance; GitHub redirects the old URL).
 ## Features (built) and plans
 | | |
 |---|---|
-| [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking (zoom in the stash, phone layout in parking), drawing small windows (mipmaps), input to parked windows, icon-like tiny windows, minimize = park |
+| [docs/dragging-and-parking.md](docs/dragging-and-parking.md) | Shrink while dragging, parking (zoom in the stash, phone layout in parking), parking tiles (square, tilted), drawing small windows (mipmaps), input to parked windows, icon-like tiny windows, minimize = park |
 | [docs/stacks.md](docs/stacks.md) | Parking columns; stashes are free placement |
 | [docs/meta-wheel.md](docs/meta-wheel.md) | Meta+wheel resizes in place; over parking icons it sizes the preview |
 | [docs/keyboard.md](docs/keyboard.md) | Meta+arrows ladder, Meta+Up/Down views, Meta+Alt+arrows selection, Meta alone and KDE's launcher |
@@ -106,6 +106,12 @@ drawn below half size are drawn from mipmaps (no broken-up, shimmering
 text; [docs/dragging-and-parking.md](docs/dragging-and-parking.md),
 Drawing small windows). Waiting for the user's check (the user has
 screenshots of parking from before).
+2026-10-06: parking icons are tiles: apps laid out 600x600, drawn 140 px
+(about 10 per edge), turned 40° away around their outer edge; a hover
+preview turns flat and grows to 3x; clicks go through the tilt
+([docs/dragging-and-parking.md](docs/dragging-and-parking.md), Parking
+tiles). Headless screenshot checked; waiting for the user's check
+(hover, clicks, drags).
 
 ### 2026-10-03, end of day
 Running in the user's real Plasma session (via use-in-session.sh; after a

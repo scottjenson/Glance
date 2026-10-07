@@ -148,13 +148,15 @@ bool ParkedInput::releasePending(PointerButtonEvent *event)
 // where the pointer stops (tooltips, menus) the frame is right.
 // The frame swings far past the drawing: never so far that its centre
 // leaves the window's monitor, or KWin would give it to the next one.
+// A tilted icon: the point under the pointer is found by turning the
+// pointer back flat (see ParkedWindows::untilt).
 bool ParkedInput::reanchor(Window *window, const QPointF &pos, bool now)
 {
     if (workspace()->moveResizeWindow() == window) {
         return true;
     }
     const QPointF drawn = m_parking.displayRect(m_parking.at(window)).topLeft();
-    const QPointF topLeft = pos - (pos - drawn) / m_parking.scaleOf(window);
+    const QPointF topLeft = pos - (m_parking.untilt(window, pos) - drawn) / m_parking.scaleOf(window);
     const RectF frame = window->frameGeometry();
     if (topLeft == frame.topLeft()) {
         return true;
@@ -186,7 +188,7 @@ void ParkedInput::anchorLate()
         return;
     }
     const QPointF pos = input()->pointer()->pos();
-    if (!m_parking.drawnRect(m_target).contains(pos) || !reanchor(m_target, pos, true)) {
+    if (!m_parking.drawnContains(m_target, pos) || !reanchor(m_target, pos, true)) {
         return;
     }
     if (m_forwarding) {
@@ -194,7 +196,8 @@ void ParkedInput::anchorLate()
     }
 }
 
-// Maps a global position to the window's surface-local position.
+// Maps a global position to the window's surface-local position (turned
+// back flat first, for a tilted icon).
 QMatrix4x4 ParkedInput::transformFor(Window *window) const
 {
     auto *it = m_parking.find(window);
@@ -210,7 +213,7 @@ QMatrix4x4 ParkedInput::transformFor(Window *window) const
     m.translate(frame.x() - buffer.x(), frame.y() - buffer.y());
     m.scale(1.0 / scale, 1.0 / scale);
     m.translate(-drawn.x(), -drawn.y());
-    return m;
+    return m * QMatrix4x4(m_parking.globalTiltOf(window).inverted());
 }
 
 // When we forward events ourselves, we point the seat at another surface

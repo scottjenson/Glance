@@ -85,7 +85,7 @@ void HoverPreviews::update(const QPointF &pos, Qt::MouseButtons buttons)
         m_close.stop();
         return;
     }
-    if (!icon && preview && m_parking.drawnRect(preview).contains(pos)) {
+    if (!icon && preview && m_parking.drawnContains(preview, pos)) {
         m_open.stop();
         m_close.stop();
         return;

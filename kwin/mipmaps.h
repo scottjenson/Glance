@@ -8,6 +8,11 @@
 // at the drawn size. The image is redrawn only when the window's content
 // changes (KWin's window damage). The focus ring isn't in it: it is drawn
 // over it as usual, so it stays sharp.
+//
+// Tilted parking icons (ParkedWindows::tiltOf) are always drawn from
+// here, whatever their size: KWin's own drawing can't turn them (paint
+// data has no perspective, and the draw transform stays flat). Their
+// image includes the focus ring, so it turns with them.
 #pragma once
 
 #include <QObject>
@@ -30,13 +35,14 @@ namespace glance
 {
 
 class FocusRing;
+class ParkedWindows;
 
 class Mipmaps : public QObject
 {
     Q_OBJECT
 
 public:
-    explicit Mipmaps(FocusRing &focusRing);
+    Mipmaps(ParkedWindows &parking, FocusRing &focusRing);
     ~Mipmaps() override;
 
     // Draws `window` from its mipmaps if it is drawn small (from the
@@ -51,15 +57,18 @@ private:
         std::unique_ptr<KWin::GLTexture> texture;
         std::unique_ptr<KWin::GLFramebuffer> framebuffer;
         bool dirty = true;
+        // The focus ring is in the image (a tilted window).
+        bool withRing = false;
         QMetaObject::Connection damaged;
         QMetaObject::Connection resized;
     };
 
-    bool update(KWin::EffectWindow *window, Image &image);
+    bool update(KWin::EffectWindow *window, Image &image, bool withRing);
     void paint(const KWin::RenderTarget &renderTarget, const KWin::RenderViewport &viewport, KWin::EffectWindow *window,
                const KWin::Region &deviceRegion, const KWin::WindowPaintData &data, KWin::GLTexture *texture);
     void forget(KWin::EffectWindow *window);
 
+    ParkedWindows &m_parking;
     FocusRing &m_focusRing;
     std::map<KWin::EffectWindow *, Image> m_images;
 };

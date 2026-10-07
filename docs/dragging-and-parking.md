@@ -46,10 +46,12 @@ so nothing jumps while the app catches up with a resize. Real resize via
 talked through with the user): a stashed window keeps its app's full
 size and is only drawn smaller, so it looks as it did while dragged
 (the shrinking gives depth) and never reflows; a parking icon's app is
-laid out `parkingLayoutWidth` (600) wide, keeping its shape, at least
-the app's minimum (`clientSizeToFrameSize(minSize())`, Firefox 500),
-capped at the original: web pages switch to their phone layout and the
-icon shows the app's compact form (hover previews are for reading).
+laid out as a `parkingLayoutWidth` (600) square (since 2026-10-06; before,
+600 wide in its own shape), each side at least the app's minimum
+(`clientSizeToFrameSize(minSize())`, Firefox 500), no larger than the
+original's longer side: web pages switch to their phone layout and the
+icon shows the app's compact form (hover previews are for reading). See
+Parking tiles below for how icons are drawn.
 The reflow happens as the window joins the parking column, which moves
 it anyway. Parking is decided by the drawn size (`atParkingSize`, as
 `parkedPlace`). Why: with 1x the shown size (≥ 400 px) stashed windows
@@ -89,6 +91,43 @@ cancelled logout the windows stay parked at their full layout size
 (smaller text until they are moved). Headless check: `setState` on
 KWin's /Session over D-Bus brings a parked Konsole from 540x374 back to
 1800x1246.
+
+## Parking tiles
+2026-10-06, the user's design, so parking looks different from the
+stash and main: every parking icon is a **tile**, the app laid out
+square (above), drawn `parkingTile` (140 px) on its longer side whatever
+size it was dropped at, so about 10 fit along the 1630 px edge, against
+the screen edge (`parkingTileRect`, from `ParkedWindows::park`; a drop
+glides into it). Clips keep their own shape (their text sets their
+height) but get the same size and tilt. More icons than fit: not
+designed yet (they run past the column's ends).
+
+Tiles are **turned away from the viewer** (`tiltAngle`, 40°) around a
+vertical axis at their outer edge, in perspective (`tiltDistance`, the
+eye 2.5 tile widths away): in left parking the left edge stays in front
+at full height and the right edge recedes, mirrored on the right. A hover
+preview turns flat as it grows (one animation); dropped or sent into
+parking a window turns as it glides in; dragged out, it turns flat
+during the drag's first moments. `ParkedWindows::updateTilt` (on every
+draw transform change) picks the target: turned when in parking, not
+previewed and not restoring; `advance` animates it (`animationTime`).
+
+How it's drawn: the draw transform (a `QTransform` on the window item)
+stays a plain scale and move, which Glance's other parts (focus ring
+width, mipmaps, Alt+Tab, input) and KWin's repainting rely on; the
+turned tile always lies inside that flat rectangle. The tilt
+(`tiltTransform`, a perspective `QTransform`, `ParkedWindows::tiltOf`)
+is applied only where the window is drawn from mipmaps: tilted windows
+always are, at any size (KWin's paint data has no perspective, so its own
+drawing can't turn them, and the mipmap image couldn't be drawn through
+a perspective item transform). The GPU maps the texture in perspective.
+The focus ring is put into a tilted window's image, so it turns with it.
+
+Input goes through the tilt: `pick` hit-tests the turned shape
+(`drawnContains`), and re-anchoring and forwarding turn the pointer
+back flat first (`untilt`, `transformFor`), so clicks land on the right
+spot of a tilted icon's app. Headless check: three minimized Konsoles
+become 600x600 apps drawn as turned tiles in each parking column.
 
 ## Drawing small windows
 `Mipmaps` (kwin/mipmaps.cpp), 2026-10-05, from the effect's `drawWindow`:

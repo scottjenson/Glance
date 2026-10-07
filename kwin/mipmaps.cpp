@@ -2,6 +2,7 @@
 #include "mipmaps.h"
 
 #include "focusring.h"
+#include "parked.h"
 #include "tuning.h"
 
 #include <core/output.h>
@@ -40,8 +41,9 @@ static RectF fullSizeGeometry(EffectWindow *window, qreal scale)
     return snapToPixels(window->windowItem()->boundingRect().translated(window->frameGeometry().topLeft()), scale);
 }
 
-Mipmaps::Mipmaps(FocusRing &focusRing)
-    : m_focusRing(focusRing)
+Mipmaps::Mipmaps(ParkedWindows &parking, FocusRing &focusRing)
+    : m_parking(parking)
+    , m_focusRing(focusRing)
 {
     connect(effects, &EffectsHandler::windowDeleted, this, &Mipmaps::forget);
 }
@@ -60,7 +62,8 @@ bool Mipmaps::drawWindow(const RenderTarget &renderTarget, const RenderViewport 
                          const Region &deviceRegion, const WindowPaintData &data)
 {
     WindowItem *item = window->windowItem();
-    if (!item || item->transform().m11() >= mipmapBelow || !effects->isOpenGLCompositing()) {
+    const bool tilted = m_parking.isTilted(window->window());
+    if (!item || (item->transform().m11() >= mipmapBelow && !tilted) || !effects->isOpenGLCompositing()) {
         forget(window);
         return false;
     }
@@ -79,15 +82,15 @@ bool Mipmaps::drawWindow(const RenderTarget &renderTarget, const RenderViewport 
             dirty(window);
         });
     }
-    if (!update(window, image)) {
+    if (!update(window, image, tilted)) {
         forget(window);
         return false;
     }
     paint(renderTarget, viewport, window, deviceRegion, data, image.texture.get());
     // The focus ring over it, drawn as usual (the window's other items
-    // are left out).
+    // are left out); a tilted window's is in the image.
     Item *ring = m_focusRing.ring();
-    if (ring && ring->parentItem() == item) {
+    if (ring && ring->parentItem() == item && !tilted) {
         effects->scene()->renderer()->renderItem(renderTarget, viewport, item, mask, deviceRegion, data, [item, ring](Item *other) {
             return other != item && other != ring;
         }, nullptr);
@@ -97,7 +100,7 @@ bool Mipmaps::drawWindow(const RenderTarget &renderTarget, const RenderViewport 
 
 // Redraw the window's full-size image if its content changed, and its
 // mipmaps. False if there is no image (no size, or out of memory).
-bool Mipmaps::update(EffectWindow *window, Image &image)
+bool Mipmaps::update(EffectWindow *window, Image &image, bool withRing)
 {
     const qreal scale = window->screen()->scale();
     const RectF geometry = fullSizeGeometry(window, scale);
@@ -115,6 +118,10 @@ bool Mipmaps::update(EffectWindow *window, Image &image)
         image.texture->setFilter(GL_LINEAR_MIPMAP_LINEAR);
         image.texture->setWrapMode(GL_CLAMP_TO_EDGE);
         image.framebuffer = std::make_unique<GLFramebuffer>(image.texture.get());
+        image.dirty = true;
+    }
+    if (image.withRing != withRing) {
+        image.withRing = withRing;
         image.dirty = true;
     }
     if (!image.dirty) {
@@ -139,8 +146,8 @@ bool Mipmaps::update(EffectWindow *window, Image &image)
     Item *ring = m_focusRing.ring();
     effects->scene()->renderer()->renderItem(target, targetViewport, window->windowItem(),
                                              Effect::PAINT_WINDOW_TRANSFORMED | Effect::PAINT_WINDOW_TRANSLUCENT,
-                                             Region::infinite(), data, [ring](Item *item) {
-                                                 return item == ring;
+                                             Region::infinite(), data, [ring, withRing](Item *item) {
+                                                 return !withRing && item == ring;
                                              }, nullptr);
     GLFramebuffer::popFramebuffer();
 
@@ -153,8 +160,10 @@ bool Mipmaps::update(EffectWindow *window, Image &image)
 
 // Draw the image where the window is drawn: KWin's own transforms for a
 // window item (its position, the paint data's matrix, then the item's
-// transform), with the texture's mipmaps (see OffscreenData::paint in
-// effect/offscreeneffect.cpp, which this follows).
+// transform and Glance's tilt), with the texture's mipmaps (see
+// OffscreenData::paint in effect/offscreeneffect.cpp, which this
+// follows). The tilt is a perspective transform: the GPU then also maps
+// the texture in perspective.
 void Mipmaps::paint(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *window,
                     const Region &deviceRegion, const WindowPaintData &data, GLTexture *texture)
 {
@@ -187,7 +196,7 @@ void Mipmaps::paint(const RenderTarget &renderTarget, const RenderViewport &view
     mvp.translate(std::round(window->x() * scale), std::round(window->y() * scale));
     mvp *= data.toMatrix(scale);
     mvp.scale(scale, scale);
-    mvp *= QMatrix4x4(window->windowItem()->transform());
+    mvp *= QMatrix4x4(window->windowItem()->transform() * m_parking.tiltOf(window->window()));
     mvp.scale(1.0 / scale, 1.0 / scale);
 
     GLShader *shader = ShaderManager::instance()->shader(ShaderTrait::MapTexture | ShaderTrait::Modulate | ShaderTrait::AdjustSaturation

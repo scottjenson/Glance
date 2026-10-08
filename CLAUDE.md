@@ -71,12 +71,12 @@ WideMonitorUX (repo) and edge-shrink (the effect, still the name in
 When a plan is built, move its design into a `docs/` file, delete the
 plan, and update the table and Status.
 
-## Status (2026-10-07)
+## Status (2026-10-08)
 Everything in the docs table is built, committed and checked by the user
-in the real session, except two things waiting for the user's check:
+in the real session, except one thing waiting for the user's check:
 parked windows staying drawn in place at logout
 ([docs/dragging-and-parking.md](docs/dragging-and-parking.md), Logging
-out), and the drag shake ([docs/declutter.md](docs/declutter.md)).
+out).
 
 Next: remembered places ([plans/remembered-places.md](plans/remembered-places.md));
 first open question there: keep or remove the logout step.

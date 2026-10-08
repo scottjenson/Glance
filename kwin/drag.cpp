@@ -20,8 +20,9 @@ using namespace KWin;
 namespace glance
 {
 
-WindowDrag::WindowDrag(ParkedWindows &parking)
+WindowDrag::WindowDrag(ParkedWindows &parking, Declutter &declutter)
     : m_parking(parking)
+    , m_declutter(declutter)
 {
     m_snapDwell.setSingleShot(true);
     m_snapDwell.setInterval(snapDwell);
@@ -108,12 +109,16 @@ void WindowDrag::step(Window *window)
         m_snapped.reset();
         m_snapDwell.stop();
         m_dragAnimating = false;
+        m_shakeDir = 0;
+        m_shakeFar = cursor.x();
+        m_shakeTurns.clear();
         const auto closeRanks = m_parking.leaving(window);
         m_parking.erase(window);
         m_dragged = window;
         closeRanks();
     }
 
+    shakeStep(window, cursor);
     const std::optional<Gesture> gesture = leadStep(window, cursor);
     // The edge rule around where the window is: the pointer plus the
     // window's lead (the frame shifted with it keeps the grab offset).
@@ -264,6 +269,40 @@ void WindowDrag::updateLead(Window *window, const QPointF &cursor, qreal dx, std
     m_leadX += (gain - 1.0) * dx;
     const qreal x = std::clamp(cursor.x() + m_leadX, screen.x(), screen.x() + screen.width());
     m_leadX = x - cursor.x();
+}
+
+// Shake detection, on every drag step (the pointer, not the window, so
+// Meta+drag's lead doesn't count): a change of direction is moving back
+// shakeStroke from the farthest point; shakeTurns of them within
+// shakeTime scatter the other windows.
+void WindowDrag::shakeStep(Window *window, const QPointF &cursor)
+{
+    const qreal x = cursor.x();
+    if (m_shakeDir == 0) {
+        if (std::abs(x - m_shakeFar) >= shakeStroke) {
+            m_shakeDir = x > m_shakeFar ? 1 : -1;
+            m_shakeFar = x;
+        }
+        return;
+    }
+    if ((x - m_shakeFar) * m_shakeDir >= 0) {
+        m_shakeFar = x;
+        return;
+    }
+    if ((m_shakeFar - x) * m_shakeDir < shakeStroke) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    m_shakeDir = -m_shakeDir;
+    m_shakeFar = x;
+    m_shakeTurns.push_back(now);
+    std::erase_if(m_shakeTurns, [&](auto turn) {
+        return now - turn > shakeTime;
+    });
+    if (int(m_shakeTurns.size()) >= shakeTurns) {
+        m_shakeTurns.clear();
+        m_declutter.shake(window);
+    }
 }
 
 // The snap target for a window centered at `point`, by region

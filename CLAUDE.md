@@ -47,7 +47,8 @@ WideMonitorUX (repo) and edge-shrink (the effect, still the name in
   long as what KDE users rely on keeps working or gets a better
   replacement. Meta moves, Meta+Alt selects. Meta+drag moves (with
   acceleration and snapping), Meta+double-click declutters, Meta+wheel
-  resizes in place; Meta+click is free for future features. Meta+keyboard
+  resizes in place; Meta+click is free for future features. Shaking any
+  drag scatters the other windows to the stashes. Meta+keyboard
   shortcuts other than the arrows, Meta+C and Meta+Tab are left to KDE.
 
 ## Features (built) and plans
@@ -58,7 +59,7 @@ WideMonitorUX (repo) and edge-shrink (the effect, still the name in
 | [docs/keyboard.md](docs/keyboard.md) | Meta+arrows, Meta+Up/Down views, Meta+Alt+arrows selection, the Meta tap and KDE's launcher |
 | [docs/meta-drag.md](docs/meta-drag.md) | Meta+drag acceleration, pause to snap |
 | [docs/focus-ring.md](docs/focus-ring.md) | Focus ring; bounce on keyboard focus moves |
-| [docs/declutter.md](docs/declutter.md) | Meta+double-click declutter and undo |
+| [docs/declutter.md](docs/declutter.md) | Meta+double-click declutter and undo; shaking a dragged window scatters the others |
 | [docs/hover-previews.md](docs/hover-previews.md) | Parking icons grow in place on hover |
 | [docs/clips.md](docs/clips.md) | Text/image drops and Meta+C become clip windows (glance-clip) that drag back into documents |
 | [docs/alt-tab.md](docs/alt-tab.md) | Alt+Tab hunt and return, the desktop map |
@@ -70,12 +71,12 @@ WideMonitorUX (repo) and edge-shrink (the effect, still the name in
 When a plan is built, move its design into a `docs/` file, delete the
 plan, and update the table and Status.
 
-## Status (2026-10-06)
+## Status (2026-10-07)
 Everything in the docs table is built, committed and checked by the user
-in the real session, except one thing waiting for the user's check:
+in the real session, except two things waiting for the user's check:
 parked windows staying drawn in place at logout
 ([docs/dragging-and-parking.md](docs/dragging-and-parking.md), Logging
-out).
+out), and the drag shake ([docs/declutter.md](docs/declutter.md)).
 
 Next: remembered places ([plans/remembered-places.md](plans/remembered-places.md));
 first open question there: keep or remove the logout step.

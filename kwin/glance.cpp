@@ -12,7 +12,7 @@
 // - ParkedInput (parkedinput.h): pointer input reaches the window drawn
 //   under the pointer; icons are clicked or dragged from anywhere.
 // - WindowDrag (drag.h): shrinking while dragging; Meta+drag acceleration
-//   and pause-to-snap.
+//   and pause-to-snap; a shake scatters (through Declutter).
 // - Keyboard (keyboard.h): Meta+arrows between places, Meta+Alt+arrows
 //   selection.
 // - AltTab (alttab.h): Alt+Tab hunt and return, the desktop map.
@@ -20,7 +20,7 @@
 // - Mipmaps (mipmaps.h): windows drawn small are drawn from mipmaps.
 // - HoverPreviews (previews.h): parking icons grow in place on hover.
 // - MetaWheel (wheel.h): Meta+wheel resizes in place.
-// - Declutter (declutter.h): Meta+double-click.
+// - Declutter (declutter.h): Meta+double-click, and the scatter on a shake.
 // - Clips (clips.h): drops and Meta+C become clip windows.
 // - KdeIntegration (kde.h): what Glance switches off in KDE while loaded.
 //
@@ -309,7 +309,7 @@ private:
     FocusRing m_focusRing{m_parking, m_altTab};
     Mipmaps m_mipmaps{m_parking, m_focusRing};
     Keyboard m_keyboard{m_parking, m_focusRing};
-    WindowDrag m_drag{m_parking};
+    WindowDrag m_drag{m_parking, m_declutter};
     ParkedInput m_input{m_parking};
 
     void watch(Window *window)

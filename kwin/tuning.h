@@ -94,6 +94,13 @@ inline constexpr qreal ringWidth = 4.0;
 inline constexpr qreal bounceFrames[] = {1.0, 0.99, 0.98, 0.99, 1.0};
 inline constexpr std::chrono::milliseconds bounceStep{60};
 
+// --- Declutter (docs/declutter.md) ---
+// Shaking a dragged window: this many changes of horizontal direction
+// within shakeTime, each stroke at least shakeStroke px.
+inline constexpr int shakeTurns = 3;
+inline constexpr qreal shakeStroke = 30.0;
+inline constexpr std::chrono::milliseconds shakeTime{500};
+
 // --- Meta+drag (docs/meta-drag.md) ---
 // Acceleration: the highest gain, reached after moving leadBuild (fraction
 // of the screen width) in one direction; a reversal is this much movement

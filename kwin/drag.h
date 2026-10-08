@@ -1,9 +1,11 @@
 // Dragging: while KWin moves a window interactively (title bar or
 // Meta+drag), draw it shrunk around the cursor by the edge rule, and park
 // or restore it on the drop (docs/dragging-and-parking.md). Meta+drag adds
-// acceleration and pause to snap (docs/meta-drag.md).
+// acceleration and pause to snap (docs/meta-drag.md). Shaking either kind
+// of drag scatters the other windows (docs/declutter.md).
 #pragma once
 
+#include "declutter.h"
 #include "parked.h"
 
 #include <QObject>
@@ -25,7 +27,7 @@ class WindowDrag : public QObject
     Q_OBJECT
 
 public:
-    explicit WindowDrag(ParkedWindows &parking);
+    WindowDrag(ParkedWindows &parking, Declutter &declutter);
     ~WindowDrag() override;
 
     // The window being dragged (and drawn scaled), if any.
@@ -58,8 +60,10 @@ private:
     void updateLead(Window *window, const QPointF &cursor, qreal dx, std::chrono::steady_clock::time_point now);
     std::optional<Gesture> snapTargetAt(Window *window, const QPointF &point) const;
     void commitGesture(Window *window, const Gesture &gesture, const QRectF &from);
+    void shakeStep(Window *window, const QPointF &cursor);
 
     ParkedWindows &m_parking;
+    Declutter &m_declutter;
     // The window being dragged while we draw it scaled, its original size,
     // and its scale relative to that.
     QPointer<Window> m_dragged;
@@ -96,6 +100,12 @@ private:
     bool m_dragAnimating = false;
     QRectF m_dragAnimFrom;
     std::chrono::steady_clock::time_point m_dragAnimStart;
+    // Shake detection (see shakeStep): the pointer's horizontal direction
+    // (0 until the first stroke), the farthest it got that way (or where
+    // the drag started), and when it changed direction lately.
+    int m_shakeDir = 0;
+    qreal m_shakeFar = 0;
+    std::vector<std::chrono::steady_clock::time_point> m_shakeTurns;
 };
 
 } // namespace glance

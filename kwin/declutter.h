@@ -1,6 +1,6 @@
 // Declutter, Meta+double-click: the target fills the nearer half of main
-// and every other window in main goes to the stashes; again undoes it
-// (docs/declutter.md).
+// and every other window in main goes to the stashes; again undoes it.
+// Shaking a dragged window only scatters (docs/declutter.md).
 #pragma once
 
 #include "parked.h"
@@ -35,6 +35,9 @@ public:
     // Every pointer button event: a Meta+double-click declutters or undoes.
     // Returns whether the event was taken.
     bool button(KWin::PointerButtonEvent *event);
+    // `window`, being dragged, was shaken: every other window in main goes
+    // to the stashes (no undo).
+    void shake(Window *window);
 
 private:
     using Parked = ParkedWindows::Parked;
@@ -57,6 +60,8 @@ private:
     };
 
     void toggle(Window *target, const QPointF &pos);
+    std::vector<Saved> snapshot(KWin::LogicalOutput *output) const;
+    void scatter(Window *except, KWin::LogicalOutput *output);
     void undo();
 
     ParkedWindows &m_parking;

@@ -75,23 +75,58 @@ void Declutter::toggle(Window *target, const QPointF &pos)
     const RectF screen = output->geometryF();
     const qreal middle = screen.x() + screen.width() / 2;
 
-    Layout saved{.desktop = !target, .target = target, .half = Place::Free, .saved = {}};
-    std::vector<Window *> movers; // from main to a stash
-    std::vector<Window *> stashed[2]; // already in the left / right stash
+    Layout saved{.desktop = !target, .target = target, .half = Place::Free, .saved = snapshot(output)};
+    if (target) {
+        saved.half = m_parking.currentlyDrawn(target).center().x() < middle ? Place::HalfLeft : Place::HalfRight;
+        m_parking.fillHalf(target, saved.half);
+    }
+    scatter(target, output);
+    if (target) {
+        workspace()->activateWindow(target);
+    }
+    m_last = std::move(saved);
+}
+
+void Declutter::shake(Window *window)
+{
+    LogicalOutput *output = window->moveResizeOutput();
+    if (!output) {
+        return;
+    }
+    qInfo("glance: %s: shaken, scatter", qPrintable(window->caption()));
+    m_last.reset(); // its snapshot no longer holds
+    scatter(window, output);
+}
+
+// Every manageable window on `output` as it is now, for undo.
+std::vector<Declutter::Saved> Declutter::snapshot(LogicalOutput *output) const
+{
+    std::vector<Saved> saved;
     for (Window *window : workspace()->stackingOrder()) {
         if (!manageable(window) || window->output() != output) {
             continue;
         }
         auto *it = m_parking.find(window);
         const bool parked = it && !it->restoring;
-        saved.saved.push_back(Saved{.window = window,
-                                    .parked = parked ? std::optional<Parked>(*it) : std::nullopt,
-                                    .frame = window->moveResizeGeometry(),
-                                    .maximize = window->maximizeMode()});
-        if (window == target) {
+        saved.push_back(Saved{.window = window,
+                              .parked = parked ? std::optional<Parked>(*it) : std::nullopt,
+                              .frame = window->moveResizeGeometry(),
+                              .maximize = window->maximizeMode()});
+    }
+    return saved;
+}
+
+// Every window in main on `output` but `except` goes to a stash.
+void Declutter::scatter(Window *except, LogicalOutput *output)
+{
+    std::vector<Window *> movers; // from main to a stash
+    std::vector<Window *> stashed[2]; // already in the left / right stash
+    for (Window *window : workspace()->stackingOrder()) {
+        if (!manageable(window) || window->output() != output || window == except) {
             continue;
         }
-        if (!parked) {
+        auto *it = m_parking.find(window);
+        if (!it || it->restoring) {
             movers.push_back(window);
         } else if (const int area = m_parking.areaOf(window); area == 1 || area == 3) {
             stashed[area == 1 ? 0 : 1].push_back(window);
@@ -108,10 +143,6 @@ void Declutter::toggle(Window *target, const QPointF &pos)
     stashed[0].insert(stashed[0].end(), movers.begin(), movers.begin() + toLeft);
     stashed[1].insert(stashed[1].end(), movers.begin() + toLeft, movers.end());
 
-    if (target) {
-        saved.half = m_parking.currentlyDrawn(target).center().x() < middle ? Place::HalfLeft : Place::HalfRight;
-        m_parking.fillHalf(target, saved.half);
-    }
     // Each stash at one scale, so its column lines up.
     for (int side = 0; side < 2; ++side) {
         if (movers.empty() || stashed[side].empty()) {
@@ -124,10 +155,6 @@ void Declutter::toggle(Window *target, const QPointF &pos)
         }
         m_parking.arrangeArea(side == 0 ? 1 : 3, output, nullptr);
     }
-    if (target) {
-        workspace()->activateWindow(target);
-    }
-    m_last = std::move(saved);
 }
 
 // Everything back as it was before the last declutter (windows closed
